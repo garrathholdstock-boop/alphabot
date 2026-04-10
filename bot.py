@@ -459,6 +459,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <!-- Screener -->
   {screener_html}
 
+  <!-- Last Scan Section -->
+  <div style="margin-bottom:20px">
+    <div class="tab-bar" style="margin-bottom:0;border-bottom:none">
+      <div class="tab tab-stocks active" onclick="showScan('stocks',this)" style="border-bottom:2px solid #00aaff;color:#00aaff">📈 US Stocks Last Scan</div>
+      <div class="tab tab-crypto" onclick="showScan('crypto',this)">🪙 Crypto Last Scan</div>
+    </div>
+    <div class="card" style="border-radius:0 12px 12px 12px;margin-top:0">
+      <div id="scan-stocks" class="scan-panel active">{stocks_scan_html}</div>
+      <div id="scan-crypto" class="scan-panel">{crypto_scan_html}</div>
+    </div>
+  </div>
+
+  <script>
+  function showScan(tab, el) {{
+    document.querySelectorAll('.scan-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-bar .tab').forEach(t => {{
+      t.classList.remove('active');
+      t.style.borderBottomColor = 'transparent';
+      t.style.color = '#444';
+    }});
+    document.getElementById('scan-' + tab).classList.add('active');
+    el.classList.add('active');
+    el.style.borderBottomColor = tab === 'stocks' ? '#00aaff' : '#00ff88';
+    el.style.color = tab === 'stocks' ? '#00aaff' : '#00ff88';
+  }}
+  </script>
+
   <div style="margin-top:24px;padding:14px;background:rgba(255,204,0,0.04);border:1px solid rgba(255,204,0,0.12);border-radius:8px;font-size:11px;color:#666;line-height:1.8">
     ⚠ <strong style="color:#ffcc00">Safety:</strong>
     Stop-loss: {stop_loss}% per trade &nbsp;|&nbsp;
@@ -552,10 +579,10 @@ def build_dashboard():
     else:
         trades_html = ""
 
-    # Screener top 10
+    # Screener — BUY signals summary
     all_cands = (
-        [dict(c, market="Stock") for c in state.candidates[:5] if c["signal"]=="BUY"] +
-        [dict(c, market="Crypto") for c in crypto_state.candidates[:5] if c["signal"]=="BUY"]
+        [dict(c, market="Stock") for c in state.candidates if c["signal"]=="BUY"] +
+        [dict(c, market="Crypto") for c in crypto_state.candidates if c["signal"]=="BUY"]
     )
     if all_cands:
         rows = ""
@@ -574,11 +601,53 @@ def build_dashboard():
               <td style="color:#555">{f"{c['vol_ratio']:.2f}x" if c['vol_ratio'] else '—'}</td>
             </tr>"""
         screener_html = f"""<div class="card" style="margin-bottom:20px">
-          <div class="section-title">Current BUY Signals</div>
+          <div class="section-title">Current BUY Signals ({len(all_cands)})</div>
           <table><thead><tr><th>Symbol</th><th>Type</th><th>Price</th><th>Chg%</th><th>Signal</th><th>RSI</th><th>Vol Ratio</th></tr></thead>
           <tbody>{rows}</tbody></table></div>"""
     else:
-        screener_html = f'<div class="card" style="margin-bottom:20px"><div class="empty">No BUY signals yet — bot will scan on next cycle</div></div>'
+        screener_html = '<div class="card" style="margin-bottom:20px"><div class="empty">No BUY signals yet — bot will scan on next cycle</div></div>'
+
+    # Full scan tables — US Stocks
+    def build_scan_table(candidates, color, label):
+        if not candidates:
+            return f'<div class="empty">No scan data yet — waiting for first cycle</div>'
+        rows = ""
+        order = {"BUY": 0, "HOLD": 1, "SELL": 2}
+        for c in sorted(candidates, key=lambda x: order.get(x["signal"], 1)):
+            sig_class = {"BUY":"sig-buy","SELL":"sig-sell","HOLD":"sig-hold"}.get(c["signal"], "sig-hold")
+            chg_c = "green" if c["change"] >= 0 else "red"
+            rsi_val = f"{c['rsi']:.1f}" if c.get("rsi") else "—"
+            rsi_c = "red" if c.get("rsi") and c["rsi"] > 70 else ("green" if c.get("rsi") and c["rsi"] < 35 else "")
+            vol = f"{c['vol_ratio']:.2f}x" if c.get("vol_ratio") else "—"
+            s9  = f"${c['sma9']:.4f}" if c.get("sma9") else "—"
+            s21 = f"${c['sma21']:.4f}" if c.get("sma21") else "—"
+            rows += f"""<tr>
+              <td style="font-weight:700" class="{color}">{c['symbol']}</td>
+              <td>${c['price']:.4f}</td>
+              <td class="{chg_c}">{'+' if c['change']>=0 else ''}{c['change']:.2f}%</td>
+              <td><span class="{sig_class}">{c['signal']}</span></td>
+              <td class="{rsi_c}">{rsi_val}</td>
+              <td style="color:#555">{s9}</td>
+              <td style="color:#555">{s21}</td>
+              <td style="color:#777">{vol}</td>
+            </tr>"""
+        count = len(candidates)
+        buys  = sum(1 for c in candidates if c["signal"] == "BUY")
+        holds = sum(1 for c in candidates if c["signal"] == "HOLD")
+        sells = sum(1 for c in candidates if c["signal"] == "SELL")
+        return f"""
+          <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px">
+            <span class="green" style="font-weight:700">{buys} BUY</span>
+            <span style="color:#555">{holds} HOLD</span>
+            <span class="red">{sells} SELL</span>
+            <span style="color:#444;margin-left:auto">{count} total scanned</span>
+          </div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th><th>RSI</th><th>SMA 9</th><th>SMA 21</th><th>Vol Ratio</th></tr></thead>
+          <tbody>{rows}</tbody></table></div>"""
+
+    stocks_scan_html = build_scan_table(state.candidates, "blue", "US Stocks")
+    crypto_scan_html = build_scan_table(crypto_state.candidates, "green", "Crypto")
 
     return DASHBOARD_HTML.format(
         now            = datetime.now().strftime("%H:%M:%S"),
@@ -607,6 +676,8 @@ def build_dashboard():
         positions_html = positions_html,
         trades_html    = trades_html,
         screener_html  = screener_html,
+        stocks_scan_html = stocks_scan_html,
+        crypto_scan_html = crypto_scan_html,
         stop_loss      = STOP_LOSS_PCT,
         max_loss       = MAX_DAILY_LOSS,
         max_trade      = MAX_TRADE_VALUE,
