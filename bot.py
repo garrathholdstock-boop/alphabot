@@ -339,49 +339,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <meta http-equiv="refresh" content="60">
 <title>AlphaBot</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #090b0e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
-  .header { background: #0d1117; border-bottom: 1px solid #1e2a1e; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-  .logo { display: flex; align-items: center; gap: 10px; }
-  .logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg,#00ff88,#00aaff); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-  .logo-text { font-weight: 700; font-size: 16px; }
-  .logo-sub { font-size: 10px; color: #444; letter-spacing: 1.5px; text-transform: uppercase; }
-  .badge { padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-  .badge-paper { background: rgba(255,204,0,0.1); color: #ffcc00; border: 1px solid rgba(255,204,0,0.3); }
-  .badge-live  { background: rgba(255,68,102,0.1); color: #ff4466; border: 1px solid rgba(255,68,102,0.3); }
-  .refresh { font-size: 11px; color: #444; }
-  .container { padding: 24px; max-width: 1100px; margin: 0 auto; }
-  .grid4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
-  .card { background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 18px 20px; }
-  .card-green { border-color: rgba(0,255,136,0.15); }
-  .card-blue  { border-color: rgba(0,170,255,0.15); }
-  .lbl { font-size: 10px; letter-spacing: 2px; color: #555; text-transform: uppercase; margin-bottom: 4px; }
-  .big { font-size: 22px; font-weight: 700; font-family: monospace; }
-  .green { color: #00ff88; }
-  .blue  { color: #00aaff; }
-  .red   { color: #ff4466; }
-  .gold  { color: #ffcc00; }
-  .grey  { color: #555; }
-  .section-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { font-size: 10px; color: #444; letter-spacing: 1.5px; text-transform: uppercase; padding: 10px 12px; text-align: left; font-weight: 600; }
-  td { padding: 9px 12px; border-top: 1px solid rgba(255,255,255,0.04); font-family: monospace; }
-  tr:hover td { background: rgba(255,255,255,0.02); }
-  .sig-buy  { background: rgba(0,255,136,0.1); color: #00ff88; border: 1px solid #00ff88; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-  .sig-sell { background: rgba(255,68,102,0.1); color: #ff4466; border: 1px solid #ff4466; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-  .sig-hold { background: rgba(255,255,255,0.05); color: #555; border: 1px solid #333; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-  .dot-green { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
-  .dot-red   { background: #ff4466; box-shadow: 0 0 6px #ff4466; }
-  .dot-gold  { background: #ffcc00; box-shadow: 0 0 6px #ffcc00; }
-  .tab-bar { display: flex; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 20px; }
-  .tab { padding: 10px 16px; cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #444; border-bottom: 2px solid transparent; text-decoration: none; }
-  .tab-stocks.active { color: #00aaff; border-bottom-color: #00aaff; }
-  .tab-crypto.active { color: #00ff88; border-bottom-color: #00ff88; }
-  .tab:hover { color: #e0e0e0; }
-  .empty { text-align: center; padding: 50px; color: #333; font-size: 15px; }
-  @media(max-width:600px) { .grid4 { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } }
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #090b0e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; font-size: 14px; }}
+  .header {{ background: #0d1117; border-bottom: 1px solid #1e2a1e; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }}
+  .logo {{ display: flex; align-items: center; gap: 10px; }}
+  .logo-icon {{ width: 32px; height: 32px; background: linear-gradient(135deg,#00ff88,#00aaff); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }}
+  .logo-text {{ font-weight: 700; font-size: 16px; }}
+  .logo-sub {{ font-size: 10px; color: #444; letter-spacing: 1.5px; text-transform: uppercase; }}
+  .badge {{ padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; }}
+  .badge-paper {{ background: rgba(255,204,0,0.1); color: #ffcc00; border: 1px solid rgba(255,204,0,0.3); }}
+  .badge-live  {{ background: rgba(255,68,102,0.1); color: #ff4466; border: 1px solid rgba(255,68,102,0.3); }}
+  .refresh {{ font-size: 11px; color: #444; }}
+  .container {{ padding: 24px; max-width: 1100px; margin: 0 auto; }}
+  .grid4 {{ display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }}
+  .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }}
+  .card {{ background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 18px 20px; }}
+  .card-green {{ border-color: rgba(0,255,136,0.15); }}
+  .card-blue  {{ border-color: rgba(0,170,255,0.15); }}
+  .lbl {{ font-size: 10px; letter-spacing: 2px; color: #555; text-transform: uppercase; margin-bottom: 4px; }}
+  .big {{ font-size: 22px; font-weight: 700; font-family: monospace; }}
+  .green {{ color: #00ff88; }}
+  .blue  {{ color: #00aaff; }}
+  .red   {{ color: #ff4466; }}
+  .gold  {{ color: #ffcc00; }}
+  .grey  {{ color: #555; }}
+  .section-title {{ font-size: 15px; font-weight: 700; margin-bottom: 14px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+  th {{ font-size: 10px; color: #444; letter-spacing: 1.5px; text-transform: uppercase; padding: 10px 12px; text-align: left; font-weight: 600; }}
+  td {{ padding: 9px 12px; border-top: 1px solid rgba(255,255,255,0.04); font-family: monospace; }}
+  tr:hover td {{ background: rgba(255,255,255,0.02); }}
+  .sig-buy  {{ background: rgba(0,255,136,0.1); color: #00ff88; border: 1px solid #00ff88; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }}
+  .sig-sell {{ background: rgba(255,68,102,0.1); color: #ff4466; border: 1px solid #ff4466; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }}
+  .sig-hold {{ background: rgba(255,255,255,0.05); color: #555; border: 1px solid #333; padding: 2px 8px; border-radius: 4px; font-size: 11px; }}
+  .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }}
+  .dot-green {{ background: #00ff88; box-shadow: 0 0 6px #00ff88; }}
+  .dot-red   {{ background: #ff4466; box-shadow: 0 0 6px #ff4466; }}
+  .dot-gold  {{ background: #ffcc00; box-shadow: 0 0 6px #ffcc00; }}
+  .tab-bar {{ display: flex; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 20px; }}
+  .tab {{ padding: 10px 16px; cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #444; border-bottom: 2px solid transparent; text-decoration: none; }}
+  .tab-stocks.active {{ color: #00aaff; border-bottom-color: #00aaff; }}
+  .tab-crypto.active {{ color: #00ff88; border-bottom-color: #00ff88; }}
+  .tab:hover {{ color: #e0e0e0; }}
+  .empty {{ text-align: center; padding: 50px; color: #333; font-size: 15px; }}
+  @media(max-width:600px) {{ .grid4 {{ grid-template-columns: 1fr 1fr; }} .grid2 {{ grid-template-columns: 1fr; }} }}
 </style>
 </head>
 <body>
