@@ -38,6 +38,8 @@ EMAIL_TO       = "garrathholdstock@gmail.com"
 PORT           = int(os.environ.get("PORT", 8080))
 DASH_USER      = os.environ.get("DASH_USER", "alpha")
 DASH_PASS      = os.environ.get("DASH_PASS", "bot123")
+import hashlib as _hashlib
+DASH_TOKEN     = _hashlib.md5(f"{DASH_USER}:{DASH_PASS}:alphabot".encode()).hexdigest()
 
 ALPACA_BASE    = "https://api.alpaca.markets" if IS_LIVE else "https://paper-api.alpaca.markets"
 DATA_BASE      = "https://data.alpaca.markets"
@@ -2789,6 +2791,55 @@ def send_daily_summary():
         log.error(f"Email failed: {e}")
 
 # ── Web dashboard ─────────────────────────────────────────────
+LOGIN_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AlphaBot Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #090b0e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .box { background: #0d1117; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+         padding: 40px; width: 100%; max-width: 380px; }
+  .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+  .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg,#00ff88,#00aaff);
+               border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .logo-text { font-size: 20px; font-weight: 700; }
+  .logo-sub { font-size: 11px; color: #444; letter-spacing: 1.5px; text-transform: uppercase; }
+  label { display: block; font-size: 11px; color: #555; letter-spacing: 1.5px;
+          text-transform: uppercase; margin-bottom: 6px; margin-top: 16px; }
+  input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 8px; padding: 12px 14px; color: #e0e0e0; font-size: 14px; outline: none; }
+  input:focus { border-color: #00aaff; }
+  button { width: 100%; margin-top: 24px; padding: 13px; background: linear-gradient(135deg,#00ff88,#00aaff);
+           border: none; border-radius: 8px; color: #090b0e; font-size: 14px; font-weight: 700;
+           cursor: pointer; letter-spacing: 1px; }
+  .error { color: #ff4466; font-size: 13px; margin-top: 12px; text-align: center; display: none; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <div class="logo-text">AlphaBot</div>
+      <div class="logo-sub">Automated Day Trader</div>
+    </div>
+  </div>
+  <form method="POST" action="/login">
+    <label>Username</label>
+    <input type="text" name="username" autocomplete="username" autofocus>
+    <label>Password</label>
+    <input type="password" name="password" autocomplete="current-password">
+    <button type="submit">Sign In →</button>
+  </form>
+  <div class="error" id="err">Invalid credentials</div>
+</div>
+</body>
+</html>"""
+
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html>
 <head>
@@ -3588,25 +3639,16 @@ def build_dashboard():
 
 class DashboardHandler(BaseHTTPRequestHandler):
     def _check_auth(self):
-        """Returns True if request has valid Basic Auth credentials."""
-        import base64
-        auth_header = self.headers.get("Authorization", "")
-        if not auth_header.startswith("Basic "):
-            return False
-        try:
-            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-            username, password = decoded.split(":", 1)
-            return username == DASH_USER and password == DASH_PASS
-        except:
-            return False
+        """Check session cookie for valid auth token."""
+        cookies = self.headers.get("Cookie", "")
+        return f"auth={DASH_TOKEN}" in cookies
 
     def _require_auth(self):
-        """Send 401 response requesting Basic Auth."""
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="AlphaBot Dashboard"')
+        """Serve a proper login page — works on mobile and desktop."""
+        self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
-        self.wfile.write("<html><body style='background:#111;color:#fff;font-family:sans-serif;padding:40px'><h2>AlphaBot - Authentication Required</h2><p>Enter your dashboard credentials.</p></body></html>".encode("utf-8"))
+        self.wfile.write(LOGIN_HTML.encode("utf-8"))
 
     def do_GET(self):
         if self.path == "/health":
@@ -3644,12 +3686,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode())
 
     def do_POST(self):
-        """Handle kill switch and resume commands from dashboard."""
+        """Handle login and kill switch commands."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
+
+        # Login form submission
+        if self.path == "/login":
+            import urllib.parse
+            params = dict(urllib.parse.parse_qsl(body))
+            if params.get("username") == DASH_USER and params.get("password") == DASH_PASS:
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", f"auth={DASH_TOKEN}; Path=/; HttpOnly; SameSite=Strict")
+                self.end_headers()
+            else:
+                self.send_response(302)
+                self.send_header("Location", "/?error=1")
+                self.end_headers()
+            return
+
         if not self._check_auth():
             self._require_auth()
             return
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
 
         if self.path == "/kill":
             kill_switch["active"]       = True
