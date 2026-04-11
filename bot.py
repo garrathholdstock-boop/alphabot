@@ -85,6 +85,10 @@ MAX_DAILY_SPEND_PCT     = 50.0  # 50%   → $500 on $1k | $5,000 on $10k
 MAX_EXPOSURE_PCT        = 30.0  # 30%   → $300 on $1k | $3,000 on $10k
 DAILY_PROFIT_TARGET_PCT = 2.0   # 2%    → $20 on $1k  | $200 on $10k
 MAX_TRADE_PCT           = 5.0   # 5%    → $50 on $1k  | $500 on $10k
+CRYPTO_EXPOSURE_PCT     = 20.0  # 20%   → $200 on $1k | $2,000 on $10k
+INTRADAY_TRADE_PCT      = 3.0   # 3%    → $30 on $1k  | $300 on $10k
+CRYPTO_INTRADAY_PCT     = 2.0   # 2%    → $20 on $1k  | $200 on $10k
+SMALLCAP_TRADE_PCT      = 2.5   # 2.5%  → $25 on $1k  | $250 on $10k
 
 # Computed from STARTING_BALANCE — do not edit these directly
 MAX_DAILY_LOSS         = STARTING_BALANCE * MAX_DAILY_LOSS_PCT / 100
