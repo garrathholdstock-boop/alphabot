@@ -207,7 +207,7 @@ US_WATCHLIST = [
 CRYPTO_WATCHLIST_ALPACA = [
     "BTC/USD","ETH/USD","SOL/USD","AVAX/USD","DOGE/USD","SHIB/USD",
     "LTC/USD","BCH/USD","LINK/USD","DOT/USD","UNI/USD","AAVE/USD",
-    "XTZ/USD","BAT/USD","CRV/USD","GRT/USD","MKR/USD","MATIC/USD",
+    "XTZ/USD","BAT/USD","CRV/USD","GRT/USD","MKR/USD","LINK/USD",
     "ALGO/USD","XLM/USD","SUSHI/USD","YFI/USD","ETH/BTC",
 ]
 
@@ -216,7 +216,7 @@ CRYPTO_WATCHLIST_ALPACA = [
 CRYPTO_WATCHLIST_BINANCE = [
     # Large caps — always trade these
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT",
-    "AVAXUSDT","DOGEUSDT","DOTUSDT","MATICUSDT","LINKUSDT","LTCUSDT",
+    "AVAXUSDT","DOGEUSDT","DOTUSDT","LINKUSDT","LINKUSDT","LTCUSDT",
     "BCHUSDT","XLMUSDT","ATOMUSDT","ETCUSDT","NEARUSDT","ALGOUSDT",
     # High volatility meme/momentum
     "SHIBUSDT","PEPEUSDT","FLOKIUSDT","BONKUSDT","WIFUSDT",
@@ -3521,7 +3521,7 @@ def build_dashboard():
         dd_color     = dd_color,
         peak_pv      = peak_pv,
         profit_factor= profit_factor,
-        old_pf_color  = old_pf_color,
+        old_pf_color  = pf_color,
         sharpe       = sharpe,
         sharpe_color = sharpe_color,
         loss_streak  = loss_streak,
