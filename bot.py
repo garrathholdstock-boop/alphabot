@@ -1631,6 +1631,125 @@ def score_signal(sym, price, change, rsi, vol_ratio, closes):
 
     return round(min(11.0, max(0.0, score)), 1)
 
+# ── Signal breakdown — explains WHY a trade fired ────────────
+def signal_breakdown(sym, price, change, rsi, vol_ratio, closes, score, crypto=False):
+    """Returns a human-readable breakdown of every factor that went into the score."""
+    lines = []
+
+    # Header
+    label = "CRYPTO" if crypto else "STOCK"
+    lines.append(f"{'─'*52}")
+    lines.append(f"  {label}: {sym}  |  Score: {score}/10  |  Price: ${price:.4f}")
+    lines.append(f"{'─'*52}")
+
+    # SMA crossover
+    if len(closes) >= 22:
+        s9  = sum(closes[-9:]) / 9
+        s21 = sum(closes[-21:]) / 21
+        p9  = sum(closes[-10:-1]) / 9
+        p21 = sum(closes[-22:-1]) / 21
+        crossed = p9 <= p21 and s9 > s21
+        lines.append(f"  SMA Cross:    {'✅ YES — 9-day crossed above 21-day' if crossed else '❌ No crossover yet'}")
+        lines.append(f"  SMA 9:        ${s9:.4f}  |  SMA 21: ${s21:.4f}")
+
+    # RSI
+    if rsi:
+        if 50 <= rsi <= 65:
+            rsi_note = "✅ Sweet spot (50-65) +1.0pt"
+        elif 40 <= rsi < 50:
+            rsi_note = "⚠ Building momentum (40-50) +0.5pt"
+        elif rsi > 75:
+            rsi_note = "🔴 Overbought (>75) -1.0pt"
+        elif rsi > 70:
+            rsi_note = "⚠ Getting hot (70-75)"
+        else:
+            rsi_note = "— Neutral zone"
+        lines.append(f"  RSI:          {rsi:.1f}  {rsi_note}")
+
+    # Volume
+    if vol_ratio:
+        if vol_ratio >= 2.0:
+            vol_note = "✅ Strong conviction (2x+) +2.0pt"
+        elif vol_ratio >= 1.5:
+            vol_note = "✅ Good conviction (1.5x+) +1.0pt"
+        elif vol_ratio >= 1.2:
+            vol_note = "⚠ Mild confirmation (1.2x+) +0.5pt"
+        else:
+            vol_note = "❌ Below average — weak signal"
+        lines.append(f"  Volume:       {vol_ratio:.2f}x avg  {vol_note}")
+
+    # Breakout
+    if len(closes) >= 20:
+        breakout = is_breakout(closes, lookback=20)
+        lines.append(f"  Breakout:     {'✅ YES — 20-bar high +2.0pt' if breakout else '❌ No breakout'}")
+
+    # 5-day momentum
+    if len(closes) >= 6 and closes[-6] > 0:
+        m5d = (closes[-1] - closes[-6]) / closes[-6] * 100
+        if m5d >= 3.0:
+            mom_note = f"✅ Strong +{m5d:.1f}% +1.0pt"
+        elif m5d >= 1.5:
+            mom_note = f"⚠ Moderate +{m5d:.1f}% +0.5pt"
+        else:
+            mom_note = f"— Weak {m5d:+.1f}%"
+        lines.append(f"  5d Momentum:  {mom_note}")
+
+    # Relative strength (stocks only)
+    if not crypto and len(closes) >= 6:
+        rs = relative_strength_vs_spy(closes)
+        lines.append(f"  vs SPY:       {'✅ Outperforming +1.5pt' if rs else '❌ Underperforming SPY'}")
+
+    # MACD
+    if len(closes) >= 35:
+        mv, ms = calc_macd(closes)
+        if mv is not None and ms is not None:
+            macd_note = f"{'✅ Bullish (MACD > Signal) +1.0pt' if mv > ms else '❌ Bearish (MACD < Signal)'}"
+            lines.append(f"  MACD:         {macd_note}")
+
+    # News
+    if sym in news_state.get("watch_list", {}):
+        lines.append(f"  News:         ✅ Positive catalyst +1.5pt")
+    elif sym in news_state.get("skip_list", {}):
+        lines.append(f"  News:         🔴 NEGATIVE — skip flag -5.0pt")
+    else:
+        lines.append(f"  News:         — No news flag")
+
+    # Market environment
+    choppy = is_choppy_market()
+    regime = crypto_regime["mode"] if crypto else market_regime["mode"]
+    lines.append(f"  Market:       {'⚠ Choppy -1.0pt' if choppy else '✅ Trending'}")
+    lines.append(f"  Regime:       {'🔴 BEAR' if regime == 'BEAR' else '✅ BULL'}")
+
+    lines.append(f"{'─'*52}")
+    return "\n".join(lines)
+
+
+def sell_breakdown(sym, pos, exit_price, pnl, reason, hold_hours, crypto=False):
+    """Returns a human-readable breakdown of why a position was closed."""
+    entry  = pos.get("entry_price", 0)
+    stop   = pos.get("stop_price", 0)
+    target = pos.get("take_profit_price", 0)
+    qty    = pos.get("qty", 0)
+    pct    = ((exit_price - entry) / entry * 100) if entry > 0 else 0
+    hold_str = f"{hold_hours:.1f}h" if hold_hours else "?"
+
+    lines = [
+        f"{'─'*52}",
+        f"  SELL: {sym}  |  P&L: {'+' if pnl >= 0 else ''}${pnl:.2f} ({pct:+.2f}%)",
+        f"{'─'*52}",
+        f"  Reason:       {reason}",
+        f"  Entry:        ${entry:.4f}",
+        f"  Exit:         ${exit_price:.4f}",
+        f"  Stop was:     ${stop:.4f} ({((stop-entry)/entry*100):+.1f}%)",
+        f"  Target was:   ${target:.4f} ({((target-entry)/entry*100):+.1f}%)",
+        f"  Qty:          {qty}",
+        f"  Hold time:    {hold_str}",
+        f"  Result:       {'✅ WIN' if pnl >= 0 else '❌ LOSS'}",
+        f"{'─'*52}",
+    ]
+    return "\n".join(lines)
+
+
 # ── Max drawdown tracking ─────────────────────────────────────
 def update_drawdown(portfolio_value):
     """Track peak portfolio value and calculate max drawdown."""
@@ -2116,8 +2235,14 @@ def run_cycle(watchlist, st, crypto=False):
             log.info(f"[{st.label}] Max trades per day ({MAX_TRADES_PER_DAY}) reached — no more buys today")
             break
 
-        log.info(f"[{st.label}] ✅ BUY #{pos_count+1} score:{sig_score}/10 {s['symbol']} size:${adj_size:.0f}")
-        log.info(f"[{st.label}] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} stop:${stop_price:.4f} target:${take_profit_price:.4f} RSI:{s['rsi']:.1f}")
+        # Detailed signal breakdown — logged so you can learn WHY each trade fired
+        breakdown = signal_breakdown(
+            s["symbol"], s["price"], s.get("change", 0), s.get("rsi"),
+            s.get("vol_ratio", 1), s.get("closes", [s["price"]]*22),
+            sig_score, crypto=crypto
+        )
+        log.info(f"[{st.label}] ✅ BUY SIGNAL BREAKDOWN:\n{breakdown}")
+        log.info(f"[{st.label}] Executing: BUY {s['symbol']} x{qty} @ ~${s['price']:.4f} | stop:${stop_price:.4f} | target:${take_profit_price:.4f}")
         order, fill_price = place_order(s["symbol"], "buy", qty, crypto=crypto, estimated_price=s["price"])
         if order:
             # Use actual fill price (with slippage) not just signal price
@@ -2152,8 +2277,13 @@ def run_cycle(watchlist, st, crypto=False):
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
                 "price": fill_price, "pnl": None, "reason": "Signal",
                 "time": datetime.now().strftime("%H:%M:%S"),
-                "entry_ts": datetime.now().isoformat()})
+                "entry_ts": datetime.now().isoformat(),
+                "score": sig_score,
+                "rsi": s.get("rsi"),
+                "vol_ratio": s.get("vol_ratio"),
+                "breakdown": breakdown})
             st.positions[s["symbol"]]["entry_ts"] = datetime.now().isoformat()
+            st.positions[s["symbol"]]["entry_breakdown"] = breakdown
             pos_count += 1
 
     # Close SELL positions
@@ -2161,21 +2291,21 @@ def run_cycle(watchlist, st, crypto=False):
         if s["signal"] != "SELL": continue
         if s["symbol"] not in st.positions: continue
         pos = st.positions[s["symbol"]]
-        pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
-        log.info(f"[{st.label}] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
-        order = place_order(s["symbol"], "sell", pos["qty"], crypto=crypto)
-        if order:
+        entry_ts   = pos.get("entry_ts")
+        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
+        order_sell, sell_price = place_order(s["symbol"], "sell", pos["qty"], crypto=crypto, estimated_price=s["price"])
+        pnl = (sell_price - pos["entry_price"]) * pos["qty"]
+        bd  = sell_breakdown(s["symbol"], pos, sell_price, pnl, "Signal", hold_hours, crypto=crypto)
+        log.info(f"[{st.label}] SELL BREAKDOWN:\n{bd}")
+        if order_sell:
             del st.positions[s["symbol"]]
             st.daily_pnl += pnl
             st.trades_today += 1
-            entry_ts = pos.get("entry_ts")
-            hold_hours = None
-            if entry_ts:
-                hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1)
             st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
-                "price": s["price"], "pnl": pnl, "reason": "Signal",
+                "price": sell_price, "pnl": pnl, "reason": "Signal",
                 "time": datetime.now().strftime("%H:%M:%S"),
-                "hold_hours": hold_hours})
+                "hold_hours": hold_hours,
+                "breakdown": bd})
             st.trades = st.trades[:200]
             if st.daily_pnl >= DAILY_PROFIT_TARGET:
                 log.info(f"[{st.label}] Profit target hit! ${st.daily_pnl:.2f}")
@@ -2191,19 +2321,35 @@ def send_daily_summary():
     def section(st):
         sells = [t for t in st.trades if t["side"] == "SELL" and t.get("pnl") is not None]
         wins  = [t for t in sells if t["pnl"] > 0]
+
         def fmt_trade(t):
-            pnl_str = ""
-            if t.get("pnl") is not None:
-                sign = "+" if t["pnl"] >= 0 else ""
-                pnl_str = f"  P&L: {sign}${t['pnl']:.2f}"
-            return f"  {t['time']}  {t['side']:4}  {t['symbol']:10}  ${t['price']:.4f}{pnl_str}"
-        lines = "\n".join(fmt_trade(t) for t in st.trades[:20]) or "  No trades today"
+            lines = []
+            if t["side"] == "BUY":
+                sign = "+"
+                lines.append(f"  {t['time']}  BUY   {t['symbol']:10}  ${t['price']:.4f}")
+                if t.get("score"):
+                    lines.append(f"    Score: {t['score']}/10  RSI: {t.get('rsi','?')}  Vol: {t.get('vol_ratio','?')}x")
+                if t.get("breakdown"):
+                    # Include compact version of breakdown in email
+                    for line in t["breakdown"].split("\n")[2:-1]:  # skip header/footer
+                        lines.append(f"  {line}")
+            else:
+                sign = "+" if t.get("pnl", 0) >= 0 else ""
+                pnl_str = f"  P&L: {sign}${t['pnl']:.2f}" if t.get("pnl") is not None else ""
+                hold_str = f"  Held: {t['hold_hours']}h" if t.get("hold_hours") else ""
+                lines.append(f"  {t['time']}  SELL  {t['symbol']:10}  ${t['price']:.4f}{pnl_str}{hold_str}")
+                if t.get("breakdown"):
+                    for line in t["breakdown"].split("\n")[2:-1]:
+                        lines.append(f"  {line}")
+            return "\n".join(lines)
+
+        trade_lines = "\n\n".join(fmt_trade(t) for t in st.trades[:10]) or "  No trades today"
         return (f"{st.label}\n{'─'*40}\n"
                 f"Daily P&L:   ${st.daily_pnl:+.2f}\n"
                 f"Trades:      {len(sells)}\n"
                 f"Win rate:    {int(len(wins)/len(sells)*100) if sells else 0}%\n"
                 f"Positions:   {len(st.positions)}\n\n"
-                f"Trade log:\n{lines}\n")
+                f"Trade log (with signal breakdown):\n{trade_lines}\n")
 
     # News summary for email
     news_summary = ""
