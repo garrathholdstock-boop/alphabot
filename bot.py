@@ -3521,6 +3521,7 @@ def build_dashboard():
         dd_color     = dd_color,
         peak_pv      = peak_pv,
         profit_factor= profit_factor,
+        pf_color      = pf_color,
         old_pf_color  = pf_color,
         sharpe       = sharpe,
         sharpe_color = sharpe_color,
