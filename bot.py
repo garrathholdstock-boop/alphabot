@@ -39,15 +39,49 @@ PORT           = int(os.environ.get("PORT", 8080))
 
 ALPACA_BASE    = "https://api.alpaca.markets" if IS_LIVE else "https://paper-api.alpaca.markets"
 DATA_BASE      = "https://data.alpaca.markets"
+NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "")       # from newsapi.org — free tier
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")     # from console.anthropic.com
 
 # ── Safety settings ───────────────────────────────────────────
-MAX_DAILY_LOSS      = 50.0
-STOP_LOSS_PCT       = 2.0
+MAX_DAILY_LOSS      = 50.0    # $ shut off if day loss hits this
+STOP_LOSS_PCT       = 2.0     # % initial stop-loss below entry
+TRAILING_STOP_PCT   = 2.0     # % trailing stop trails behind highest price
+TAKE_PROFIT_PCT     = 5.0     # % auto sell when position up this much
+MAX_HOLD_DAYS       = 3       # days max hold before forced exit
+GAP_DOWN_PCT        = 3.0     # % gap down at open triggers immediate sell
 MAX_POSITIONS       = 3
 MAX_TRADE_VALUE     = 500.0
 MAX_DAILY_SPEND     = 5000.0
+MAX_PORTFOLIO_EXPOSURE = 2000.0  # $ max total in open positions at once
 DAILY_PROFIT_TARGET = 2000.0
 CYCLE_SECONDS       = 60
+
+# ── Market regime settings ────────────────────────────────────
+VIX_FEAR_THRESHOLD    = 25.0   # VIX above this = fear, pause bull buys
+SPY_MA_PERIOD         = 20     # SPY moving average period for trend filter
+BEAR_TICKERS          = ["SQQQ","UVXY","GLD","SLV","SPXS"]  # buy in stock bear mode
+SPY_FAST_DROP_PCT     = 3.0    # % SPY single-day drop triggers instant bear mode
+SPY_CIRCUIT_BREAKER   = 5.0    # % SPY intraday drop pauses ALL new buys immediately
+MACRO_KEYWORDS        = [      # macro news terms that trigger full pause
+    "federal reserve","fed rate","interest rate","recession","inflation",
+    "iran","war","sanctions","oil embargo","nuclear","geopolit",
+    "bank collapse","credit crisis","market crash","circuit breaker",
+    "emergency","black swan","systemic"
+]
+
+# ── Crypto regime settings ────────────────────────────────────
+BTC_MA_PERIOD         = 20     # BTC moving average period
+BTC_CRASH_PCT         = 5.0    # % BTC single-day drop = volatility spike
+CRYPTO_MAX_EXPOSURE   = 2000.0 # $ max total in open crypto positions
+
+# ── Small cap settings ───────────────────────────────────────
+SMALLCAP_MIN_PRICE    = 2.0    # $ minimum price
+SMALLCAP_MAX_PRICE    = 20.0   # $ maximum price
+SMALLCAP_POOL_SIZE    = 50     # number of small caps to maintain
+SMALLCAP_STOP_LOSS    = 1.5    # % tighter stop-loss for small caps
+SMALLCAP_MAX_TRADE    = 250.0  # $ smaller position size for small caps
+SMALLCAP_VOL_RATIO    = 2.0    # higher volume confirmation required
+SMALLCAP_REFRESH_DAYS = 7      # refresh pool every 7 days
 
 # ── Watchlists ────────────────────────────────────────────────
 US_WATCHLIST = [
@@ -96,7 +130,53 @@ class BotState:
 
 state        = BotState("STOCKS")
 crypto_state = BotState("CRYPTO")
+smallcap_state = BotState("SMALLCAP")
 account_info = {}
+
+# ── Small cap pool (refreshes weekly) ────────────────────────
+smallcap_pool = {
+    "symbols":       [],
+    "last_refresh":  None,
+    "last_refresh_day": None,
+}
+
+# ── Market regime (updated each cycle) ───────────────────────
+market_regime = {
+    "mode":        "BULL",   # BULL or BEAR
+    "vix":         None,
+    "spy_price":   None,
+    "spy_ma20":    None,
+    "spy_trend":   "unknown",
+    "last_check":  None,
+}
+
+# ── Circuit breaker state ─────────────────────────────────────
+circuit_breaker = {
+    "active":       False,   # True = all new buys paused
+    "reason":       None,    # why it triggered
+    "triggered_at": None,
+    "spy_open":     None,    # SPY price at open today for intraday % calc
+    "macro_paused": False,   # paused due to macro news
+}
+
+# ── Crypto regime (updated each cycle) ───────────────────────
+crypto_regime = {
+    "mode":        "BULL",   # BULL or BEAR
+    "btc_price":   None,
+    "btc_ma20":    None,
+    "btc_change":  None,     # latest daily % change
+    "last_check":  None,
+}
+
+# ── News sentiment state (updated each morning) ───────────────
+news_state = {
+    "skip_list":     {},    # { symbol: { reason, headline, sentiment_score } }
+    "watch_list":    {},    # { symbol: { headline, sentiment } } — positive news
+    "last_scan_day": None,
+    "last_scan_time": None,
+    "briefing":      [],    # list of summary lines for email
+    "scan_complete": False,
+}
 
 # ── Alpaca API ────────────────────────────────────────────────
 HEADERS = {
@@ -155,8 +235,517 @@ def fetch_latest_price(symbol, crypto=False):
             return d.get("latestTrade", {}).get("p") or d.get("latestQuote", {}).get("ap")
     except: return None
 
+# ── News sentiment analysis ──────────────────────────────────
+def fetch_news_for_symbol(symbol):
+    """Fetch latest news headlines for a stock symbol via NewsAPI."""
+    if not NEWS_API_KEY:
+        return []
+    try:
+        # Clean symbol for search (remove /USD etc for crypto)
+        query = symbol.replace("/USD", "").replace("/BTC", "")
+        url = (
+            f"https://newsapi.org/v2/everything"
+            f"?q={query}+stock+OR+{query}+shares+OR+{query}+earnings"
+            f"&sortBy=publishedAt"
+            f"&pageSize=5"
+            f"&language=en"
+            f"&apiKey={NEWS_API_KEY}"
+        )
+        r = requests.get(url, timeout=8)
+        if not r.ok:
+            return []
+        articles = r.json().get("articles", [])
+        return [
+            {
+                "title":  a.get("title", ""),
+                "source": a.get("source", {}).get("name", ""),
+                "published": a.get("publishedAt", "")[:10],
+            }
+            for a in articles if a.get("title")
+        ]
+    except Exception as e:
+        log.debug(f"News fetch {symbol}: {e}")
+        return []
+
+def analyse_sentiment_with_claude(symbol, headlines):
+    """Use Claude API to score news sentiment for a stock."""
+    if not CLAUDE_API_KEY or not headlines:
+        return None, "no_data"
+    try:
+        headline_text = "\n".join(
+            f"- {h['title']} ({h['source']}, {h['published']})"
+            for h in headlines[:5]
+        )
+        prompt = (
+            f"You are a financial analyst. Analyse these news headlines for {symbol} "
+            f"and return ONLY a JSON object with no markdown:\n\n"
+            f"{headline_text}\n\n"
+            f'Return exactly: {{"sentiment": "POSITIVE" or "NEGATIVE" or "NEUTRAL", '
+            f'"score": number from -1.0 to 1.0, '
+            f'"skip": true or false (true if strongly negative news that should prevent buying today), '
+            f'"reason": "one short sentence explaining the key risk or opportunity", '
+            f'"key_headline": "the most important headline"}}'
+        )
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 200,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=15,
+        )
+        if not r.ok:
+            return None, "api_error"
+        text = r.json()["content"][0]["text"].strip()
+        # Strip any markdown fences just in case
+        text = text.replace("```json", "").replace("```", "").strip()
+        result = json.loads(text)
+        return result, "ok"
+    except Exception as e:
+        log.debug(f"Sentiment {symbol}: {e}")
+        return None, "error"
+
+def run_morning_news_scan():
+    """Scan all 100 stocks for news sentiment. Runs at 9:00am ET on weekdays."""
+    global news_state
+    today = datetime.now().date()
+
+    log.info("=" * 50)
+    log.info("MORNING NEWS SCAN starting...")
+    log.info(f"Scanning {len(US_WATCHLIST)} stocks for sentiment")
+    log.info("=" * 50)
+
+    skip_list  = {}
+    watch_list = {}
+    briefing   = []
+    skipped    = 0
+    positive   = 0
+    neutral    = 0
+    errors     = 0
+
+    if not NEWS_API_KEY:
+        log.warning("NEWS_API_KEY not set — skipping news scan. Add it in Railway Variables.")
+        news_state["scan_complete"] = True
+        news_state["last_scan_day"] = today
+        return
+
+    for symbol in US_WATCHLIST:
+        try:
+            headlines = fetch_news_for_symbol(symbol)
+            if not headlines:
+                neutral += 1
+                continue
+
+            result, status = analyse_sentiment_with_claude(symbol, headlines)
+            if not result or status != "ok":
+                errors += 1
+                continue
+
+            sentiment  = result.get("sentiment", "NEUTRAL")
+            score      = result.get("score", 0)
+            should_skip = result.get("skip", False)
+            reason     = result.get("reason", "")
+            key_headline = result.get("key_headline", headlines[0]["title"] if headlines else "")
+
+            if should_skip or sentiment == "NEGATIVE":
+                skip_list[symbol] = {
+                    "sentiment": sentiment,
+                    "score":     score,
+                    "reason":    reason,
+                    "headline":  key_headline,
+                }
+                briefing.append(f"  🔴 SKIP  {symbol:8} | {reason}")
+                log.info(f"[NEWS] SKIP {symbol}: {reason}")
+                skipped += 1
+
+            elif sentiment == "POSITIVE" and score > 0.3:
+                watch_list[symbol] = {
+                    "sentiment": sentiment,
+                    "score":     score,
+                    "reason":    reason,
+                    "headline":  key_headline,
+                }
+                briefing.append(f"  🟢 BOOST {symbol:8} | {reason}")
+                log.info(f"[NEWS] POSITIVE {symbol}: {reason}")
+                positive += 1
+            else:
+                neutral += 1
+
+            # Small delay to respect API rate limits
+            time.sleep(0.5)
+
+        except Exception as e:
+            log.warning(f"[NEWS] Error scanning {symbol}: {e}")
+            errors += 1
+
+    news_state.update({
+        "skip_list":      skip_list,
+        "watch_list":     watch_list,
+        "briefing":       briefing,
+        "last_scan_day":  today,
+        "last_scan_time": datetime.now().strftime("%H:%M:%S"),
+        "scan_complete":  True,
+    })
+
+    log.info(f"[NEWS] Scan complete: {skipped} skip | {positive} positive | {neutral} neutral | {errors} errors")
+
+    # Send morning briefing email
+    send_morning_briefing(skipped, positive, neutral)
+
+def send_morning_briefing(skipped, positive, neutral):
+    """Email the morning news briefing before market open."""
+    def fmt_item(sym, data, tag):
+        return tag + " " + sym + " | " + data["reason"] + " | " + data["headline"]
+    skip_lines  = "\n".join(fmt_item(s,d,"SKIP ") for s,d in news_state["skip_list"].items()) or "  None all clear!"
+    boost_lines = "\n".join(fmt_item(s,d,"BOOST") for s,d in news_state["watch_list"].items()) or "  None today"
+
+    body = f"""
+AlphaBot Morning Briefing
+{'='*50}
+Date:     {datetime.now().strftime('%A, %d %B %Y')}
+Time:     {datetime.now().strftime('%H:%M ET')} (market opens at 9:30 ET)
+Stocks scanned: {len(US_WATCHLIST)}
+
+SKIPPING TODAY ({skipped} stocks — negative news):
+{skip_lines}
+
+POSITIVE SIGNALS ({positive} stocks — good news):
+{boost_lines}
+
+SUMMARY
+{'─'*50}
+  {skipped} stocks skipped due to negative news
+  {positive} stocks flagged as positive
+  {neutral} stocks with neutral/no news — trading normally
+
+The bot will automatically avoid skipped stocks today.
+All restrictions clear at midnight and reset tomorrow.
+{'='*50}
+Sent by AlphaBot · Market opens in ~30 minutes
+""".strip()
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"]    = GMAIL_USER
+        msg["To"]      = EMAIL_TO
+        msg["Subject"] = f"AlphaBot Morning Briefing — {datetime.now().strftime('%d %b %Y')} ({skipped} stocks skipped)"
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(GMAIL_USER, GMAIL_PASS)
+            smtp.sendmail(GMAIL_USER, EMAIL_TO, msg.as_string())
+        log.info(f"Morning briefing emailed to {EMAIL_TO}")
+    except Exception as e:
+        log.error(f"Morning briefing email failed: {e}")
+
+# ── Small cap pool management ────────────────────────────────
+def refresh_smallcap_pool():
+    """Fetch and rank the most active small cap stocks from Alpaca.
+    Filters by price $2-$20, active, tradable on NYSE/NASDAQ.
+    Refreshes weekly so the pool stays current."""
+    global smallcap_pool
+    log.info("[SMALLCAP] Refreshing small cap pool...")
+
+    try:
+        # Fetch all active US equity assets from Alpaca
+        assets = alpaca_get("/v2/assets?status=active&asset_class=us_equity")
+        if not assets:
+            log.warning("[SMALLCAP] Could not fetch assets from Alpaca")
+            return
+
+        # Filter to small cap criteria
+        candidates = [
+            a for a in assets
+            if (a.get("tradable")
+                and a.get("exchange") in ("NYSE", "NASDAQ", "ARCA")
+                and a.get("status") == "active"
+                and not a.get("symbol","").endswith(("W","R","P","Q"))  # exclude warrants/rights
+                and len(a.get("symbol","")) <= 5  # exclude very long symbols
+            )
+        ]
+
+        log.info(f"[SMALLCAP] {len(candidates)} tradable small cap candidates found")
+
+        # Score by fetching bars and checking price range + volume
+        scored = []
+        checked = 0
+        for asset in candidates:
+            sym = asset.get("symbol","")
+            if not sym or sym in US_WATCHLIST:
+                continue  # skip if already in main watchlist
+            bars = fetch_bars(sym)
+            if not bars or len(bars) < 10:
+                continue
+            price = bars[-1]["c"]
+            if not (SMALLCAP_MIN_PRICE <= price <= SMALLCAP_MAX_PRICE):
+                continue
+            volumes = [b["v"] for b in bars]
+            avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
+            if avg_vol < 50000:  # skip very thinly traded stocks
+                continue
+            # Score by volume * recent momentum
+            closes = [b["c"] for b in bars]
+            momentum = (closes[-1] - closes[-5]) / closes[-5] * 100 if len(closes) >= 5 else 0
+            score = avg_vol * (1 + abs(momentum) / 100)
+            scored.append({"symbol": sym, "price": price, "avg_vol": avg_vol, "momentum": momentum, "score": score})
+            checked += 1
+            if checked >= 300:  # cap API calls
+                break
+            time.sleep(0.1)  # rate limit courtesy
+
+        # Sort by score and take top SMALLCAP_POOL_SIZE
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        pool = [s["symbol"] for s in scored[:SMALLCAP_POOL_SIZE]]
+
+        smallcap_pool["symbols"]          = pool
+        smallcap_pool["last_refresh"]     = datetime.now().strftime("%Y-%m-%d %H:%M")
+        smallcap_pool["last_refresh_day"] = datetime.now().date()
+
+        log.info(f"[SMALLCAP] Pool refreshed: {len(pool)} stocks | Top 5: {pool[:5]}")
+
+    except Exception as e:
+        log.error(f"[SMALLCAP] Pool refresh error: {e}")
+
+def should_refresh_smallcap():
+    """Check if small cap pool needs refreshing."""
+    if not smallcap_pool["symbols"]:
+        return True
+    if not smallcap_pool["last_refresh_day"]:
+        return True
+    days_since = (datetime.now().date() - smallcap_pool["last_refresh_day"]).days
+    return days_since >= SMALLCAP_REFRESH_DAYS
+
+# ── Circuit breaker ──────────────────────────────────────────
+def check_circuit_breaker():
+    """Check for fast SPY drop and intraday crash. Updates circuit_breaker state."""
+    global circuit_breaker
+
+    # Reset circuit breaker at market open each day
+    et = datetime.now(ZoneInfo("America/New_York"))
+    mins = et.hour * 60 + et.minute
+    if mins == 570:  # exactly 9:30am — reset
+        circuit_breaker["active"]      = False
+        circuit_breaker["reason"]      = None
+        circuit_breaker["triggered_at"]= None
+        circuit_breaker["macro_paused"]= False
+        log.info("[CIRCUIT] Reset for new trading day")
+
+    # Fetch SPY snapshot for intraday price
+    spy_snap = None
+    try:
+        r = requests.get(f"{DATA_BASE}/v2/stocks/SPY/snapshot?feed=sip", headers=HEADERS, timeout=8)
+        if r.ok:
+            spy_snap = r.json()
+    except: pass
+
+    if not spy_snap:
+        return
+
+    spy_now  = spy_snap.get("latestTrade", {}).get("p")
+    spy_open = spy_snap.get("dailyBar",    {}).get("o")
+    spy_prev = spy_snap.get("prevDailyBar",{}).get("c")
+
+    if not spy_now or not spy_prev:
+        return
+
+    # Store spy open price
+    if spy_open:
+        circuit_breaker["spy_open"] = spy_open
+
+    # Check 1: fast single-day drop vs previous close
+    daily_chg = ((spy_now - spy_prev) / spy_prev) * 100
+    if daily_chg <= -SPY_FAST_DROP_PCT and not circuit_breaker["active"]:
+        log.warning(f"[CIRCUIT] SPY fast drop {daily_chg:.1f}% vs prev close — flipping to BEAR")
+        market_regime["mode"] = "BEAR"
+
+    # Check 2: intraday circuit breaker vs today's open
+    if spy_open:
+        intraday_chg = ((spy_now - spy_open) / spy_open) * 100
+        if intraday_chg <= -SPY_CIRCUIT_BREAKER and not circuit_breaker["active"]:
+            reason = f"SPY intraday -{abs(intraday_chg):.1f}% (circuit breaker)"
+            log.warning(f"[CIRCUIT] TRIGGERED: {reason}")
+            circuit_breaker.update({
+                "active":       True,
+                "reason":       reason,
+                "triggered_at": datetime.now().strftime("%H:%M:%S"),
+            })
+
+def check_macro_news():
+    """Scan for macro news that should pause all trading. Runs during morning scan."""
+    global circuit_breaker
+    if not NEWS_API_KEY:
+        return
+    try:
+        # Check top financial headlines for macro keywords
+        r = requests.get(
+            f"https://newsapi.org/v2/top-headlines?category=business&language=en&pageSize=20&apiKey={NEWS_API_KEY}",
+            timeout=8
+        )
+        if not r.ok: return
+        articles = r.json().get("articles", [])
+        headlines = " ".join(a.get("title","").lower() for a in articles)
+        triggered_keywords = [kw for kw in MACRO_KEYWORDS if kw in headlines]
+        if triggered_keywords:
+            # Use Claude to score macro risk if available
+            if CLAUDE_API_KEY:
+                sample = "\n".join(a.get("title","") for a in articles[:10])
+                prompt = ("Rate the systemic market risk of these headlines 1-10 (10=extreme). "
+                          "Return ONLY JSON: {\"score\": 7, \"pause_trading\": true, \"reason\": \"brief reason\"}\n\n" + sample)
+                r2 = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                    json={"model": "claude-haiku-4-5-20251001", "max_tokens": 100,
+                          "messages": [{"role": "user", "content": prompt}]},
+                    timeout=12
+                )
+                if r2.ok:
+                    result = json.loads(r2.json()["content"][0]["text"].replace("```json","").replace("```","").strip())
+                    if result.get("pause_trading") and result.get("score", 0) >= 7:
+                        reason = result.get("reason", f"Macro risk keywords: {', '.join(triggered_keywords[:3])}")
+                        log.warning(f"[CIRCUIT] MACRO PAUSE triggered: {reason} (score:{result['score']})")
+                        circuit_breaker["macro_paused"] = True
+                        circuit_breaker["active"]       = True
+                        circuit_breaker["reason"]       = f"Macro news: {reason}"
+                        circuit_breaker["triggered_at"] = datetime.now().strftime("%H:%M:%S")
+                        return
+            # No Claude — pause on keyword match alone if 2+ keywords hit
+            if len(triggered_keywords) >= 2:
+                reason = f"Macro keywords detected: {', '.join(triggered_keywords[:3])}"
+                log.warning(f"[CIRCUIT] MACRO PAUSE: {reason}")
+                circuit_breaker["macro_paused"] = True
+                circuit_breaker["active"]       = True
+                circuit_breaker["reason"]       = reason
+                circuit_breaker["triggered_at"] = datetime.now().strftime("%H:%M:%S")
+    except Exception as e:
+        log.debug(f"[CIRCUIT] Macro check error: {e}")
+
+# ── Market regime detection ──────────────────────────────────
+def update_market_regime():
+    """Check VIX and SPY trend to determine BULL or BEAR mode."""
+    global market_regime
+
+    # Fetch SPY bars for MA calculation
+    spy_bars = fetch_bars("SPY")
+    vix_bars = fetch_bars("VIXY")  # VIXY is the VIX ETF tradeable via Alpaca
+
+    spy_price = None
+    spy_ma20  = None
+    vix_val   = None
+
+    if spy_bars and len(spy_bars) >= SPY_MA_PERIOD:
+        closes    = [b["c"] for b in spy_bars]
+        spy_price = closes[-1]
+        spy_ma20  = sum(closes[-SPY_MA_PERIOD:]) / SPY_MA_PERIOD
+
+    # Try VIXY as VIX proxy, fallback to hardcoded neutral
+    if vix_bars:
+        vix_val = vix_bars[-1]["c"]
+
+    # Determine regime
+    bear_signals = 0
+    if spy_price and spy_ma20 and spy_price < spy_ma20:
+        bear_signals += 1
+        log.info(f"[REGIME] SPY ${spy_price:.2f} below MA20 ${spy_ma20:.2f} — bearish signal")
+    if vix_val and vix_val > VIX_FEAR_THRESHOLD:
+        bear_signals += 1
+        log.info(f"[REGIME] VIX proxy ${vix_val:.2f} above threshold {VIX_FEAR_THRESHOLD} — fear signal")
+
+    old_mode = market_regime["mode"]
+    new_mode = "BEAR" if bear_signals >= 1 else "BULL"
+
+    market_regime.update({
+        "mode":       new_mode,
+        "vix":        vix_val,
+        "spy_price":  spy_price,
+        "spy_ma20":   spy_ma20,
+        "spy_trend":  "below MA20" if (spy_price and spy_ma20 and spy_price < spy_ma20) else "above MA20",
+        "last_check": datetime.now().strftime("%H:%M:%S"),
+    })
+
+    if old_mode != new_mode:
+        log.warning(f"[REGIME] Mode changed: {old_mode} -> {new_mode}")
+        if new_mode == "BEAR":
+            log.warning("[REGIME] BEAR MODE: pausing bull buys, rotating to defensive tickers")
+        else:
+            log.info("[REGIME] BULL MODE: resuming normal trading")
+
+    spy_p_str  = f"${spy_price:.2f}"  if spy_price else "N/A"
+    spy_m_str  = f"${spy_ma20:.2f}"  if spy_ma20  else "N/A"
+    vix_str_   = f"{vix_val:.2f}"    if vix_val   else "N/A"
+    log.info(f"[REGIME] {new_mode} | SPY: {spy_p_str} MA20: {spy_m_str} | VIX proxy: {vix_str_}")
+    return new_mode
+
+# ── Crypto regime detection ──────────────────────────────────
+def update_crypto_regime():
+    """Check BTC trend and volatility to determine crypto BULL or BEAR mode."""
+    global crypto_regime
+
+    btc_bars = fetch_bars("BTC/USD", crypto=True)
+    if not btc_bars or len(btc_bars) < BTC_MA_PERIOD:
+        log.info("[CRYPTO REGIME] Not enough BTC data — staying in current mode")
+        return crypto_regime["mode"]
+
+    closes    = [b["c"] for b in btc_bars]
+    btc_price = closes[-1]
+    btc_prev  = closes[-2]
+    btc_ma20  = sum(closes[-BTC_MA_PERIOD:]) / BTC_MA_PERIOD
+    btc_change = ((btc_price - btc_prev) / btc_prev) * 100
+
+    bear_signals = 0
+
+    # Signal 1: BTC below its 20-day MA
+    if btc_price < btc_ma20:
+        bear_signals += 1
+        log.info(f"[CRYPTO REGIME] BTC ${btc_price:.0f} below MA20 ${btc_ma20:.0f} — bearish")
+
+    # Signal 2: BTC crashed more than BTC_CRASH_PCT today
+    if btc_change <= -BTC_CRASH_PCT:
+        bear_signals += 1
+        log.info(f"[CRYPTO REGIME] BTC daily drop {btc_change:.1f}% — volatility spike")
+
+    old_mode = crypto_regime["mode"]
+    new_mode = "BEAR" if bear_signals >= 1 else "BULL"
+
+    crypto_regime.update({
+        "mode":       new_mode,
+        "btc_price":  btc_price,
+        "btc_ma20":   btc_ma20,
+        "btc_change": btc_change,
+        "last_check": datetime.now().strftime("%H:%M:%S"),
+    })
+
+    if old_mode != new_mode:
+        log.warning(f"[CRYPTO REGIME] Mode changed: {old_mode} -> {new_mode}")
+        if new_mode == "BEAR":
+            log.warning("[CRYPTO REGIME] BEAR MODE: pausing all new crypto buys, protecting capital")
+        else:
+            log.info("[CRYPTO REGIME] BULL MODE: resuming crypto trading")
+
+    log.info(f"[CRYPTO REGIME] {new_mode} | BTC: ${btc_price:.0f} MA20: ${btc_ma20:.0f} | Daily: {btc_change:+.1f}%")
+    return new_mode
+
+# ── Portfolio exposure check ──────────────────────────────────
+def total_exposure(st):
+    """Calculate total $ currently deployed in open positions."""
+    return sum(pos["entry_price"] * pos["qty"] for pos in st.positions.values())
+
 # ── Indicators ────────────────────────────────────────────────
+def ema(prices, period):
+    """Exponential Moving Average — weights recent prices more heavily than SMA."""
+    if len(prices) < period: return None
+    k = 2 / (period + 1)
+    result = sum(prices[:period]) / period  # seed with SMA
+    for price in prices[period:]:
+        result = price * k + result * (1 - k)
+    return result
+
 def sma(prices, period):
+    """Simple Moving Average — kept for regime checks."""
     if len(prices) < period: return None
     return sum(prices[-period:]) / period
 
@@ -168,14 +757,86 @@ def calc_rsi(prices, period=14):
     if al == 0: return 100.0
     return 100 - 100 / (1 + ag / al)
 
-def get_signal(closes):
-    s9, s21 = sma(closes, 9), sma(closes, 21)
-    p9, p21 = sma(closes[:-1], 9), sma(closes[:-1], 21)
-    rsi = calc_rsi(closes)
-    if None in (s9, s21, p9, p21, rsi): return "HOLD", s9, s21, rsi
-    if p9 <= p21 and s9 > s21 and rsi < 70: return "BUY", s9, s21, rsi
-    if (p9 >= p21 and s9 < s21) or rsi > 70: return "SELL", s9, s21, rsi
-    return "HOLD", s9, s21, rsi
+def calc_macd(prices):
+    """MACD = EMA12 - EMA26. Signal line = EMA9 of MACD.
+    Returns (macd_line, signal_line) or (None, None) if not enough data."""
+    if len(prices) < 35: return None, None
+    macd_line = []
+    for i in range(26, len(prices) + 1):
+        e12 = ema(prices[:i], 12)
+        e26 = ema(prices[:i], 26)
+        if e12 and e26:
+            macd_line.append(e12 - e26)
+    if len(macd_line) < 9: return None, None
+    signal_line = ema(macd_line, 9)
+    return macd_line[-1], signal_line
+
+VOLUME_MIN_RATIO = 1.2  # volume must be at least 1.2x 10-day average to confirm signal
+
+def get_signal(closes, volumes=None):
+    """
+    Signal uses EMA 9/21 crossover (upgraded from SMA) + RSI filter.
+    Optional volume confirmation: only BUY if volume >= 1.5x average.
+    MACD used as additional confirmation for BUY signals.
+    """
+    # EMA crossover (upgraded from SMA)
+    e9  = ema(closes, 9)
+    e21 = ema(closes, 21)
+    pe9  = ema(closes[:-1], 9)
+    pe21 = ema(closes[:-1], 21)
+    rsi  = calc_rsi(closes)
+
+    if None in (e9, e21, pe9, pe21, rsi):
+        return "HOLD", e9, e21, rsi
+
+    cross_up   = pe9 <= pe21 and e9 > e21   # EMA 9 crossed above EMA 21
+    cross_down = pe9 >= pe21 and e9 < e21   # EMA 9 crossed below EMA 21
+
+    # MACD confirmation
+    macd, macd_sig = calc_macd(closes)
+    macd_bullish = macd is not None and macd_sig is not None and macd > macd_sig
+    macd_bearish = macd is not None and macd_sig is not None and macd < macd_sig
+
+    # Volume confirmation
+    vol_confirmed = True
+    if volumes and len(volumes) >= 11:
+        avg_vol = sum(volumes[-11:-1]) / 10
+        vol_confirmed = volumes[-1] >= avg_vol * VOLUME_MIN_RATIO
+
+    # BUY: EMA crossover up + RSI not overbought + volume confirmed + MACD bullish
+    if cross_up and rsi < 75 and vol_confirmed and (macd_bullish or macd is None):
+        return "BUY", e9, e21, rsi
+
+    # SELL: EMA crossover down OR overbought RSI OR MACD turning bearish
+    if cross_down or rsi > 75 or (cross_down and macd_bearish):
+        return "SELL", e9, e21, rsi
+
+    return "HOLD", e9, e21, rsi
+
+def get_signal_smallcap(closes, volumes=None):
+    """Tighter signal for small caps — higher volume requirement, same EMA/RSI/MACD logic."""
+    e9  = ema(closes, 9)
+    e21 = ema(closes, 21)
+    pe9  = ema(closes[:-1], 9)
+    pe21 = ema(closes[:-1], 21)
+    rsi  = calc_rsi(closes)
+    if None in (e9, e21, pe9, pe21, rsi):
+        return "HOLD", e9, e21, rsi
+    cross_up   = pe9 <= pe21 and e9 > e21
+    cross_down = pe9 >= pe21 and e9 < e21
+    macd, macd_sig = calc_macd(closes)
+    macd_bullish = macd is not None and macd_sig is not None and macd > macd_sig
+    macd_bearish = macd is not None and macd_sig is not None and macd < macd_sig
+    # Small caps need stronger volume confirmation
+    vol_confirmed = True
+    if volumes and len(volumes) >= 11:
+        avg_vol = sum(volumes[-11:-1]) / 10
+        vol_confirmed = volumes[-1] >= avg_vol * SMALLCAP_VOL_RATIO
+    if cross_up and rsi < 75 and vol_confirmed and (macd_bullish or macd is None):
+        return "BUY", e9, e21, rsi
+    if cross_down or rsi > 75 or (cross_down and macd_bearish):
+        return "SELL", e9, e21, rsi
+    return "HOLD", e9, e21, rsi
 
 def is_market_open():
     et   = datetime.now(ZoneInfo("America/New_York"))
@@ -193,18 +854,74 @@ def place_order(symbol, side, qty, crypto=False):
 
 # ── Bot cycle ─────────────────────────────────────────────────
 def check_stop_losses(st, crypto=False):
+    """Check all open positions for stop-loss, trailing stop, take-profit, max hold days."""
+    now = datetime.now()
+    market_just_opened = False
+    if not crypto:
+        et = datetime.now(ZoneInfo("America/New_York"))
+        # Detect market open window (9:30-9:35 ET) for gap-down check
+        mins = et.hour * 60 + et.minute
+        market_just_opened = (mins >= 570 and mins <= 575)
+
     for sym, pos in list(st.positions.items()):
         live = fetch_latest_price(sym, crypto=crypto)
-        if not live: continue
-        if live <= pos["stop_price"]:
-            pnl = (live - pos["entry_price"]) * pos["qty"]
-            log.warning(f"[{st.label}] STOP-LOSS {sym} @ ${live:.4f} P&L:${pnl:+.2f}")
+        if not live:
+            continue
+
+        reason = None
+        entry  = pos["entry_price"]
+        high   = pos.get("highest_price", entry)
+        pct_from_entry = ((live - entry) / entry) * 100
+
+        # Update highest price seen and trail the stop up
+        if live > high:
+            pos["highest_price"] = live
+            new_stop = live * (1 - TRAILING_STOP_PCT / 100)
+            if new_stop > pos["stop_price"]:
+                old_stop = pos["stop_price"]
+                pos["stop_price"] = new_stop
+                log.info(f"[{st.label}] TRAIL {sym} stop raised ${old_stop:.4f} -> ${new_stop:.4f} (high:${live:.4f})")
+
+        # Update days held
+        if pos.get("entry_date"):
+            entry_date = datetime.fromisoformat(pos["entry_date"]).date()
+            pos["days_held"] = (now.date() - entry_date).days
+
+        # 1. Gap-down protection at market open (stocks only)
+        if market_just_opened and not crypto:
+            gap_pct = ((live - entry) / entry) * 100
+            if gap_pct <= -GAP_DOWN_PCT:
+                reason = f"Gap-Down ({gap_pct:.1f}%)"
+
+        # 2. Take-profit
+        if reason is None and live >= pos.get("take_profit_price", entry * 1.05):
+            reason = f"Take-Profit (+{pct_from_entry:.1f}%)"
+
+        # 3. Trailing / hard stop-loss
+        if reason is None and live <= pos["stop_price"]:
+            reason = f"Stop-Loss ({pct_from_entry:.1f}%)"
+
+        # 4. Max hold days
+        if reason is None and pos.get("days_held", 0) >= MAX_HOLD_DAYS:
+            reason = f"Max Hold ({pos['days_held']} days)"
+
+        if reason:
+            pnl = (live - entry) * pos["qty"]
+            emoji = "+" if pnl >= 0 else "-"
+            log.info(f"[{st.label}] SELL {sym} @ ${live:.4f} | {reason} | P&L:{emoji}${abs(pnl):.2f}")
             place_order(sym, "sell", pos["qty"], crypto=crypto)
             del st.positions[sym]
             st.daily_pnl += pnl
-            st.trades.insert(0, {"symbol": sym, "side": "SELL", "qty": pos["qty"],
-                "price": live, "pnl": pnl, "reason": "Stop-Loss",
-                "time": datetime.now().strftime("%H:%M:%S")})
+            entry_ts = pos.get("entry_ts")
+            hold_hours = None
+            if entry_ts:
+                hold_hours = round((now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1)
+            st.trades.insert(0, {
+                "symbol": sym, "side": "SELL", "qty": pos["qty"],
+                "price": live, "pnl": pnl, "reason": reason,
+                "time": now.strftime("%H:%M:%S"),
+                "hold_hours": hold_hours,
+            })
             if st.daily_pnl <= -MAX_DAILY_LOSS:
                 log.warning(f"[{st.label}] Daily loss limit hit!")
                 st.shutoff = True
@@ -220,10 +937,24 @@ def run_cycle(watchlist, st, crypto=False):
     st.running     = True
     st.last_cycle  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
-    log.info(f"[{st.label}] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f}")
+    regime = market_regime["mode"]
+    log.info(f"[{st.label}] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Regime: {regime}")
 
     check_stop_losses(st, crypto=crypto)
     if st.shutoff: return
+
+    # Regime logic
+    if crypto:
+        c_regime = crypto_regime["mode"]
+        if c_regime == "BEAR":
+            log.info(f"[{st.label}] CRYPTO BEAR MODE — pausing new buys, protecting capital")
+            # Don't buy anything new in crypto bear mode — just manage existing positions
+            st.running = False
+            return
+    else:
+        if regime == "BEAR":
+            log.info(f"[{st.label}] BEAR MODE — scanning defensive/inverse tickers")
+            watchlist = BEAR_TICKERS
 
     # Scan
     results = []
@@ -237,9 +968,9 @@ def run_cycle(watchlist, st, crypto=False):
         change  = ((price - prev) / prev) * 100
         avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
-        signal, s9, s21, rsi = get_signal(closes)
+        signal, e9, e21, rsi = get_signal(closes, volumes)
         results.append({"symbol": sym, "price": price, "change": change,
-            "signal": signal, "sma9": s9, "sma21": s21, "rsi": rsi, "vol_ratio": vol_ratio})
+            "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi, "vol_ratio": vol_ratio})
 
     results.sort(key=lambda x: {"BUY": 0, "HOLD": 1, "SELL": 2}[x["signal"]])
     st.candidates = results
@@ -254,18 +985,44 @@ def run_cycle(watchlist, st, crypto=False):
         if s["symbol"] in st.positions: continue
         if st.daily_pnl >= DAILY_PROFIT_TARGET: break
         if st.daily_spend >= MAX_DAILY_SPEND: break
+        # News sentiment skip check (stocks only)
+        if not crypto and s["symbol"] in news_state["skip_list"]:
+            skip_info = news_state["skip_list"][s["symbol"]]
+            log.info(f"[{st.label}] SKIP {s['symbol']} — negative news: {skip_info['reason']}")
+            continue
+        # Circuit breaker — pause all new buys if triggered
+        if not crypto and circuit_breaker["active"]:
+            log.info(f"[{st.label}] CIRCUIT BREAKER active ({circuit_breaker['reason']}) — no new buys")
+            break
+        # Portfolio exposure cap
+        cap = CRYPTO_MAX_EXPOSURE if crypto else MAX_PORTFOLIO_EXPOSURE
+        if total_exposure(st) >= cap:
+            log.info(f"[{st.label}] Max exposure hit (${total_exposure(st):.0f}/${cap:.0f}) — no new buys")
+            break
         qty = max(0.0001, round(MAX_TRADE_VALUE / s["price"], 6)) if crypto else max(1, int(MAX_TRADE_VALUE / s["price"]))
         trade_val = qty * s["price"]
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
         stop_price = s["price"] * (1 - STOP_LOSS_PCT / 100)
-        log.info(f"[{st.label}] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} stop:${stop_price:.4f} RSI:{s['rsi']:.1f}")
+        take_profit_price = s["price"] * (1 + TAKE_PROFIT_PCT / 100)
+        log.info(f"[{st.label}] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} stop:${stop_price:.4f} target:${take_profit_price:.4f} RSI:{s['rsi']:.1f}")
         order = place_order(s["symbol"], "buy", qty, crypto=crypto)
         if order:
-            st.positions[s["symbol"]] = {"qty": qty, "entry_price": s["price"], "stop_price": stop_price}
+            st.positions[s["symbol"]] = {
+                "qty": qty,
+                "entry_price": s["price"],
+                "stop_price": stop_price,
+                "highest_price": s["price"],
+                "take_profit_price": take_profit_price,
+                "entry_date": datetime.now().date().isoformat(),
+                "days_held": 0,
+            }
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
                 "price": s["price"], "pnl": None, "reason": "Signal",
-                "time": datetime.now().strftime("%H:%M:%S")})
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "entry_ts": datetime.now().isoformat()})
+            # Also store entry_ts in position for hold period calc
+            st.positions[s["symbol"]]["entry_ts"] = datetime.now().isoformat()
             pos_count += 1
 
     # Close SELL positions
@@ -279,9 +1036,14 @@ def run_cycle(watchlist, st, crypto=False):
         if order:
             del st.positions[s["symbol"]]
             st.daily_pnl += pnl
+            entry_ts = pos.get("entry_ts")
+            hold_hours = None
+            if entry_ts:
+                hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1)
             st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
                 "price": s["price"], "pnl": pnl, "reason": "Signal",
-                "time": datetime.now().strftime("%H:%M:%S")})
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "hold_hours": hold_hours})
             st.trades = st.trades[:200]
             if st.daily_pnl >= DAILY_PROFIT_TARGET:
                 log.info(f"[{st.label}] Profit target hit! ${st.daily_pnl:.2f}")
@@ -311,11 +1073,19 @@ def send_daily_summary():
                 f"Positions:   {len(st.positions)}\n\n"
                 f"Trade log:\n{lines}\n")
 
+    # News summary for email
+    news_summary = ""
+    if news_state["scan_complete"]:
+        skips = "\n".join(f"  🔴 {s}: {d['reason']}" for s,d in news_state["skip_list"].items()) or "  None"
+        boosts = "\n".join(f"  🟢 {s}: {d['reason']}" for s,d in news_state["watch_list"].items()) or "  None"
+        news_summary = f"\nMORNING NEWS SCAN\n{'─'*40}\nSkipped:{'\n'}{skips}\nPositive:{'\n'}{boosts}\n"
+
     body = (f"AlphaBot Daily Summary\n{'='*40}\n"
             f"Date: {datetime.now().strftime('%A, %d %B %Y')}\n"
             f"Mode: {'LIVE' if IS_LIVE else 'Paper'} Trading\n"
             f"Portfolio: ${float(account_info.get('portfolio_value',0)):,.2f}\n\n"
-            f"{section(state)}\n{section(crypto_state)}\n"
+            f"{section(state)}\n{section(smallcap_state)}\n{section(crypto_state)}\n"
+            f"{news_summary}"
             f"{'='*40}\nSent by AlphaBot on Railway")
     try:
         msg = MIMEMultipart()
@@ -401,6 +1171,45 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <div class="container">
 
+  <!-- Market Regime Banners -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+    <!-- Stocks Regime -->
+    <div style="padding:14px 18px;border-radius:12px;background:{regime_bg};border:1px solid {regime_border}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div style="font-size:10px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:2px">US Stocks Regime</div>
+          <div style="font-size:20px;font-weight:700;color:{regime_color}">{regime_icon} {regime} MODE</div>
+        </div>
+        <div style="font-size:11px;color:#555;text-align:right">{regime_desc}</div>
+      </div>
+      <div style="display:flex;gap:16px;font-size:12px">
+        <div><span style="color:#555">SPY </span><span style="font-family:monospace;font-weight:700">{spy_str}</span></div>
+        <div><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{spy_ma_str}</span></div>
+        <div><span style="color:#555">VIX </span><span style="font-family:monospace;color:{vix_color}">{vix_str}</span></div>
+        <div><span style="color:#555">Exposure </span><span style="font-family:monospace">${exposure:.0f}/${max_exposure:.0f}</span></div>
+      </div>
+    </div>
+    <!-- Crypto Regime -->
+    <div style="padding:14px 18px;border-radius:12px;background:{c_regime_bg};border:1px solid {c_regime_border}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div style="font-size:10px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:2px">Crypto Regime</div>
+          <div style="font-size:20px;font-weight:700;color:{c_regime_color}">{c_regime_icon} {c_regime} MODE</div>
+        </div>
+        <div style="font-size:11px;color:#555;text-align:right">{c_regime_desc}</div>
+      </div>
+      <div style="display:flex;gap:16px;font-size:12px">
+        <div><span style="color:#555">BTC </span><span style="font-family:monospace;font-weight:700">{btc_str}</span></div>
+        <div><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{btc_ma_str}</span></div>
+        <div><span style="color:#555">Daily </span><span style="font-family:monospace;color:{btc_chg_color}">{btc_chg_str}</span></div>
+        <div><span style="color:#555">Exposure </span><span style="font-family:monospace">${crypto_exposure:.0f}/${crypto_max_exposure:.0f}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Circuit Breaker Banner (only shown when active) -->
+  {circuit_banner}
+
   <!-- Top stats -->
   <div class="grid4">
     <div class="card">
@@ -459,6 +1268,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <!-- Screener -->
   {screener_html}
 
+  <!-- Morning News Briefing -->
+  <div class="card" style="margin-bottom:20px;border-color:rgba(170,136,255,0.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="section-title" style="color:#aa88ff;margin-bottom:0">📰 Morning News Scan</div>
+      <div style="font-size:11px;color:#555">{news_scan_time}</div>
+    </div>
+    {news_html}
+  </div>
+
   <!-- Last Scan Section -->
   <div style="margin-bottom:20px">
     <div class="tab-bar" style="margin-bottom:0;border-bottom:none">
@@ -488,10 +1306,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <div style="margin-top:24px;padding:14px;background:rgba(255,204,0,0.04);border:1px solid rgba(255,204,0,0.12);border-radius:8px;font-size:11px;color:#666;line-height:1.8">
     ⚠ <strong style="color:#ffcc00">Safety:</strong>
-    Stop-loss: {stop_loss}% per trade &nbsp;|&nbsp;
+    Initial stop: {stop_loss}% &nbsp;|&nbsp;
+    Trailing stop: {trailing_stop}% &nbsp;|&nbsp;
+    Take-profit: {take_profit}% &nbsp;|&nbsp;
+    Max hold: {max_hold_days} days &nbsp;|&nbsp;
+    Gap-down sell: {gap_down}% &nbsp;|&nbsp;
     Daily loss limit: ${max_loss} &nbsp;|&nbsp;
     Max per trade: ${max_trade} &nbsp;|&nbsp;
-    Daily spend cap: ${max_spend} &nbsp;|&nbsp;
     Profit target: ${profit_target}
   </div>
 </div>
@@ -505,6 +1326,39 @@ def build_dashboard():
     market = is_market_open()
 
     portfolio = f"${float(acc.get('portfolio_value', 0)):,.2f}" if acc else "—"
+    # Small cap state
+    sc_dot     = ("dot-green" if smallcap_state.running else "dot-gold") if not smallcap_state.shutoff else "dot-red"
+    sc_status  = "Shut Off" if smallcap_state.shutoff else ("Running" if smallcap_state.running else "Idle")
+
+    # Circuit breaker banner
+    if circuit_breaker["active"]:
+        circuit_banner = (
+            f'<div style="margin-bottom:16px;padding:16px 20px;border-radius:12px;'
+            f'background:rgba(255,68,102,0.15);border:2px solid #ff4466;'
+            f'display:flex;align-items:center;gap:16px">'
+            f'<div style="font-size:28px">🚨</div>'
+            f'<div>'
+            f'<div style="font-size:16px;font-weight:700;color:#ff4466">CIRCUIT BREAKER ACTIVE — ALL NEW BUYS PAUSED</div>'
+            f'<div style="font-size:12px;color:#888;margin-top:4px">Reason: {circuit_breaker["reason"]} · Triggered: {circuit_breaker["triggered_at"]}</div>'
+            f'<div style="font-size:11px;color:#555;margin-top:2px">Existing positions still managed normally. Resets at next market open.</div>'
+            f'</div></div>'
+        )
+    else:
+        circuit_banner = ""
+
+    regime       = market_regime["mode"]
+    regime_color = "red" if regime == "BEAR" else "green"
+    vix_str      = f"{market_regime['vix']:.1f}" if market_regime["vix"] else "N/A"
+    spy_str      = f"${market_regime['spy_price']:.2f}" if market_regime["spy_price"] else "N/A"
+    spy_ma_str   = f"${market_regime['spy_ma20']:.2f}" if market_regime["spy_ma20"] else "N/A"
+    exposure     = total_exposure(state)
+    c_regime       = crypto_regime["mode"]
+    c_regime_color = "red" if c_regime == "BEAR" else "green"
+    btc_str        = f"${crypto_regime['btc_price']:.0f}" if crypto_regime["btc_price"] else "N/A"
+    btc_ma_str     = f"${crypto_regime['btc_ma20']:.0f}" if crypto_regime["btc_ma20"] else "N/A"
+    btc_chg_str    = f"{crypto_regime['btc_change']:+.1f}%" if crypto_regime["btc_change"] is not None else "N/A"
+    btc_chg_color  = "red" if crypto_regime["btc_change"] and crypto_regime["btc_change"] < -BTC_CRASH_PCT else "e0e0e0"
+    crypto_exposure = total_exposure(crypto_state)
 
     def pnl_str(v): return f"+${v:.2f}" if v >= 0 else f"-${abs(v):.2f}"
     def pnl_color(v): return "green" if v >= 0 else "red"
@@ -546,38 +1400,70 @@ def build_dashboard():
         positions_html = ""
 
     # Recent trades
-    all_trades = (
-        [dict(t, market="Stock") for t in state.trades[:5]] +
-        [dict(t, market="Crypto") for t in crypto_state.trades[:5]]
+    # Completed trades only (SELL side with P&L) — last 10
+    completed = (
+        [dict(t, market="Stock")    for t in state.trades          if t["side"] == "SELL" and t.get("pnl") is not None] +
+        [dict(t, market="SmallCap") for t in smallcap_state.trades if t["side"] == "SELL" and t.get("pnl") is not None] +
+        [dict(t, market="Crypto")   for t in crypto_state.trades   if t["side"] == "SELL" and t.get("pnl") is not None]
     )
-    all_trades.sort(key=lambda t: t["time"], reverse=True)
-    if all_trades:
+    completed.sort(key=lambda t: t["time"], reverse=True)
+
+    # Open (BUY) trades for reference
+    open_trades = (
+        [dict(t, market="Stock")  for t in state.trades       if t["side"] == "BUY"] +
+        [dict(t, market="Crypto") for t in crypto_state.trades if t["side"] == "BUY"]
+    )
+
+    if completed:
+        wins   = sum(1 for t in completed if t["pnl"] > 0)
+        losses = sum(1 for t in completed if t["pnl"] <= 0)
+        total_pnl = sum(t["pnl"] for t in completed)
+        win_rate  = int(wins / len(completed) * 100) if completed else 0
+        avg_hold  = None
+        hold_vals = [t["hold_hours"] for t in completed if t.get("hold_hours") is not None]
+        if hold_vals:
+            avg_hold = sum(hold_vals) / len(hold_vals)
+
+        def hold_str(h):
+            if h is None: return "—"
+            if h < 1: return f"{int(h*60)}m"
+            if h < 24: return f"{h:.1f}h"
+            return f"{h/24:.1f}d"
+
         rows = ""
-        for t in all_trades[:12]:
-            if t.get("pnl") is not None:
-                pnl_color = "green" if t["pnl"] >= 0 else "red"
-                pnl_sign  = "+" if t["pnl"] >= 0 else ""
-                pnl_td = f'<td class="{pnl_color}">{pnl_sign}${t["pnl"]:.2f}</td>'
-            else:
-                pnl_td = '<td>—</td>'
-            side_c = "green" if t["side"] == "BUY" else "red"
-            market_c = "blue" if t["market"] == "Stock" else "green"
+        for t in completed[:10]:
+            pnl_color = "green" if t["pnl"] >= 0 else "red"
+            pnl_sign  = "+" if t["pnl"] >= 0 else ""
+            pnl_pct   = (t["pnl"] / (t["price"] * t["qty"])) * 100 if t["price"] and t["qty"] else 0
+            result_icon = "✅" if t["pnl"] > 0 else "❌"
+            market_c  = "blue" if t["market"] == "Stock" else "green"
             rows += f"""<tr>
-              <td style="color:#555">{t['time']}</td>
-              <td class="{market_c}">{t['symbol']}</td>
-              <td>{t['market']}</td>
-              <td class="{side_c}" style="font-weight:700">{t['side']}</td>
-              <td>{t['qty']}</td>
-              <td>${t['price']:.4f}</td>
-              {pnl_td}
-              <td style="color:#555;font-size:11px">{t['reason']}</td>
+              <td>{result_icon}</td>
+              <td class="{market_c}" style="font-weight:700">{t["symbol"]}</td>
+              <td style="color:#555;font-size:11px">{t["market"]}</td>
+              <td style="color:#555">{t["time"]}</td>
+              <td class="{pnl_color}" style="font-weight:700">{pnl_sign}${t["pnl"]:.2f}</td>
+              <td class="{pnl_color}">{pnl_sign}{pnl_pct:.1f}%</td>
+              <td style="color:#888">{hold_str(t.get("hold_hours"))}</td>
+              <td style="color:#555;font-size:11px">{t.get("reason","—")}</td>
             </tr>"""
-        trades_html = f"""<div class="card" style="margin-bottom:20px">
-          <div class="section-title">Recent Trades</div>
-          <table><thead><tr><th>Time</th><th>Symbol</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th>P&amp;L</th><th>Reason</th></tr></thead>
-          <tbody>{rows}</tbody></table></div>"""
+
+        avg_hold_str = hold_str(avg_hold) if avg_hold else "—"
+        summary = (f'<div style="display:flex;gap:24px;margin-bottom:14px;font-size:13px">'
+            f'<span class="green" style="font-weight:700">✅ {wins} wins</span>'
+            f'<span class="red" style="font-weight:700">❌ {losses} losses</span>'
+            f'<span style="color:#ffcc00">Win rate: {win_rate}%</span>'
+            f'<span style="color:#e0e0e0">Total P&amp;L: <b class="{"green" if total_pnl>=0 else "red"}">{("+" if total_pnl>=0 else "")}${total_pnl:.2f}</b></span>'
+            f'<span style="color:#555">Avg hold: {avg_hold_str}</span>'
+            f'</div>')
+
+        trades_html = (f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">Last {min(10,len(completed))} Completed Trades</div>'
+            f'{summary}'
+            f'<table><thead><tr><th></th><th>Symbol</th><th>Type</th><th>Closed</th><th>P&amp;L $</th><th>P&amp;L %</th><th>Hold Time</th><th>Exit Reason</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
     else:
-        trades_html = ""
+        trades_html = '<div class="card" style="margin-bottom:20px"><div class="empty">No completed trades yet — bot will show results here after first sell</div></div>'
 
     # Screener — BUY signals summary
     all_cands = (
@@ -649,8 +1535,33 @@ def build_dashboard():
     stocks_scan_html = build_scan_table(state.candidates, "blue", "US Stocks")
     crypto_scan_html = build_scan_table(crypto_state.candidates, "green", "Crypto")
 
+    # News section
+    if not news_state["scan_complete"]:
+        if NEWS_API_KEY:
+            news_html = '<div class="empty" style="padding:20px">Waiting for 9:00 AM ET morning scan...</div>'
+        else:
+            news_html = '<div style="padding:12px;background:rgba(255,204,0,0.05);border:1px solid rgba(255,204,0,0.2);border-radius:8px;font-size:12px;color:#888">⚠ Add <b style="color:#ffcc00">NEWS_API_KEY</b> and <b style="color:#ffcc00">CLAUDE_API_KEY</b> in Railway Variables to enable news scanning. Get free keys at <b>newsapi.org</b> and <b>console.anthropic.com</b></div>'
+    else:
+        skip_rows = "".join(
+            f'<tr><td style="font-weight:700;color:#ff4466">{sym}</td><td><span class="sig-sell">SKIP</span></td><td style="color:#888;font-size:12px">{d["reason"]}</td></tr>'
+            for sym, d in news_state["skip_list"].items()
+        )
+        boost_rows = "".join(
+            f'<tr><td style="font-weight:700;color:#00ff88">{sym}</td><td><span class="sig-buy">POSITIVE</span></td><td style="color:#888;font-size:12px">{d["reason"]}</td></tr>'
+            for sym, d in news_state["watch_list"].items()
+        )
+        all_rows = skip_rows + boost_rows
+        if all_rows:
+            news_html = f'''<table><thead><tr><th>Symbol</th><th>Sentiment</th><th>Reason</th></tr></thead><tbody>{all_rows}</tbody></table>
+              <div style="margin-top:10px;font-size:11px;color:#555">{len(news_state["skip_list"])} skipped today · {len(news_state["watch_list"])} positive · resets at midnight</div>'''
+        else:
+            news_html = '<div style="color:#555;font-size:13px;padding:8px 0">All clear — no negative news found today. Trading normally on all stocks.</div>'
+
+    news_scan_time = f"Last scan: {news_state['last_scan_time']} ET" if news_state["last_scan_time"] else "Scans at 9:00 AM ET daily"
+
     return DASHBOARD_HTML.format(
         now            = datetime.now().strftime("%H:%M:%S"),
+        circuit_banner = circuit_banner,
         mode_badge     = "badge-live" if IS_LIVE else "badge-paper",
         mode_label     = "LIVE" if IS_LIVE else "PAPER",
         portfolio      = portfolio,
@@ -678,11 +1589,49 @@ def build_dashboard():
         screener_html  = screener_html,
         stocks_scan_html = stocks_scan_html,
         crypto_scan_html = crypto_scan_html,
+        sc_dot       = sc_dot,
+        sc_status    = sc_status,
+        sc_cycle     = smallcap_state.cycle_count,
+        sc_positions = len(smallcap_state.positions),
+        sc_trades    = len(smallcap_state.trades),
+        sc_last      = smallcap_state.last_cycle or "—",
+        sc_pool_size = len(smallcap_pool["symbols"]),
+        sc_refresh   = smallcap_pool.get("last_refresh", "Not yet"),
         stop_loss      = STOP_LOSS_PCT,
+        trailing_stop  = TRAILING_STOP_PCT,
+        take_profit    = TAKE_PROFIT_PCT,
+        max_hold_days  = MAX_HOLD_DAYS,
+        gap_down       = GAP_DOWN_PCT,
         max_loss       = MAX_DAILY_LOSS,
         max_trade      = MAX_TRADE_VALUE,
         max_spend      = MAX_DAILY_SPEND,
         profit_target  = DAILY_PROFIT_TARGET,
+        max_exposure   = MAX_PORTFOLIO_EXPOSURE,
+        regime         = regime,
+        regime_color   = regime_color,
+        regime_bg      = "rgba(255,68,102,0.08)" if regime == "BEAR" else "rgba(0,255,136,0.05)",
+        regime_border  = "rgba(255,68,102,0.25)" if regime == "BEAR" else "rgba(0,255,136,0.15)",
+        regime_icon    = "🐻" if regime == "BEAR" else "🐂",
+        regime_desc    = ("Buying SQQQ/UVXY/GLD · Pausing bull trades" if regime == "BEAR" else "Normal trading · Momentum stocks"),
+        spy_str        = spy_str,
+        spy_ma_str     = spy_ma_str,
+        vix_str        = vix_str,
+        vix_color      = "red" if market_regime["vix"] and market_regime["vix"] > VIX_FEAR_THRESHOLD else "e0e0e0",
+        exposure       = exposure,
+        c_regime       = c_regime,
+        c_regime_color = c_regime_color,
+        c_regime_bg    = "rgba(255,68,102,0.08)" if c_regime == "BEAR" else "rgba(0,255,136,0.05)",
+        c_regime_border= "rgba(255,68,102,0.25)" if c_regime == "BEAR" else "rgba(0,255,136,0.15)",
+        c_regime_icon  = "🐻" if c_regime == "BEAR" else "🐂",
+        c_regime_desc  = ("Pausing buys · Protecting capital" if c_regime == "BEAR" else "Normal crypto trading"),
+        btc_str        = btc_str,
+        btc_ma_str     = btc_ma_str,
+        btc_chg_str    = btc_chg_str,
+        btc_chg_color  = btc_chg_color,
+        crypto_exposure     = crypto_exposure,
+        crypto_max_exposure = CRYPTO_MAX_EXPOSURE,
+        news_html      = news_html,
+        news_scan_time = news_scan_time,
     )
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -718,6 +1667,123 @@ def start_dashboard():
     server.serve_forever()
 
 # ── Main ──────────────────────────────────────────────────────
+def run_cycle_smallcap(watchlist, st):
+    """Small cap specific trading cycle with tighter risk controls."""
+    st.check_reset()
+    if st.shutoff: return
+    if not is_market_open():
+        return
+    if market_regime["mode"] == "BEAR":
+        log.info("[SMALLCAP] BEAR MODE — pausing all small cap buys")
+        return
+
+    st.running    = True
+    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.cycle_count += 1
+    log.info(f"[SMALLCAP] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Pool: {len(watchlist)} stocks")
+
+    # Check stop losses with tighter stop
+    for sym, pos in list(st.positions.items()):
+        live = fetch_latest_price(sym)
+        if not live: continue
+        now = datetime.now()
+        # Update trailing stop
+        if live > pos.get("highest_price", pos["entry_price"]):
+            pos["highest_price"] = live
+            new_stop = live * (1 - SMALLCAP_STOP_LOSS / 100)
+            if new_stop > pos["stop_price"]:
+                pos["stop_price"] = new_stop
+        # Check exit conditions
+        pct = ((live - pos["entry_price"]) / pos["entry_price"]) * 100
+        reason = None
+        if live <= pos["stop_price"]:   reason = f"Stop-Loss ({pct:.1f}%)"
+        elif live >= pos.get("take_profit_price", pos["entry_price"] * 1.05): reason = f"Take-Profit (+{pct:.1f}%)"
+        elif pos.get("days_held", 0) >= MAX_HOLD_DAYS: reason = f"Max Hold"
+        if reason:
+            pnl = (live - pos["entry_price"]) * pos["qty"]
+            entry_ts = pos.get("entry_ts")
+            hold_hours = round((now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
+            log.info(f"[SMALLCAP] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
+            place_order(sym, "sell", pos["qty"])
+            del st.positions[sym]
+            st.daily_pnl += pnl
+            st.trades.insert(0, {"symbol": sym, "side": "SELL", "qty": pos["qty"],
+                "price": live, "pnl": pnl, "reason": reason,
+                "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
+            if st.daily_pnl <= -MAX_DAILY_LOSS: st.shutoff = True; break
+    if st.shutoff: st.running = False; return
+
+    # Scan small caps
+    results = []
+    for sym in watchlist:
+        if sym in news_state["skip_list"]: continue  # respect news skip list
+        bars = fetch_bars(sym)
+        if not bars: continue
+        closes  = [b["c"] for b in bars]
+        volumes = [b["v"] for b in bars]
+        price   = closes[-1]
+        if not (SMALLCAP_MIN_PRICE <= price <= SMALLCAP_MAX_PRICE): continue
+        prev    = closes[-2] if len(closes) > 1 else price
+        change  = ((price - prev) / prev) * 100
+        avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
+        vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+        signal, e9, e21, rsi = get_signal_smallcap(closes, volumes)
+        results.append({"symbol": sym, "price": price, "change": change,
+            "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
+            "vol_ratio": vol_ratio, "smallcap": True})
+
+    results.sort(key=lambda x: {"BUY": 0, "HOLD": 1, "SELL": 2}[x["signal"]])
+    st.candidates = results
+    buys = sum(1 for r in results if r["signal"] == "BUY")
+    log.info(f"[SMALLCAP] {buys} BUY signals from {len(results)} scanned")
+
+    # Open BUY positions
+    pos_count = len(st.positions)
+    for s in results:
+        if s["signal"] != "BUY": continue
+        if pos_count >= MAX_POSITIONS: break
+        if s["symbol"] in st.positions: continue
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: break
+        if total_exposure(st) >= MAX_PORTFOLIO_EXPOSURE: break
+        qty = max(1, int(SMALLCAP_MAX_TRADE / s["price"]))
+        trade_val = qty * s["price"]
+        if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
+        stop_price = s["price"] * (1 - SMALLCAP_STOP_LOSS / 100)
+        take_profit_price = s["price"] * (1 + TAKE_PROFIT_PCT / 100)
+        log.info(f"[SMALLCAP] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} = ${trade_val:.0f} stop:${stop_price:.4f} RSI:{s['rsi']:.1f}")
+        order = place_order(s["symbol"], "buy", qty)
+        if order:
+            now_str = datetime.now().isoformat()
+            st.positions[s["symbol"]] = {"qty": qty, "entry_price": s["price"],
+                "stop_price": stop_price, "highest_price": s["price"],
+                "take_profit_price": take_profit_price,
+                "entry_date": datetime.now().date().isoformat(),
+                "entry_ts": now_str, "days_held": 0}
+            st.daily_spend += trade_val
+            st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
+                "price": s["price"], "pnl": None, "reason": "Signal",
+                "time": datetime.now().strftime("%H:%M:%S"), "entry_ts": now_str})
+            pos_count += 1
+
+    # Close SELL positions
+    for s in results:
+        if s["signal"] != "SELL" or s["symbol"] not in st.positions: continue
+        pos = st.positions[s["symbol"]]
+        pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
+        entry_ts = pos.get("entry_ts")
+        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
+        log.info(f"[SMALLCAP] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
+        place_order(s["symbol"], "sell", pos["qty"])
+        del st.positions[s["symbol"]]
+        st.daily_pnl += pnl
+        st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
+            "price": s["price"], "pnl": pnl, "reason": "Signal",
+            "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
+        if st.daily_pnl <= -MAX_DAILY_LOSS: st.shutoff = True; break
+
+    st.running = False
+
 def main():
     global account_info
 
@@ -752,12 +1818,35 @@ def main():
             # Refresh account info each cycle
             account_info = alpaca_get("/v2/account") or account_info
 
-            # Run both bots
+            # Update market regimes
+            if not IS_LIVE or is_market_open():
+                update_market_regime()
+                check_circuit_breaker()  # intraday crash detection
+            update_crypto_regime()  # always runs — crypto is 24/7
+
+            # Refresh small cap pool if needed (runs in background thread)
+            if should_refresh_smallcap() and is_market_open():
+                log.info("[SMALLCAP] Starting pool refresh in background...")
+                threading.Thread(target=refresh_smallcap_pool, daemon=True).start()
+
+            # Run all three bots
             run_cycle(US_WATCHLIST, state, crypto=False)
             run_cycle(CRYPTO_WATCHLIST, crypto_state, crypto=True)
+            if smallcap_pool["symbols"]:
+                run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
+
+            # Morning news scan at 9:00am ET (30 mins before open)
+            et = datetime.now(ZoneInfo("America/New_York"))
+            if (et.weekday() < 5
+                    and et.hour == 9 and et.minute < 2
+                    and news_state["last_scan_day"] != et.date()):
+                log.info("Running morning news scan...")
+                def morning_tasks():
+                    check_macro_news()       # macro circuit breaker first
+                    run_morning_news_scan()  # then individual stock sentiment
+                threading.Thread(target=morning_tasks, daemon=True).start()
 
             # Daily email at 5pm ET
-            et = datetime.now(ZoneInfo("America/New_York"))
             if et.weekday() < 5 and et.hour == 17 and et.minute < 2 and last_email_day != et.date():
                 send_daily_summary()
                 last_email_day = et.date()
