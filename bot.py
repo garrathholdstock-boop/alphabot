@@ -2171,7 +2171,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .tab-crypto.active {{ color: #00ff88; border-bottom-color: #00ff88; }}
   .tab:hover {{ color: #e0e0e0; }}
   .empty {{ text-align: center; padding: 50px; color: #333; font-size: 15px; }}
-  @media(max-width:600px) {{ .grid4 {{ grid-template-columns: 1fr 1fr; }} .grid2 {{ grid-template-columns: 1fr; }} }}
+  @media(max-width:768px) {{
+    /* Tables — scroll horizontally instead of overflowing */
+    .table-wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+    table {{ min-width: 500px; font-size: 11px; }}
+    th, td {{ padding: 6px 8px; white-space: nowrap; }}
+
+    /* Header — stack vertically */
+    .header {{ padding: 10px 14px; flex-direction: column; align-items: flex-start; gap: 8px; }}
+    .header-right {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }}
+    .refresh {{ display: none; }}
+
+    /* Grids — stack to single column */
+    .grid4 {{ grid-template-columns: 1fr 1fr; gap: 10px; }}
+    .grid2 {{ grid-template-columns: 1fr; gap: 10px; }}
+    .regime-grid {{ grid-template-columns: 1fr !important; }}
+    .regime-stats {{ flex-wrap: wrap; gap: 6px !important; }}
+    .regime-desc {{ display: none; }}
+
+    /* Cards */
+    .container {{ padding: 10px; }}
+    .card {{ padding: 12px 14px; }}
+    .big {{ font-size: 18px; }}
+    .section-title {{ font-size: 13px; margin-bottom: 10px; }}
+    .lbl {{ font-size: 9px; }}
+
+    /* Tabs — make them scrollable */
+    .tab-bar {{ overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }}
+    .tab {{ padding: 10px 12px; font-size: 10px; }}
+
+    /* Bot status grid — 2 cols on mobile */
+    .bot-status-grid {{ grid-template-columns: 1fr 1fr !important; gap: 6px !important; font-size: 11px !important; }}
+  }}
+
+  @media(max-width:480px) {{
+    .grid4 {{ grid-template-columns: 1fr 1fr; gap: 8px; }}
+    .big {{ font-size: 16px; }}
+    .card {{ padding: 10px 12px; }}
+    .container {{ padding: 8px; }}
+    /* Stack header pnl values */
+    .header-pnl {{ flex-direction: column; gap: 4px; }}
+  }}
+
+  @media(max-width:380px) {{
+    .grid4 {{ grid-template-columns: 1fr 1fr; }}
+    .big {{ font-size: 15px; }}
+    table {{ font-size: 10px; }}
+    th, td {{ padding: 5px 6px; }}
+  }}
 </style>
 </head>
 <body>
@@ -2186,43 +2233,51 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div class="logo-sub">Automated Day Trader · Railway</div>
     </div>
   </div>
-  <div class="refresh">Auto-refreshes every 60s · Last update: {now}</div>
+  <div class="header-right">
+    <div class="header-pnl" style="display:flex;gap:16px;align-items:center">
+      <div style="text-align:right">
+        <div style="font-size:10px;color:#00aaff">US P&amp;L</div>
+        <div style="font-family:monospace;font-size:13px;font-weight:700;color:{stocks_pnl_color}">{stocks_pnl}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;color:#00ff88">Crypto P&amp;L</div>
+        <div style="font-family:monospace;font-size:13px;font-weight:700;color:{crypto_pnl_color}">{crypto_pnl}</div>
+      </div>
+    </div>
+    <div class="refresh">Auto-refreshes every 60s · {now}</div>
+  </div>
 </div>
 
 <div class="container">
 
   <!-- Market Regime Banners -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+  <div class="regime-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
     <!-- Stocks Regime -->
-    <div style="padding:14px 18px;border-radius:12px;background:{regime_bg};border:1px solid {regime_border}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div>
-          <div style="font-size:10px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:2px">US Stocks Regime</div>
-          <div style="font-size:20px;font-weight:700;color:{regime_color}">{regime_icon} {regime} MODE</div>
-        </div>
-        <div style="font-size:11px;color:#555;text-align:right">{regime_desc}</div>
+    <div style="padding:12px 14px;border-radius:12px;background:{regime_bg};border:1px solid {regime_border}">
+      <div style="margin-bottom:8px">
+        <div style="font-size:9px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:2px">US Stocks</div>
+        <div class="regime-title" style="font-size:16px;font-weight:700;color:{regime_color};line-height:1.2">{regime_icon} {regime}</div>
+        <div class="regime-desc" style="font-size:10px;color:#555;margin-top:3px">{regime_desc}</div>
       </div>
-      <div style="display:flex;gap:16px;font-size:12px">
+      <div class="regime-stats" style="display:flex;gap:10px;font-size:11px;flex-wrap:wrap">
         <div><span style="color:#555">SPY </span><span style="font-family:monospace;font-weight:700">{spy_str}</span></div>
         <div><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{spy_ma_str}</span></div>
         <div><span style="color:#555">VIX </span><span style="font-family:monospace;color:{vix_regime_color}">{vix_str}</span></div>
-        <div><span style="color:#555">Exposure </span><span style="font-family:monospace">${exposure:.0f}/${max_exposure:.0f}</span></div>
+        <div><span style="color:#555">Exp </span><span style="font-family:monospace">${exposure:.0f}</span></div>
       </div>
     </div>
     <!-- Crypto Regime -->
-    <div style="padding:14px 18px;border-radius:12px;background:{c_regime_bg};border:1px solid {c_regime_border}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div>
-          <div style="font-size:10px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:2px">Crypto Regime</div>
-          <div style="font-size:20px;font-weight:700;color:{c_regime_color}">{c_regime_icon} {c_regime} MODE</div>
-        </div>
-        <div style="font-size:11px;color:#555;text-align:right">{c_regime_desc}</div>
+    <div style="padding:12px 14px;border-radius:12px;background:{c_regime_bg};border:1px solid {c_regime_border}">
+      <div style="margin-bottom:8px">
+        <div style="font-size:9px;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:2px">Crypto</div>
+        <div class="regime-title" style="font-size:16px;font-weight:700;color:{c_regime_color};line-height:1.2">{c_regime_icon} {c_regime}</div>
+        <div class="regime-desc" style="font-size:10px;color:#555;margin-top:3px">{c_regime_desc}</div>
       </div>
-      <div style="display:flex;gap:16px;font-size:12px">
+      <div class="regime-stats" style="display:flex;gap:10px;font-size:11px;flex-wrap:wrap">
         <div><span style="color:#555">BTC </span><span style="font-family:monospace;font-weight:700">{btc_str}</span></div>
         <div><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{btc_ma_str}</span></div>
-        <div><span style="color:#555">Daily </span><span style="font-family:monospace;color:{btc_chg_color}">{btc_chg_str}</span></div>
-        <div><span style="color:#555">Exposure </span><span style="font-family:monospace">${crypto_exposure:.0f}/${crypto_max_exposure:.0f}</span></div>
+        <div><span style="color:#555">Chg </span><span style="font-family:monospace;color:{btc_chg_color}">{btc_chg_str}</span></div>
+        <div><span style="color:#555">Exp </span><span style="font-family:monospace">${crypto_exposure:.0f}</span></div>
       </div>
     </div>
   </div>
@@ -2245,8 +2300,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div class="big {crypto_pnl_color}">{crypto_pnl}</div>
     </div>
     <div class="card">
-      <div class="lbl">Market Status</div>
-      <div style="margin-top:6px">
+      <div class="lbl">Market</div>
+      <div style="margin-top:6px;display:flex;align-items:center">
         <span class="dot {market_dot}"></span>
         <span style="font-weight:700;font-size:13px">{market_status}</span>
       </div>
@@ -2257,7 +2312,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="grid2">
     <div class="card card-blue">
       <div class="section-title blue">📈 US Stocks Bot</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+      <div class="bot-status-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
         <div><div class="lbl">Status</div><span class="dot {stocks_dot}"></span>{stocks_status}</div>
         <div><div class="lbl">Cycle</div>#{stocks_cycle}</div>
         <div><div class="lbl">Open Positions</div><span style="font-weight:700">{stocks_positions}</span></div>
@@ -2268,7 +2323,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="card card-green">
       <div class="section-title green">🪙 Crypto Bot</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+      <div class="bot-status-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
         <div><div class="lbl">Status</div><span class="dot {crypto_dot}"></span>{crypto_status}</div>
         <div><div class="lbl">Cycle</div>#{crypto_cycle}</div>
         <div><div class="lbl">Open Positions</div><span style="font-weight:700">{crypto_positions}</span></div>
@@ -2529,8 +2584,8 @@ def build_dashboard():
             </tr>"""
         positions_html = f"""<div class="card" style="margin-bottom:20px">
           <div class="section-title">Open Positions ({len(all_pos)})</div>
-          <table><thead><tr><th>Symbol</th><th>Type</th><th>Qty</th><th>Entry</th><th>Stop</th><th>P&amp;L</th></tr></thead>
-          <tbody>{rows}</tbody></table></div>"""
+          <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Type</th><th>Qty</th><th>Entry</th><th>Stop</th><th>P&amp;L</th></tr></thead>
+          <tbody>{rows}</tbody></table></div></div>"""
     else:
         positions_html = ""
 
@@ -2625,8 +2680,8 @@ def build_dashboard():
             </tr>"""
         screener_html = f"""<div class="card" style="margin-bottom:20px">
           <div class="section-title">Current BUY Signals ({len(all_cands)})</div>
-          <table><thead><tr><th>Symbol</th><th>Type</th><th>Price</th><th>Chg%</th><th>Signal</th><th>RSI</th><th>Vol Ratio</th></tr></thead>
-          <tbody>{rows}</tbody></table></div>"""
+          <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Type</th><th>Price</th><th>Chg%</th><th>Signal</th><th>RSI</th><th>Vol Ratio</th></tr></thead>
+          <tbody>{rows}</tbody></table></div></div>"""
     else:
         screener_html = '<div class="card" style="margin-bottom:20px"><div class="empty">No BUY signals yet — bot will scan on next cycle</div></div>'
 
