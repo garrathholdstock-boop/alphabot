@@ -2835,6 +2835,7 @@ LOGIN_HTML = """<!DOCTYPE html>
     <input type="password" name="password" autocomplete="current-password">
     <button type="submit">Sign In →</button>
   </form>
+  <p style="font-size:11px;color:#444;margin-top:16px;text-align:center">After signing in, bookmark the page URL for instant mobile access</p>
   <div class="error" id="err">Invalid credentials</div>
 </div>
 <script>
@@ -2995,15 +2996,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button onclick="sendCmd('/kill')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">🛑 KILL ALL BOTS</button>
   <button onclick="sendCmd('/close-all')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">💰 CLOSE ALL POSITIONS</button>
   <button onclick="sendCmd('/resume')" style="padding:6px 16px;border-radius:6px;border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">▶ RESUME</button>
+  <span id="dash-token" style="display:none">{dash_token}</span>
   <span id="cmd-status" style="font-size:11px;color:#555;margin-left:8px"></span>
 </div>
 <script>
 function sendCmd(path) {{
   var btn = event.target;
   var status = document.getElementById('cmd-status');
+  var token = document.getElementById('dash-token').textContent;
   btn.disabled = true;
   status.textContent = 'Sending...';
-  fetch(path, {{method:'POST'}})
+  fetch(path + '?token=' + token, {{method:'POST'}})
     .then(r => r.json())
     .then(d => {{
       status.textContent = '✅ ' + d.status + ' — refreshing...';
@@ -3575,6 +3578,7 @@ def build_dashboard():
         trades_html    = trades_html,
         screener_html  = screener_html,
         kill_banner      = kill_banner,
+        dash_token       = DASH_TOKEN,
         stocks_scan_html = stocks_scan_html,
         crypto_scan_html = crypto_scan_html,
         sc_dot       = sc_dot,
@@ -3659,12 +3663,16 @@ def build_dashboard():
 
 class DashboardHandler(BaseHTTPRequestHandler):
     def _check_auth(self):
-        """Check session cookie for valid auth token."""
+        """Check URL token or session cookie."""
+        # Check URL query param first — works on all mobile browsers
+        if f"token={DASH_TOKEN}" in self.path:
+            return True
+        # Also check cookie for desktop sessions
         cookies = self.headers.get("Cookie", "")
         return f"auth={DASH_TOKEN}" in cookies
 
     def _require_auth(self):
-        """Serve a proper login page — works on mobile and desktop."""
+        """Serve a proper login page."""
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
@@ -3715,9 +3723,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             import urllib.parse
             params = dict(urllib.parse.parse_qsl(body))
             if params.get("username") == DASH_USER and params.get("password") == DASH_PASS:
+                # Redirect to dashboard with token in URL — works on all mobile browsers
+                # User should bookmark this URL
                 self.send_response(302)
-                self.send_header("Location", "/")
-                self.send_header("Set-Cookie", f"auth={DASH_TOKEN}; Path=/; HttpOnly; SameSite=Strict")
+                self.send_header("Location", f"/?token={DASH_TOKEN}")
+                self.send_header("Set-Cookie", f"auth={DASH_TOKEN}; Path=/; SameSite=Lax")
                 self.end_headers()
             else:
                 self.send_response(302)
