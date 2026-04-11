@@ -2837,6 +2837,16 @@ LOGIN_HTML = """<!DOCTYPE html>
   </form>
   <div class="error" id="err">Invalid credentials</div>
 </div>
+<script>
+// Auto-reload every 60s — JS reload preserves cookies unlike meta refresh on mobile
+var _t = 60;
+var _el = document.getElementById("refresh-timer");
+setInterval(function() {{
+  _t--;
+  if (_el) _el.textContent = "↻ refreshing in " + _t + "s";
+  if (_t <= 0) {{ window.location.reload(); }}
+}}, 1000);
+</script>
 </body>
 </html>"""
 
@@ -2845,7 +2855,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="60">
+<!-- Auto-refresh handled by JS below to preserve mobile session -->
 <title>AlphaBot</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -2976,7 +2986,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div style="font-family:monospace;font-size:13px;font-weight:700;color:#00aaff">{portfolio}</div>
       </div>
     </div>
-    <div class="refresh">↻ {now}</div>
+    <div class="refresh" id="refresh-timer">↻ {now}</div>
   </div>
 </div>
 <!-- Kill switch controls -->
@@ -3204,6 +3214,16 @@ function sendCmd(path) {{
     Profit target: ${profit_target}
   </div>
 </div>
+<script>
+// Auto-reload every 60s — JS reload preserves cookies unlike meta refresh on mobile
+var _t = 60;
+var _el = document.getElementById("refresh-timer");
+setInterval(function() {{
+  _t--;
+  if (_el) _el.textContent = "↻ refreshing in " + _t + "s";
+  if (_t <= 0) {{ window.location.reload(); }}
+}}, 1000);
+</script>
 </body>
 </html>"""
 
