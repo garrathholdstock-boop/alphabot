@@ -539,6 +539,43 @@ def binance_get_top_coins(limit=100):
     return top if top else CRYPTO_WATCHLIST_BINANCE
 
 # ── Market data ───────────────────────────────────────────────
+def fetch_bars_batch(symbols, limit=30):
+    """Fetch daily bars for multiple US stocks in ONE API call.
+    Alpaca supports up to 100 symbols per request — far more efficient than
+    looping 100 individual calls (reduces ~100 API calls to 1-2).
+    Returns dict: { symbol: [bars] }
+    """
+    if not symbols:
+        return {}
+    end   = datetime.utcnow()
+    start = end - timedelta(days=60)
+    s_str = start.strftime("%Y-%m-%d")
+    e_str = end.strftime("%Y-%m-%d")
+    results = {}
+    # Alpaca allows max 100 symbols per batch request
+    chunk_size = 100
+    for i in range(0, len(symbols), chunk_size):
+        chunk = symbols[i:i + chunk_size]
+        syms_param = ",".join(chunk)
+        try:
+            url = (f"{DATA_BASE}/v2/stocks/bars"
+                   f"?symbols={requests.utils.quote(syms_param, safe=',')}"
+                   f"&timeframe=1Day&start={s_str}&end={e_str}"
+                   f"&limit={limit}&feed=sip&adjustment=raw")
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if not r.ok:
+                log.warning(f"[BATCH] Bars fetch failed: {r.status_code}")
+                continue
+            data = r.json().get("bars", {})
+            for sym, bars in data.items():
+                if bars and len(bars) >= 15:
+                    results[sym] = bars
+        except Exception as e:
+            log.warning(f"[BATCH] Error: {e}")
+    log.info(f"[BATCH] Fetched bars for {len(results)}/{len(symbols)} symbols in {len(symbols)//chunk_size + 1} API call(s)")
+    return results
+
+
 def fetch_bars(symbol, crypto=False):
     """Fetch daily OHLCV bars. Routes crypto to Binance if configured."""
     if crypto and USE_BINANCE:
@@ -1183,6 +1220,10 @@ def run_intraday_cycle(watchlist, st):
         if all_positions_count() >= MAX_TOTAL_POSITIONS:
             log.info(f"[INTRADAY] Global position cap ({MAX_TOTAL_POSITIONS}) reached — no new buys")
             break
+        # Global symbol lock — no two bots can hold same ticker
+        if s["symbol"] in all_symbols_held():
+            log.info(f"[INTRADAY] SKIP {s['symbol']} — already held by another bot")
+            continue
         qty = max(1, int(INTRADAY_MAX_TRADE / s["price"]))
         trade_val = qty * s["price"]
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
@@ -1464,6 +1505,17 @@ def all_positions_count():
     return (len(state.positions) + len(crypto_state.positions) +
             len(smallcap_state.positions) + len(intraday_state.positions) +
             len(crypto_intraday_state.positions))
+
+def all_symbols_held():
+    """Set of ALL symbols currently held across every bot — prevents duplicate positions."""
+    held = set()
+    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+        held.update(st.positions.keys())
+    return held
+
+# Thread-safe lock for state modifications
+import threading as _threading
+_state_lock = _threading.Lock()
 
 # ── Volatility-adjusted trade sizing ─────────────────────────
 def vol_adjusted_size(base_size):
@@ -1983,10 +2035,33 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
         return result, fill_price
 
     # ── Stocks via Alpaca ──
-    result = alpaca_post("/v2/orders", {
-        "symbol": symbol, "qty": str(qty), "side": side,
-        "type": "market", "time_in_force": "gtc" if crypto else "day",
-    })
+    # Live trading: use limit orders with 0.5% tolerance for better fills
+    # Paper trading: use market orders (slippage model handles simulation)
+    if IS_LIVE and estimated_price and not crypto:
+        tolerance = 0.005  # 0.5% tolerance
+        if side == "buy":
+            limit_price = round(estimated_price * (1 + tolerance), 2)
+        else:
+            limit_price = round(estimated_price * (1 - tolerance), 2)
+        result = alpaca_post("/v2/orders", {
+            "symbol": symbol, "qty": str(qty), "side": side,
+            "type": "limit", "limit_price": str(limit_price),
+            "time_in_force": "day",
+        })
+        if result:
+            log.info(f"[LIMIT ORDER] {side.upper()} {symbol} limit:${limit_price:.2f} (signal:${estimated_price:.2f} tolerance:0.5%)")
+        else:
+            # Fallback to market if limit order fails
+            log.warning(f"[LIMIT] Failed for {symbol} — falling back to market order")
+            result = alpaca_post("/v2/orders", {
+                "symbol": symbol, "qty": str(qty), "side": side,
+                "type": "market", "time_in_force": "day",
+            })
+    else:
+        result = alpaca_post("/v2/orders", {
+            "symbol": symbol, "qty": str(qty), "side": side,
+            "type": "market", "time_in_force": "gtc" if crypto else "day",
+        })
 
     if IS_LIVE and result and result.get("id"):
         # Option B: wait for fill then fetch actual filled_avg_price from Alpaca
@@ -2151,22 +2226,41 @@ def run_cycle(watchlist, st, crypto=False):
             log.info(f"[{st.label}] BEAR MODE — scanning defensive/inverse tickers")
             watchlist = BEAR_TICKERS
 
-    # Scan
+    # Scan — use batch API call for US stocks (1 call per 100 symbols vs 100 individual calls)
     results = []
-    for sym in watchlist:
-        bars = fetch_bars(sym, crypto=crypto)
-        if not bars: continue
-        closes  = [b["c"] for b in bars]
-        volumes = [b["v"] for b in bars]
-        price   = closes[-1]
-        prev    = closes[-2] if len(closes) > 1 else price
-        change  = ((price - prev) / prev) * 100
-        avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
-        vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
-        signal, e9, e21, rsi = get_signal(closes, volumes)
-        results.append({"symbol": sym, "price": price, "change": change,
-            "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
-            "vol_ratio": vol_ratio, "closes": closes})
+    if not crypto:
+        # Batch fetch all US stock bars in one API call
+        bars_batch = fetch_bars_batch(watchlist)
+        for sym in watchlist:
+            bars = bars_batch.get(sym)
+            if not bars: continue
+            closes  = [b["c"] for b in bars]
+            volumes = [b["v"] for b in bars]
+            price   = closes[-1]
+            prev    = closes[-2] if len(closes) > 1 else price
+            change  = ((price - prev) / prev) * 100
+            avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
+            vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+            signal, e9, e21, rsi = get_signal(closes, volumes)
+            results.append({"symbol": sym, "price": price, "change": change,
+                "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
+                "vol_ratio": vol_ratio, "closes": closes})
+    else:
+        # Crypto — individual calls (Binance handles its own batching)
+        for sym in watchlist:
+            bars = fetch_bars(sym, crypto=True)
+            if not bars: continue
+            closes  = [b["c"] for b in bars]
+            volumes = [b["v"] for b in bars]
+            price   = closes[-1]
+            prev    = closes[-2] if len(closes) > 1 else price
+            change  = ((price - prev) / prev) * 100
+            avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
+            vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+            signal, e9, e21, rsi = get_signal(closes, volumes)
+            results.append({"symbol": sym, "price": price, "change": change,
+                "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
+                "vol_ratio": vol_ratio, "closes": closes})
 
     results.sort(key=lambda x: {"BUY": 0, "HOLD": 1, "SELL": 2}[x["signal"]])
     st.candidates = results
@@ -2192,6 +2286,10 @@ def run_cycle(watchlist, st, crypto=False):
         if all_positions_count() >= MAX_TOTAL_POSITIONS:
             log.info(f"[{st.label}] Global position cap ({MAX_TOTAL_POSITIONS}) reached — no new buys")
             break
+        # Global symbol lock — prevent two bots holding the same ticker
+        if s["symbol"] in all_symbols_held():
+            log.info(f"[{st.label}] SKIP {s['symbol']} — already held by another bot")
+            continue
         # Loss streak pause
         if is_loss_streak_paused(): break
         # News sentiment skip check
@@ -3363,14 +3461,22 @@ def main():
                     "entry_date": datetime.now().date().isoformat(),
                     "days_held": 0, "entry_ts": datetime.now().isoformat(),
                 }
+                # Check if current price already below stop — close immediately
+                current_price = float(pos.get("current_price", 0)) or fetch_latest_price(sym, crypto=is_crypto)
+                if current_price and current_price <= stop:
+                    pnl = (current_price - entry) * qty
+                    log.warning(f"[RECOVERY] {sym} already below stop (current:${current_price:.4f} stop:${stop:.4f}) — closing immediately P&L:${pnl:+.2f}")
+                    place_order(sym, "sell", qty, crypto=is_crypto, estimated_price=current_price)
+                    continue  # don't add to positions
+
                 # Re-place exchange stop for any recovered position
                 if not is_crypto:
                     stop_order = place_stop_order_alpaca(sym, qty, round(stop, 2))
                     if stop_order and stop_order.get("id"):
                         exchange_stops[sym] = stop_order["id"]
-                        log.info(f"[RECOVERY] Restored {sym} qty:{qty} entry:${entry:.2f} — exchange stop re-placed")
+                        log.info(f"[RECOVERY] Restored {sym} qty:{qty} entry:${entry:.2f} current:${current_price:.2f} — exchange stop re-placed")
                 else:
-                    log.info(f"[RECOVERY] Restored crypto {sym} qty:{qty} entry:${entry:.4f}")
+                    log.info(f"[RECOVERY] Restored crypto {sym} qty:{qty} entry:${entry:.4f} current:${current_price:.4f}")
                 recovered += 1
         if recovered:
             log.info(f"=== Recovered {recovered} open position(s) from exchange ===")
