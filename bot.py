@@ -48,6 +48,8 @@ BINANCE_SECRET = os.environ.get("BINANCE_SECRET", "")
 BINANCE_BASE   = "https://api.binance.com"
 BINANCE_TEST   = "https://testnet.binance.vision"   # paper trading endpoint
 USE_BINANCE    = bool(BINANCE_KEY)                  # auto-detected from env vars
+BINANCE_DELAY  = 0.12   # seconds between Binance API calls (max ~8/sec, we use ~8/sec safely)
+_last_binance_call = 0.0  # timestamp of last call for rate limiting
 
 # ── Safety settings ───────────────────────────────────────────
 MAX_DAILY_LOSS      = 50.0    # $ shut off if day loss hits this
@@ -141,32 +143,25 @@ CRYPTO_WATCHLIST_ALPACA = [
     "ALGO/USD","XLM/USD","SUSHI/USD","YFI/USD","ETH/BTC",
 ]
 
-# Top 100 coins on Binance by volume — auto-refreshes weekly
+# Top 50 coins on Binance by volume — auto-refreshes weekly
+# Kept at 50 to stay well within Binance rate limits
 CRYPTO_WATCHLIST_BINANCE = [
-    # Large caps
+    # Large caps — always trade these
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT",
     "AVAXUSDT","DOGEUSDT","DOTUSDT","MATICUSDT","LINKUSDT","LTCUSDT",
-    "BCHUSDT","XLMUSDT","ATOMUSDT","ETCUSDT","FILUSDT","NEARUSDT",
-    "ALGOUSDT","VETUSDT","ICPUSDT","FTMUSDT","SANDUSDT","MANAUSDT",
-    # Mid caps — high volatility
-    "SHIBUSDT","PEPEUSDT","FLOKIUSDT","BONKUSDT","WIFUSDT","MEMEUSDT",
-    "AAVEUSDT","UNIUSDT","CRVUSDT","MKRUSDT","COMPUSDT","SNXUSDT",
-    "SUSHIUSDT","YFIUSDT","GRTUSDT","BATUSDT","ZRXUSDT","STORJUSDT",
-    # AI & tech tokens
-    "FETUSDT","AGIXUSDT","OCEANUSDT","RNDRУСDT","WLDUSDT","TAOУСDT",
-    "AIUSDT","ARKMUSDT","NMRUSDT","CORTEXUSDT",
-    # Layer 2 & infrastructure
-    "ARBUSDT","OPUSDT","STRKUSDT","ZKUSDT","MANTAUSDT","SCROLLUSDT",
-    "METISUSDT","BOBIUSDT","CELOUSDT","GLMRUSDT",
-    # Gaming & NFT
-    "AXSUSDT","SANDUSDT","MANAUSDT","GALAUSDT","IMXUSDT","FLOWUSDT",
-    "ENJUSDT","CHZUSDT","RARIUSDT","HIGHUSDT",
+    "BCHUSDT","XLMUSDT","ATOMUSDT","ETCUSDT","NEARUSDT","ALGOUSDT",
+    # High volatility meme/momentum
+    "SHIBUSDT","PEPEUSDT","FLOKIUSDT","BONKUSDT","WIFUSDT",
     # DeFi
-    "JUPUSDT","RAYUSDT","ORCAUSDT","GMXUSDT","DYDXUSDT","PERPUSDT",
-    "KNCUSDT","BALUSDT","IDEXUSDT","LOOPUSDT",
-    # Other high-volume
-    "APTUSDT","SUIUSDT","SEIUSDT","TIAUSDT","INJUSDT","RUNEUSDT",
-    "KASUSDT","CFXUSDT","STXUSDT","HBARUSDT",
+    "AAVEUSDT","UNIUSDT","MKRUSDT","CRVUSDT","GRTUSDT","SUSHIUSDT",
+    # AI tokens
+    "FETUSDT","AGIXUSDT","OCEANUSDT","WLDUSDT","ARKMUSDT",
+    # Layer 2
+    "ARBUSDT","OPUSDT","STRKUSDT","INJUSDT","APTUSDT","SUIUSDT",
+    # Gaming/NFT
+    "AXSUSDT","SANDUSDT","MANAUSDT","GALAUSDT","IMXUSDT",
+    # Other high volume
+    "FILUSDT","ICPUSDT","RUNEUSDT","TIAUSDT","KASUSDT",
 ]
 
 # Active list — switches based on USE_BINANCE flag
@@ -288,6 +283,12 @@ def _binance_ts():
 BINANCE_HEADERS = {"X-MBX-APIKEY": BINANCE_KEY}
 
 def binance_get(path, params=None, signed=False):
+    global _last_binance_call
+    # Rate limit — pause between calls to stay well under Binance limits
+    elapsed = time.time() - _last_binance_call
+    if elapsed < BINANCE_DELAY:
+        time.sleep(BINANCE_DELAY - elapsed)
+    _last_binance_call = time.time()
     try:
         p = params or {}
         if signed:
@@ -297,6 +298,12 @@ def binance_get(path, params=None, signed=False):
             url = f"{BINANCE_BASE}{path}" + (f"?{urllib.parse.urlencode(p)}" if p else "")
         r = requests.get(url, headers=BINANCE_HEADERS, timeout=10)
         if not r.ok:
+            # If rate limited, back off for the ban duration
+            if r.status_code == 418 or r.status_code == 429:
+                retry_after = int(r.headers.get("Retry-After", 30))
+                log.warning(f"[BINANCE] Rate limited — backing off {retry_after}s")
+                time.sleep(min(retry_after, 60))
+                return None
             log.warning(f"Binance GET {path}: {r.status_code} {r.text[:100]}")
             return None
         return r.json()
