@@ -74,6 +74,31 @@ BTC_MA_PERIOD         = 20     # BTC moving average period
 BTC_CRASH_PCT         = 5.0    # % BTC single-day drop = volatility spike
 CRYPTO_MAX_EXPOSURE   = 2000.0 # $ max total in open crypto positions
 
+# ── Intraday scanner settings ────────────────────────────────
+INTRADAY_TIMEFRAME      = "1Hour"   # bar size for stock intraday scanner
+INTRADAY_BARS           = 48        # 48 x 1h = 2 days of hourly data
+INTRADAY_EMA_FAST       = 5         # faster EMA for intraday
+INTRADAY_EMA_SLOW       = 13        # slower EMA for intraday
+INTRADAY_RSI_LIMIT      = 75        # same RSI cap
+INTRADAY_VOL_RATIO      = 1.5       # volume confirmation
+INTRADAY_TAKE_PROFIT    = 2.5       # % — smaller target for intraday
+INTRADAY_STOP_LOSS      = 1.0       # % — tighter stop for intraday
+INTRADAY_MAX_POSITIONS  = 2         # separate limit from swing positions
+INTRADAY_MAX_TRADE      = 300.0     # $ — smaller size per intraday trade
+INTRADAY_START_HOUR_ET  = 10        # don't trade first 30 mins (volatile open)
+INTRADAY_END_HOUR_ET    = 15        # stop at 3pm ET — avoid volatile close
+
+# Crypto intraday — 15 min bars, runs 24/7
+CRYPTO_INTRADAY_TIMEFRAME = "15Min"
+CRYPTO_INTRADAY_BARS      = 96      # 96 x 15min = 24h of data
+CRYPTO_INTRADAY_EMA_FAST  = 5
+CRYPTO_INTRADAY_EMA_SLOW  = 13
+CRYPTO_INTRADAY_TP        = 2.0     # % take profit — crypto moves fast
+CRYPTO_INTRADAY_SL        = 1.0     # % stop loss
+CRYPTO_INTRADAY_MAX_POS   = 2       # separate from swing crypto positions
+CRYPTO_INTRADAY_MAX_TRADE = 200.0   # $ per intraday crypto trade
+CRYPTO_INTRADAY_VOL_RATIO = 1.5
+
 # ── Small cap settings ───────────────────────────────────────
 SMALLCAP_MIN_PRICE    = 2.0    # $ minimum price
 SMALLCAP_MAX_PRICE    = 20.0   # $ maximum price
@@ -128,9 +153,11 @@ class BotState:
             log.info(f"[{self.label}] Daily reset")
             self.reset()
 
-state        = BotState("STOCKS")
-crypto_state = BotState("CRYPTO")
-smallcap_state = BotState("SMALLCAP")
+state            = BotState("STOCKS")
+crypto_state     = BotState("CRYPTO")
+smallcap_state   = BotState("SMALLCAP")
+intraday_state   = BotState("INTRADAY")       # stock intraday (1h bars)
+crypto_intraday_state = BotState("CRYPTO_ID") # crypto intraday (15m bars)
 account_info = {}
 
 # ── Small cap pool (refreshes weekly) ────────────────────────
@@ -624,6 +651,274 @@ def check_macro_news():
     except Exception as e:
         log.debug(f"[CIRCUIT] Macro check error: {e}")
 
+# ── Intraday bar fetchers ─────────────────────────────────────
+def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
+    """Fetch sub-daily bars (1h for stocks, 15min for crypto)."""
+    try:
+        if crypto:
+            enc = requests.utils.quote(symbol, safe="")
+            url = (f"{DATA_BASE}/v1beta3/crypto/us/bars"
+                   f"?symbols={enc}&timeframe={timeframe}&limit={limit}")
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            if not r.ok: return None
+            bars = r.json().get("bars", {}).get(symbol, [])
+        else:
+            url = (f"{DATA_BASE}/v2/stocks/{symbol}/bars"
+                   f"?timeframe={timeframe}&limit={limit}&feed=sip&adjustment=raw")
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            if not r.ok: return None
+            bars = r.json().get("bars", [])
+        return bars if bars and len(bars) >= 10 else None
+    except Exception as e:
+        log.debug(f"intraday bars {symbol}: {e}")
+        return None
+
+def get_intraday_signal(closes, volumes, ema_fast, ema_slow, rsi_limit, vol_ratio_min):
+    """Intraday signal — faster EMA periods, same logic as swing."""
+    ef  = ema(closes, ema_fast)
+    es  = ema(closes, ema_slow)
+    pef = ema(closes[:-1], ema_fast)
+    pes = ema(closes[:-1], ema_slow)
+    rsi_val = calc_rsi(closes)
+    if None in (ef, es, pef, pes, rsi_val):
+        return "HOLD", ef, es, rsi_val
+    cross_up   = pef <= pes and ef > es
+    cross_down = pef >= pes and ef < es
+    # Volume check
+    vol_ok = True
+    if volumes and len(volumes) >= 6:
+        avg_vol = sum(volumes[-6:-1]) / 5
+        vol_ok  = volumes[-1] >= avg_vol * vol_ratio_min
+    if cross_up and rsi_val < rsi_limit and vol_ok:
+        return "BUY", ef, es, rsi_val
+    if cross_down or rsi_val > rsi_limit:
+        return "SELL", ef, es, rsi_val
+    return "HOLD", ef, es, rsi_val
+
+def is_intraday_window():
+    """Stock intraday only trades between 10am-3pm ET."""
+    et   = datetime.now(ZoneInfo("America/New_York"))
+    if et.weekday() >= 5: return False
+    return INTRADAY_START_HOUR_ET <= et.hour < INTRADAY_END_HOUR_ET
+
+# ── Intraday position manager ─────────────────────────────────
+def check_intraday_positions(st, crypto=False):
+    """Faster position check for intraday trades — tighter stops."""
+    sl_pct = CRYPTO_INTRADAY_SL if crypto else INTRADAY_STOP_LOSS
+    tp_pct = CRYPTO_INTRADAY_TP if crypto else INTRADAY_TAKE_PROFIT
+    now    = datetime.now()
+    for sym, pos in list(st.positions.items()):
+        live = fetch_latest_price(sym, crypto=crypto)
+        if not live: continue
+        entry = pos["entry_price"]
+        high  = pos.get("highest_price", entry)
+        pct   = ((live - entry) / entry) * 100
+        # Trail the stop
+        if live > high:
+            pos["highest_price"] = live
+            new_stop = live * (1 - sl_pct / 100)
+            if new_stop > pos["stop_price"]:
+                pos["stop_price"] = new_stop
+        reason = None
+        if live >= pos.get("take_profit_price", entry * 1.025): reason = f"Take-Profit (+{pct:.1f}%)"
+        elif live <= pos["stop_price"]:                          reason = f"Stop-Loss ({pct:.1f}%)"
+        # Force close at end of trading window for stocks
+        if not crypto and not is_intraday_window() and is_market_open():
+            reason = "End-of-Window"
+        if reason:
+            pnl = (live - entry) * pos["qty"]
+            entry_ts   = pos.get("entry_ts")
+            hold_hours = round((now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
+            log.info(f"[{st.label}] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
+            place_order(sym, "sell", pos["qty"], crypto=crypto)
+            del st.positions[sym]
+            st.daily_pnl += pnl
+            st.trades.insert(0, {"symbol": sym, "side": "SELL", "qty": pos["qty"],
+                "price": live, "pnl": pnl, "reason": f"[ID]{reason}",
+                "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
+            if st.daily_pnl <= -MAX_DAILY_LOSS:
+                st.shutoff = True
+
+# ── Intraday stock scanner cycle ──────────────────────────────
+def run_intraday_cycle(watchlist, st):
+    """1-hour bar scanner for sharp single-day stock moves. 10am–3pm ET only."""
+    st.check_reset()
+    if st.shutoff: return
+    if not is_intraday_window(): return
+    if market_regime["mode"] == "BEAR": return  # no intraday in bear mode
+    if circuit_breaker["active"]:
+        log.info("[INTRADAY] Circuit breaker active — skipping")
+        return
+
+    st.running    = True
+    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.cycle_count += 1
+    log.info(f"[INTRADAY] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f}")
+
+    check_intraday_positions(st, crypto=False)
+    if st.shutoff: st.running = False; return
+
+    results = []
+    for sym in watchlist:
+        if sym in news_state.get("skip_list", {}): continue
+        bars = fetch_intraday_bars(sym, timeframe=INTRADAY_TIMEFRAME, limit=INTRADAY_BARS)
+        if not bars or len(bars) < 14: continue
+        closes  = [b["c"] for b in bars]
+        volumes = [b["v"] for b in bars]
+        price   = closes[-1]
+        prev    = closes[-2]
+        change  = ((price - prev) / prev) * 100
+        avg_vol = sum(volumes[-6:-1]) / 5 if len(volumes) >= 6 else 1
+        vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+        signal, ef, es, rsi_val = get_intraday_signal(
+            closes, volumes,
+            INTRADAY_EMA_FAST, INTRADAY_EMA_SLOW,
+            INTRADAY_RSI_LIMIT, INTRADAY_VOL_RATIO
+        )
+        results.append({"symbol": sym, "price": price, "change": change,
+            "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
+            "vol_ratio": vol_ratio, "intraday": True})
+
+    results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
+    st.candidates = results
+    buys = sum(1 for r in results if r["signal"] == "BUY")
+    log.info(f"[INTRADAY] {buys} BUY / {len(results)} scanned")
+
+    pos_count = len(st.positions)
+    for s in results:
+        if s["signal"] != "BUY": continue
+        if pos_count >= INTRADAY_MAX_POSITIONS: break
+        if s["symbol"] in st.positions: continue
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: break
+        if total_exposure(st) >= MAX_PORTFOLIO_EXPOSURE: break
+        qty = max(1, int(INTRADAY_MAX_TRADE / s["price"]))
+        trade_val = qty * s["price"]
+        if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
+        stop_price = s["price"] * (1 - INTRADAY_STOP_LOSS / 100)
+        tp_price   = s["price"] * (1 + INTRADAY_TAKE_PROFIT / 100)
+        log.info(f"[INTRADAY] BUY {s['symbol']} @ ${s['price']:.2f} x{qty} "
+                 f"stop:${stop_price:.2f} target:${tp_price:.2f} RSI:{s['rsi']:.1f}")
+        order = place_order(s["symbol"], "buy", qty)
+        if order:
+            now_ts = datetime.now().isoformat()
+            st.positions[s["symbol"]] = {"qty": qty, "entry_price": s["price"],
+                "stop_price": stop_price, "highest_price": s["price"],
+                "take_profit_price": tp_price,
+                "entry_date": datetime.now().date().isoformat(),
+                "entry_ts": now_ts, "days_held": 0}
+            st.daily_spend += trade_val
+            st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
+                "price": s["price"], "pnl": None, "reason": "[ID]Signal",
+                "time": datetime.now().strftime("%H:%M:%S"), "entry_ts": now_ts})
+            pos_count += 1
+
+    for s in results:
+        if s["signal"] != "SELL" or s["symbol"] not in st.positions: continue
+        pos = st.positions[s["symbol"]]
+        pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
+        entry_ts   = pos.get("entry_ts")
+        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
+        log.info(f"[INTRADAY] SELL {s['symbol']} @ ${s['price']:.2f} P&L:${pnl:+.2f}")
+        place_order(s["symbol"], "sell", pos["qty"])
+        del st.positions[s["symbol"]]
+        st.daily_pnl += pnl
+        st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
+            "price": s["price"], "pnl": pnl, "reason": "[ID]Signal",
+            "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
+        if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
+
+    st.running = False
+
+# ── Intraday crypto scanner cycle ─────────────────────────────
+def run_crypto_intraday_cycle(watchlist, st):
+    """15-minute bar scanner for crypto spikes. Runs 24/7."""
+    st.check_reset()
+    if st.shutoff: return
+    if crypto_regime["mode"] == "BEAR":
+        log.info("[CRYPTO_ID] Bear mode — skipping intraday buys")
+        return
+
+    st.running    = True
+    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.cycle_count += 1
+    log.info(f"[CRYPTO_ID] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f}")
+
+    check_intraday_positions(st, crypto=True)
+    if st.shutoff: st.running = False; return
+
+    results = []
+    for sym in watchlist:
+        bars = fetch_intraday_bars(sym, timeframe=CRYPTO_INTRADAY_TIMEFRAME,
+                                   limit=CRYPTO_INTRADAY_BARS, crypto=True)
+        if not bars or len(bars) < 14: continue
+        closes  = [b["c"] for b in bars]
+        volumes = [b["v"] for b in bars]
+        price   = closes[-1]
+        prev    = closes[-2]
+        change  = ((price - prev) / prev) * 100
+        avg_vol = sum(volumes[-6:-1]) / 5 if len(volumes) >= 6 else 1
+        vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+        signal, ef, es, rsi_val = get_intraday_signal(
+            closes, volumes,
+            CRYPTO_INTRADAY_EMA_FAST, CRYPTO_INTRADAY_EMA_SLOW,
+            INTRADAY_RSI_LIMIT, CRYPTO_INTRADAY_VOL_RATIO
+        )
+        results.append({"symbol": sym, "price": price, "change": change,
+            "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
+            "vol_ratio": vol_ratio, "intraday": True})
+
+    results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
+    st.candidates = results
+    buys = sum(1 for r in results if r["signal"] == "BUY")
+    log.info(f"[CRYPTO_ID] {buys} BUY / {len(results)} scanned")
+
+    pos_count = len(st.positions)
+    for s in results:
+        if s["signal"] != "BUY": continue
+        if pos_count >= CRYPTO_INTRADAY_MAX_POS: break
+        if s["symbol"] in st.positions: continue
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: break
+        if total_exposure(st) >= CRYPTO_MAX_EXPOSURE: break
+        qty = max(0.0001, round(CRYPTO_INTRADAY_MAX_TRADE / s["price"], 6))
+        trade_val = qty * s["price"]
+        if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
+        stop_price = s["price"] * (1 - CRYPTO_INTRADAY_SL / 100)
+        tp_price   = s["price"] * (1 + CRYPTO_INTRADAY_TP / 100)
+        log.info(f"[CRYPTO_ID] BUY {s['symbol']} @ ${s['price']:.4f} "
+                 f"stop:${stop_price:.4f} target:${tp_price:.4f} RSI:{s['rsi']:.1f}")
+        order = place_order(s["symbol"], "buy", qty, crypto=True)
+        if order:
+            now_ts = datetime.now().isoformat()
+            st.positions[s["symbol"]] = {"qty": qty, "entry_price": s["price"],
+                "stop_price": stop_price, "highest_price": s["price"],
+                "take_profit_price": tp_price,
+                "entry_date": datetime.now().date().isoformat(),
+                "entry_ts": now_ts, "days_held": 0}
+            st.daily_spend += trade_val
+            st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
+                "price": s["price"], "pnl": None, "reason": "[ID]Signal",
+                "time": datetime.now().strftime("%H:%M:%S"), "entry_ts": now_ts})
+            pos_count += 1
+
+    for s in results:
+        if s["signal"] != "SELL" or s["symbol"] not in st.positions: continue
+        pos = st.positions[s["symbol"]]
+        pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
+        entry_ts   = pos.get("entry_ts")
+        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
+        log.info(f"[CRYPTO_ID] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
+        place_order(s["symbol"], "sell", pos["qty"], crypto=True)
+        del st.positions[s["symbol"]]
+        st.daily_pnl += pnl
+        st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
+            "price": s["price"], "pnl": pnl, "reason": "[ID]Signal",
+            "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
+        if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
+
+    st.running = False
+
 # ── Market regime detection ──────────────────────────────────
 def update_market_regime():
     """Check VIX and SPY trend to determine BULL or BEAR mode."""
@@ -1084,7 +1379,7 @@ def send_daily_summary():
             f"Date: {datetime.now().strftime('%A, %d %B %Y')}\n"
             f"Mode: {'LIVE' if IS_LIVE else 'Paper'} Trading\n"
             f"Portfolio: ${float(account_info.get('portfolio_value',0)):,.2f}\n\n"
-            f"{section(state)}\n{section(smallcap_state)}\n{section(crypto_state)}\n"
+            f"{section(state)}\n{section(smallcap_state)}\n{section(intraday_state)}\n{section(crypto_state)}\n{section(crypto_intraday_state)}\n"
             f"{news_summary}"
             f"{'='*40}\nSent by AlphaBot on Railway")
     try:
@@ -1330,6 +1625,12 @@ def build_dashboard():
     sc_dot     = ("dot-green" if smallcap_state.running else "dot-gold") if not smallcap_state.shutoff else "dot-red"
     sc_status  = "Shut Off" if smallcap_state.shutoff else ("Running" if smallcap_state.running else "Idle")
 
+    # Intraday state
+    id_dot     = ("dot-green" if intraday_state.running else "dot-gold") if not intraday_state.shutoff else "dot-red"
+    id_status  = "Shut Off" if intraday_state.shutoff else ("Running" if intraday_state.running else ("Window Closed" if not is_intraday_window() else "Idle"))
+    cid_dot    = ("dot-green" if crypto_intraday_state.running else "dot-gold") if not crypto_intraday_state.shutoff else "dot-red"
+    cid_status = "Shut Off" if crypto_intraday_state.shutoff else ("Running" if crypto_intraday_state.running else "Idle")
+
     # Circuit breaker banner
     if circuit_breaker["active"]:
         circuit_banner = (
@@ -1402,9 +1703,11 @@ def build_dashboard():
     # Recent trades
     # Completed trades only (SELL side with P&L) — last 10
     completed = (
-        [dict(t, market="Stock")    for t in state.trades          if t["side"] == "SELL" and t.get("pnl") is not None] +
-        [dict(t, market="SmallCap") for t in smallcap_state.trades if t["side"] == "SELL" and t.get("pnl") is not None] +
-        [dict(t, market="Crypto")   for t in crypto_state.trades   if t["side"] == "SELL" and t.get("pnl") is not None]
+        [dict(t, market="Stock")    for t in state.trades                 if t["side"] == "SELL" and t.get("pnl") is not None] +
+        [dict(t, market="SmallCap") for t in smallcap_state.trades        if t["side"] == "SELL" and t.get("pnl") is not None] +
+        [dict(t, market="Intraday") for t in intraday_state.trades        if t["side"] == "SELL" and t.get("pnl") is not None] +
+        [dict(t, market="Crypto")   for t in crypto_state.trades          if t["side"] == "SELL" and t.get("pnl") is not None] +
+        [dict(t, market="CryptoID") for t in crypto_intraday_state.trades if t["side"] == "SELL" and t.get("pnl") is not None]
     )
     completed.sort(key=lambda t: t["time"], reverse=True)
 
@@ -1597,6 +1900,18 @@ def build_dashboard():
         sc_last      = smallcap_state.last_cycle or "—",
         sc_pool_size = len(smallcap_pool["symbols"]),
         sc_refresh   = smallcap_pool.get("last_refresh", "Not yet"),
+        id_dot       = id_dot,
+        id_status    = id_status,
+        id_cycle     = intraday_state.cycle_count,
+        id_positions = len(intraday_state.positions),
+        id_trades    = len(intraday_state.trades),
+        id_last      = intraday_state.last_cycle or "—",
+        cid_dot      = cid_dot,
+        cid_status   = cid_status,
+        cid_cycle    = crypto_intraday_state.cycle_count,
+        cid_positions= len(crypto_intraday_state.positions),
+        cid_trades   = len(crypto_intraday_state.trades),
+        cid_last     = crypto_intraday_state.last_cycle or "—",
         stop_loss      = STOP_LOSS_PCT,
         trailing_stop  = TRAILING_STOP_PCT,
         take_profit    = TAKE_PROFIT_PCT,
@@ -1829,11 +2144,15 @@ def main():
                 log.info("[SMALLCAP] Starting pool refresh in background...")
                 threading.Thread(target=refresh_smallcap_pool, daemon=True).start()
 
-            # Run all three bots
+            # ── Swing trade bots (daily bars) ──
             run_cycle(US_WATCHLIST, state, crypto=False)
             run_cycle(CRYPTO_WATCHLIST, crypto_state, crypto=True)
             if smallcap_pool["symbols"]:
                 run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
+
+            # ── Intraday bots (faster bars) ──
+            run_intraday_cycle(US_WATCHLIST, intraday_state)
+            run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
 
             # Morning news scan at 9:00am ET (30 mins before open)
             et = datetime.now(ZoneInfo("America/New_York"))
