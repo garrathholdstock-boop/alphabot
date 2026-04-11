@@ -69,8 +69,9 @@ else:
     _BIN_SECRET    = ""
     USE_BINANCE    = False
 
-BINANCE_DELAY  = 0.12   # seconds between Binance API calls
-_last_binance_call = 0.0
+BINANCE_DELAY  = 0.5    # seconds between Binance API calls (conservative — avoid rate limits)
+_last_binance_call  = 0.0
+_binance_ban_until  = 0.0   # epoch time when ban expires — stop ALL calls until then
 
 # ── Safety settings ───────────────────────────────────────────
 MAX_DAILY_LOSS      = 50.0    # $ shut off if day loss hits this
@@ -382,7 +383,7 @@ def _binance_ts():
 BINANCE_HEADERS = {"X-MBX-APIKEY": _BIN_KEY}
 
 def binance_get(path, params=None, signed=False):
-    global _last_binance_call
+    global _last_binance_call, _binance_ban_until
     # Rate limit — pause between calls to stay well under Binance limits
     elapsed = time.time() - _last_binance_call
     if elapsed < BINANCE_DELAY:
@@ -399,10 +400,10 @@ def binance_get(path, params=None, signed=False):
         if not r.ok:
             # If rate limited, back off for the ban duration
             if r.status_code == 418 or r.status_code == 429:
-                retry_after = int(r.headers.get("Retry-After", 30))
-                log.warning(f"[BINANCE] Rate limited — backing off {retry_after}s")
-                time.sleep(min(retry_after, 60))
-                return None
+                retry_after = int(r.headers.get("Retry-After", 60))
+                _binance_ban_until = time.time() + retry_after
+                log.warning(f"[BINANCE] Rate limited — ban for {retry_after}s. Bot will resume at {datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')}")
+                return None  # Return immediately — do NOT sleep here, let ban tracker handle it
             log.warning(f"Binance GET {path}: {r.status_code} {r.text[:100]}")
             return None
         return r.json()
