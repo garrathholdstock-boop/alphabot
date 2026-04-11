@@ -369,6 +369,13 @@ def update_exchange_stop(symbol, qty, new_stop_price):
 # Track exchange stop order IDs per position
 exchange_stops = {}  # { symbol: order_id }
 
+# ── Global kill switch ────────────────────────────────────────
+kill_switch = {
+    "active": False,
+    "reason": "",
+    "activated_at": None,
+}
+
 # ── Binance API helpers ───────────────────────────────────────
 import hashlib, hmac, urllib.parse
 
@@ -2279,6 +2286,12 @@ def run_cycle(watchlist, st, crypto=False):
         st.running = False
         return
 
+    # Global kill switch — stop all trading immediately
+    if kill_switch["active"]:
+        log.info(f"[{st.label}] Kill switch active — no trading")
+        st.running = False
+        return
+
     check_stop_losses(st, crypto=crypto)
     if st.shutoff: return
 
@@ -2702,6 +2715,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="refresh">↻ {now}</div>
   </div>
 </div>
+<!-- Kill switch controls -->
+<div style="background:#0d1117;border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 24px;display:flex;align-items:center;gap:12px">
+  <span style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px">Controls:</span>
+  <button onclick="sendCmd('/kill')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">🛑 KILL ALL BOTS</button>
+  <button onclick="sendCmd('/close-all')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">💰 CLOSE ALL POSITIONS</button>
+  <button onclick="sendCmd('/resume')" style="padding:6px 16px;border-radius:6px;border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">▶ RESUME</button>
+  <span id="cmd-status" style="font-size:11px;color:#555;margin-left:8px"></span>
+</div>
+<script>
+function sendCmd(path) {{
+  var btn = event.target;
+  var status = document.getElementById('cmd-status');
+  btn.disabled = true;
+  status.textContent = 'Sending...';
+  fetch(path, {{method:'POST'}})
+    .then(r => r.json())
+    .then(d => {{
+      status.textContent = '✅ ' + d.status + ' — refreshing...';
+      btn.disabled = false;
+      setTimeout(() => location.reload(), 2000);
+    }})
+    .catch(e => {{
+      status.textContent = '❌ Error: ' + e;
+      btn.disabled = false;
+    }});
+}}
+</script>
 
 <div class="container">
 
@@ -2736,6 +2776,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </div>
   </div>
+
+  <!-- Kill Switch Banner -->
+  {kill_banner}
 
   <!-- Circuit Breaker Banner (only shown when active) -->
   {circuit_banner}
@@ -3179,6 +3222,18 @@ def build_dashboard():
           <table><thead><tr><th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th><th>RSI</th><th>SMA 9</th><th>SMA 21</th><th>Vol Ratio</th></tr></thead>
           <tbody>{rows}</tbody></table></div>"""
 
+    # Kill switch banner
+    if kill_switch["active"]:
+        kill_banner = f'''<div style="background:rgba(255,68,102,0.15);border:1px solid #ff4466;border-radius:8px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+          <span style="font-size:20px">🛑</span>
+          <div>
+            <div style="font-weight:700;color:#ff4466;font-size:14px">KILL SWITCH ACTIVE — All bots stopped</div>
+            <div style="font-size:12px;color:#888;margin-top:2px">{kill_switch["reason"]} · Activated at {kill_switch["activated_at"]}</div>
+          </div>
+        </div>'''
+    else:
+        kill_banner = ""
+
     stocks_scan_html = build_scan_table(state.candidates, "blue", "US Stocks")
     crypto_scan_html = build_scan_table(crypto_state.candidates, "green", "Crypto")
 
@@ -3235,6 +3290,7 @@ def build_dashboard():
         positions_html = positions_html,
         trades_html    = trades_html,
         screener_html  = screener_html,
+        kill_banner      = kill_banner,
         stocks_scan_html = stocks_scan_html,
         crypto_scan_html = crypto_scan_html,
         sc_dot       = sc_dot,
@@ -3324,21 +3380,76 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"OK")
             return
         if self.path == "/api":
-            data = json.dumps({
-                "stocks": {"pnl": state.daily_pnl, "positions": len(state.positions), "trades": len(state.trades), "cycle": state.cycle_count},
-                "crypto": {"pnl": crypto_state.daily_pnl, "positions": len(crypto_state.positions), "trades": len(crypto_state.trades), "cycle": crypto_state.cycle_count},
-                "portfolio": float(account_info.get("portfolio_value", 0)) if account_info else 0,
-            })
+            with _state_lock:
+                data = json.dumps({
+                    "stocks": {"pnl": state.daily_pnl, "positions": len(state.positions), "trades": len(state.trades), "cycle": state.cycle_count},
+                    "crypto": {"pnl": crypto_state.daily_pnl, "positions": len(crypto_state.positions), "trades": len(crypto_state.trades), "cycle": crypto_state.cycle_count},
+                    "portfolio": float(account_info.get("portfolio_value", 0)) if account_info else 0,
+                    "kill_switch": kill_switch["active"],
+                })
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(data.encode())
             return
-        html = build_dashboard()
+        with _state_lock:
+            html = build_dashboard()
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
         self.wfile.write(html.encode())
+
+    def do_POST(self):
+        """Handle kill switch and resume commands from dashboard."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
+
+        if self.path == "/kill":
+            kill_switch["active"]       = True
+            kill_switch["reason"]       = "Manual kill switch activated from dashboard"
+            kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
+            # Shut off all bots
+            for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+                st.shutoff = True
+            log.warning("[KILL SWITCH] Manual kill activated from dashboard — all bots stopped")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "killed"}).encode())
+
+        elif self.path == "/resume":
+            kill_switch["active"]       = False
+            kill_switch["reason"]       = ""
+            kill_switch["activated_at"] = None
+            for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+                st.shutoff = False
+            log.info("[KILL SWITCH] Resumed from dashboard — all bots restarted")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "resumed"}).encode())
+
+        elif self.path == "/close-all":
+            log.warning("[KILL SWITCH] Close all positions requested from dashboard")
+            for sym, pos in list(state.positions.items()):
+                place_order(sym, "sell", pos["qty"], estimated_price=pos["entry_price"])
+            for sym, pos in list(crypto_state.positions.items()):
+                place_order(sym, "sell", pos["qty"], crypto=True, estimated_price=pos["entry_price"])
+            state.positions.clear()
+            crypto_state.positions.clear()
+            kill_switch["active"]       = True
+            kill_switch["reason"]       = "Close all — positions liquidated from dashboard"
+            kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
+            for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+                st.shutoff = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "closed"}).encode())
+
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def log_message(self, format, *args):
         pass  # suppress default access logs
