@@ -494,13 +494,24 @@ def binance_place_order(symbol, side, usdt_amount):
         log.warning(f"[BINANCE] {symbol} qty {qty} below min {min_qty} — skipping")
         return None
     result = binance_post("/api/v3/order", {
-        "symbol":   symbol,
-        "side":     side.upper(),
-        "type":     "MARKET",
-        "quantity": str(qty),
+        "symbol":          symbol,
+        "side":            side.upper(),
+        "type":            "MARKET",
+        "quantity":        str(qty),
+        "newOrderRespType": "FULL",  # Request full response including fills[]
     })
     if result:
-        log.info(f"[BINANCE] ORDER {side.upper()} {qty} {symbol} @ ~${price:.4f}")
+        # Extract real fill price from fills[] array
+        fills = result.get("fills", [])
+        if fills:
+            total_qty   = sum(float(f["qty"]) for f in fills)
+            total_value = sum(float(f["price"]) * float(f["qty"]) for f in fills)
+            real_fill   = total_value / total_qty if total_qty > 0 else price
+            slip_pct    = ((real_fill - price) / price * 100)
+            log.info(f"[BINANCE] ORDER {side.upper()} {qty} {symbol} | signal=${price:.4f} fill=${real_fill:.4f} slippage={slip_pct:+.3f}%")
+            result["_real_fill_price"] = real_fill  # store for place_order() to use
+        else:
+            log.info(f"[BINANCE] ORDER {side.upper()} {qty} {symbol} @ ~${price:.4f} (no fill data)")
     return result
 
 def binance_get_balance(asset="USDT"):
@@ -1168,6 +1179,10 @@ def run_intraday_cycle(watchlist, st):
         if s["symbol"] in st.positions: continue
         if st.daily_pnl >= DAILY_PROFIT_TARGET: break
         if total_exposure(st) >= MAX_PORTFOLIO_EXPOSURE: break
+        # GLOBAL cap — prevents swing + intraday bots exceeding combined limit
+        if all_positions_count() >= MAX_TOTAL_POSITIONS:
+            log.info(f"[INTRADAY] Global position cap ({MAX_TOTAL_POSITIONS}) reached — no new buys")
+            break
         qty = max(1, int(INTRADAY_MAX_TRADE / s["price"]))
         trade_val = qty * s["price"]
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
@@ -1175,17 +1190,28 @@ def run_intraday_cycle(watchlist, st):
         tp_price   = s["price"] * (1 + INTRADAY_TAKE_PROFIT / 100)
         log.info(f"[INTRADAY] BUY {s['symbol']} @ ${s['price']:.2f} x{qty} "
                  f"stop:${stop_price:.2f} target:${tp_price:.2f} RSI:{s['rsi']:.1f}")
-        order = place_order(s["symbol"], "buy", qty)
+        order, fill_price = place_order(s["symbol"], "buy", qty, estimated_price=s["price"])
         if order:
+            actual_stop = fill_price * (1 - INTRADAY_STOP_LOSS / 100)
+            actual_tp   = fill_price * (1 + INTRADAY_TAKE_PROFIT / 100)
+            # Mandatory exchange stop — emergency exit if it fails
+            stop_order = place_stop_order_alpaca(s["symbol"], qty, round(actual_stop, 2))
+            if stop_order and stop_order.get("id"):
+                exchange_stops[s["symbol"]] = stop_order["id"]
+                log.info(f"[INTRADAY] Exchange stop placed for {s['symbol']} @ ${actual_stop:.2f}")
+            else:
+                log.error(f"[EMERGENCY] Intraday stop FAILED for {s['symbol']} — emergency exit")
+                place_order(s["symbol"], "sell", qty, estimated_price=fill_price)
+                continue
             now_ts = datetime.now().isoformat()
-            st.positions[s["symbol"]] = {"qty": qty, "entry_price": s["price"],
-                "stop_price": stop_price, "highest_price": s["price"],
-                "take_profit_price": tp_price,
+            st.positions[s["symbol"]] = {"qty": qty, "entry_price": fill_price,
+                "stop_price": actual_stop, "highest_price": fill_price,
+                "take_profit_price": actual_tp,
                 "entry_date": datetime.now().date().isoformat(),
                 "entry_ts": now_ts, "days_held": 0}
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
-                "price": s["price"], "pnl": None, "reason": "[ID]Signal",
+                "price": fill_price, "pnl": None, "reason": "[ID]Signal",
                 "time": datetime.now().strftime("%H:%M:%S"), "entry_ts": now_ts})
             pos_count += 1
 
@@ -1268,17 +1294,20 @@ def run_crypto_intraday_cycle(watchlist, st):
         tp_price   = s["price"] * (1 + CRYPTO_INTRADAY_TP / 100)
         log.info(f"[CRYPTO_ID] BUY {s['symbol']} @ ${s['price']:.4f} "
                  f"stop:${stop_price:.4f} target:${tp_price:.4f} RSI:{s['rsi']:.1f}")
-        order = place_order(s["symbol"], "buy", qty, crypto=True)
+        order, fill_price = place_order(s["symbol"], "buy", qty, crypto=True, estimated_price=s["price"])
         if order:
+            # Use slippage-adjusted fill price for all calculations
+            actual_stop = fill_price * (1 - CRYPTO_INTRADAY_SL / 100)
+            actual_tp   = fill_price * (1 + CRYPTO_INTRADAY_TP / 100)
             now_ts = datetime.now().isoformat()
-            st.positions[s["symbol"]] = {"qty": qty, "entry_price": s["price"],
-                "stop_price": stop_price, "highest_price": s["price"],
-                "take_profit_price": tp_price,
+            st.positions[s["symbol"]] = {"qty": qty, "entry_price": fill_price,
+                "stop_price": actual_stop, "highest_price": fill_price,
+                "take_profit_price": actual_tp,
                 "entry_date": datetime.now().date().isoformat(),
                 "entry_ts": now_ts, "days_held": 0}
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
-                "price": s["price"], "pnl": None, "reason": "[ID]Signal",
+                "price": fill_price, "pnl": None, "reason": "[ID]Signal",
                 "time": datetime.now().strftime("%H:%M:%S"), "entry_ts": now_ts})
             pos_count += 1
 
@@ -1288,8 +1317,9 @@ def run_crypto_intraday_cycle(watchlist, st):
         pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
         entry_ts   = pos.get("entry_ts")
         hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
-        log.info(f"[CRYPTO_ID] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
-        place_order(s["symbol"], "sell", pos["qty"], crypto=True)
+        order_sell, sell_price = place_order(s["symbol"], "sell", pos["qty"], crypto=True, estimated_price=s["price"])
+        pnl = (sell_price - pos["entry_price"]) * pos["qty"]  # recalc with real exit price
+        log.info(f"[CRYPTO_ID] SELL {s['symbol']} @ ${sell_price:.4f} P&L:${pnl:+.2f}")
         del st.positions[s["symbol"]]
         st.daily_pnl += pnl
         st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
@@ -1752,23 +1782,42 @@ def query_order_status(order_id, crypto=False):
     except: return None
 
 def get_actual_fill_price(order_result, side, estimated_price, crypto=False):
-    """Extract actual fill price from order result, fall back to slippage estimate."""
-    if not order_result:
+    """Extract actual fill price from order result.
+    
+    On live trading: uses real exchange fill price.
+    On paper trading: always applies slippage model since paper fills are not realistic.
+    This ensures paper trading P&L reflects real-world execution costs.
+    """
+    if not order_result or not estimated_price:
+        return apply_slippage(estimated_price or 0, side, crypto)
+
+    # Paper trading — Alpaca paper fills are optimistic (filled at signal price)
+    # We ALWAYS apply slippage in paper mode to get realistic P&L
+    if not IS_LIVE:
         return apply_slippage(estimated_price, side, crypto)
+
+    # Live trading — use actual exchange fill price
     # Alpaca returns filled_avg_price
     filled = order_result.get("filled_avg_price")
     if filled:
         try:
-            return float(filled)
+            fp = float(filled)
+            if fp > 0:
+                log.info(f"[FILL] Real fill: ${fp:.4f} vs signal: ${estimated_price:.4f} (slippage: {((fp-estimated_price)/estimated_price*100):+.3f}%)")
+                return fp
         except: pass
-    # Binance returns fills array
+
+    # Binance real fills array
     fills = order_result.get("fills", [])
     if fills:
         total_qty   = sum(float(f["qty"]) for f in fills)
         total_value = sum(float(f["price"]) * float(f["qty"]) for f in fills)
         if total_qty > 0:
-            return total_value / total_qty
-    # Fall back to slippage model
+            fp = total_value / total_qty
+            log.info(f"[FILL] Binance fill: ${fp:.4f} vs signal: ${estimated_price:.4f}")
+            return fp
+
+    # Final fallback — apply slippage model
     return apply_slippage(estimated_price, side, crypto)
 
 def is_order_filled(order_result):
@@ -1785,17 +1834,55 @@ def is_order_filled(order_result):
 
 def place_order(symbol, side, qty, crypto=False, estimated_price=None):
     """Place order. Routes crypto to Binance if configured, otherwise Alpaca.
+    
+    Option B execution: for live trading, waits briefly then fetches the actual
+    filled_avg_price from the exchange — not just the estimated price.
+    For paper trading, applies slippage model to simulate realistic fills.
+    
     Returns (order_result, actual_fill_price) tuple."""
+
+    # ── Crypto via Binance ──
     if crypto and USE_BINANCE:
-        price = estimated_price or binance_fetch_price(symbol)
-        usdt  = float(qty) * price if price else float(qty)
+        price  = estimated_price or binance_fetch_price(symbol)
+        usdt   = float(qty) * price if price else float(qty)
         result = binance_place_order(symbol, side, usdt)
+
+        # Use real fill price if Binance returned fills[] (newOrderRespType=FULL)
+        if result and "_real_fill_price" in result:
+            real_fill = result["_real_fill_price"]
+            return result, real_fill
+
+        # Fallback to slippage model
         fill_price = get_actual_fill_price(result, side, price or 0, crypto=True)
         return result, fill_price
+
+    # ── Stocks via Alpaca ──
     result = alpaca_post("/v2/orders", {
         "symbol": symbol, "qty": str(qty), "side": side,
         "type": "market", "time_in_force": "gtc" if crypto else "day",
     })
+
+    if IS_LIVE and result and result.get("id"):
+        # Option B: wait for fill then fetch actual filled_avg_price from Alpaca
+        order_id = result["id"]
+        real_fill = None
+        for attempt in range(5):  # try up to 5 times over ~5 seconds
+            time.sleep(1)
+            filled_order = alpaca_get(f"/v2/orders/{order_id}")
+            if filled_order:
+                status = filled_order.get("status", "")
+                avg_price = filled_order.get("filled_avg_price")
+                if avg_price and float(avg_price) > 0:
+                    real_fill = float(avg_price)
+                    slip_pct  = ((real_fill - (estimated_price or real_fill)) / (estimated_price or real_fill) * 100)
+                    log.info(f"[FILL] Alpaca {side.upper()} {symbol}: signal=${estimated_price:.4f} fill=${real_fill:.4f} slippage={slip_pct:+.3f}% status={status}")
+                    break
+                if status in ("filled", "partially_filled"):
+                    break  # filled but no price yet — use fallback
+        if real_fill:
+            return result, real_fill
+
+    # Paper trading or fallback — apply slippage model
     fill_price = get_actual_fill_price(result, side, estimated_price or 0, crypto=False)
     if result: log.info(f"ORDER {side.upper()} {qty} {symbol} fill~${fill_price:.4f}")
     return result, fill_price
@@ -2028,12 +2115,21 @@ def run_cycle(watchlist, st, crypto=False):
                 "entry_date": datetime.now().date().isoformat(),
                 "days_held": 0,
             }
-            # Place real exchange stop order on Alpaca (not just software stop)
+            # Place real exchange stop order on Alpaca — MANDATORY for stocks
             if not crypto:
                 stop_order = place_stop_order_alpaca(s["symbol"], qty, round(actual_stop, 2))
                 if stop_order and stop_order.get("id"):
                     exchange_stops[s["symbol"]] = stop_order["id"]
                     log.info(f"[{st.label}] Exchange stop placed for {s['symbol']} @ ${actual_stop:.2f}")
+                else:
+                    # EMERGENCY: stop failed to place — exit position immediately
+                    log.error(f"[EMERGENCY] Stop order FAILED for {s['symbol']} — emergency exit to protect capital")
+                    place_order(s["symbol"], "sell", qty, crypto=False, estimated_price=fill_price)
+                    if s["symbol"] in st.positions:
+                        del st.positions[s["symbol"]]
+                    log.error(f"[EMERGENCY] Position closed. No position held without exchange stop.")
+                    pos_count -= 1
+                    continue  # skip to next candidate
             st.daily_spend += trade_val
             st.trades_today += 1
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
@@ -3081,7 +3177,62 @@ def main():
         log.info("[BINANCE] Not configured — using Alpaca for crypto (25 coins)")
         log.info("[BINANCE] Add BINANCE_KEY + BINANCE_SECRET to Railway to enable")
 
+    # ── STARTUP RECOVERY — rebuild state from exchange ──────────
+    log.info("=== Startup recovery check ===")
+    try:
+        # Recover open Alpaca positions
+        open_positions = alpaca_get("/v2/positions") or []
+        recovered = 0
+        for pos in open_positions:
+            sym   = pos.get("symbol")
+            qty   = float(pos.get("qty", 0))
+            entry = float(pos.get("avg_entry_price", 0))
+            stop_pct = CRYPTO_STOP_PCT if "/" in str(sym) else STOP_LOSS_PCT
+            stop  = entry * (1 - stop_pct / 100)
+            tp    = entry * (1 + TAKE_PROFIT_PCT / 100)
+            # Determine which state to add to
+            is_crypto = pos.get("asset_class") == "crypto"
+            target_state = crypto_state if is_crypto else state
+            if sym not in target_state.positions:
+                target_state.positions[sym] = {
+                    "qty": qty, "entry_price": entry, "stop_price": stop,
+                    "highest_price": entry, "take_profit_price": tp,
+                    "entry_date": datetime.now().date().isoformat(),
+                    "days_held": 0, "entry_ts": datetime.now().isoformat(),
+                }
+                # Re-place exchange stop for any recovered position
+                if not is_crypto:
+                    stop_order = place_stop_order_alpaca(sym, qty, round(stop, 2))
+                    if stop_order and stop_order.get("id"):
+                        exchange_stops[sym] = stop_order["id"]
+                        log.info(f"[RECOVERY] Restored {sym} qty:{qty} entry:${entry:.2f} — exchange stop re-placed")
+                else:
+                    log.info(f"[RECOVERY] Restored crypto {sym} qty:{qty} entry:${entry:.4f}")
+                recovered += 1
+        if recovered:
+            log.info(f"=== Recovered {recovered} open position(s) from exchange ===")
+        else:
+            log.info("=== No open positions to recover ===")
+    except Exception as e:
+        log.error(f"Startup recovery failed: {e}")
+
+    # ── Verify ALL existing positions have exchange stops ─────────
+    log.info("=== Verifying exchange stops on all positions ===")
+    try:
+        open_orders = alpaca_get("/v2/orders?status=open") or []
+        stop_order_symbols = {o["symbol"] for o in open_orders if o.get("type") == "stop"}
+        for sym, pos in state.positions.items():
+            if sym not in stop_order_symbols and sym not in exchange_stops:
+                log.warning(f"[STOPS] {sym} has no exchange stop — placing now")
+                stop_order = place_stop_order_alpaca(sym, pos["qty"], round(pos["stop_price"], 2))
+                if stop_order and stop_order.get("id"):
+                    exchange_stops[sym] = stop_order["id"]
+                    log.info(f"[STOPS] Exchange stop placed for {sym} @ ${pos['stop_price']:.2f}")
+    except Exception as e:
+        log.error(f"Stop verification failed: {e}")
+
     last_email_day = None
+    last_watchdog  = time.time()
     cycle = 0
 
     while True:
@@ -3089,6 +3240,25 @@ def main():
             cycle += 1
             log.info(f"\n{'─'*50}")
             log.info(f"Main cycle {cycle} | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Watchdog — log health every cycle so you can detect silent failures
+            now_ts = time.time()
+            last_watchdog = now_ts
+            log.info(f"[WATCHDOG] Cycle {cycle} alive | Stocks P&L: ${state.daily_pnl:+.2f} | Crypto P&L: ${crypto_state.daily_pnl:+.2f} | Positions: {len(state.positions)}S/{len(crypto_state.positions)}C | {datetime.now().strftime('%H:%M:%S')}")
+
+            # Verify exchange stops still exist every 10 cycles (~10 mins)
+            if cycle % 10 == 0 and state.positions:
+                try:
+                    open_orders = alpaca_get("/v2/orders?status=open") or []
+                    stop_syms = {o["symbol"] for o in open_orders if o.get("type") == "stop"}
+                    for sym, pos in state.positions.items():
+                        if sym not in stop_syms:
+                            log.warning(f"[WATCHDOG] Exchange stop missing for {sym} — replacing")
+                            stop_order = place_stop_order_alpaca(sym, pos["qty"], round(pos["stop_price"], 2))
+                            if stop_order and stop_order.get("id"):
+                                exchange_stops[sym] = stop_order["id"]
+                except Exception as e:
+                    log.warning(f"[WATCHDOG] Stop check failed: {e}")
 
             # Refresh account info each cycle
             account_info = alpaca_get("/v2/account") or account_info
@@ -3190,7 +3360,17 @@ def main():
             log.info("Stopped")
             break
         except Exception as e:
-            log.error(f"Error in main loop: {e}")
+            log.error(f"[CRASH] Error in main loop: {e}")
+            log.error(f"[CRASH] Bot recovering — sleeping 30s then resuming")
+            # On crash, verify exchange stops are still in place
+            try:
+                open_orders = alpaca_get("/v2/orders?status=open") or []
+                stop_syms = {o["symbol"] for o in open_orders if o.get("type") == "stop"}
+                for sym, pos in state.positions.items():
+                    if sym not in stop_syms:
+                        log.warning(f"[CRASH RECOVERY] Replacing missing stop for {sym}")
+                        place_stop_order_alpaca(sym, pos["qty"], round(pos["stop_price"], 2))
+            except: pass
             time.sleep(30)
 
 if __name__ == "__main__":
