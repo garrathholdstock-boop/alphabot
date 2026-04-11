@@ -427,11 +427,17 @@ def binance_post(path, params):
 def binance_fetch_bars(symbol, interval="1d", limit=35):
     """Fetch OHLCV bars from Binance. interval: 1d, 1h, 15m etc."""
     data = binance_get("/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
-    if not data or len(data) < 10:
+    if not data:
+        log.warning(f"[BINANCE] No data returned for {symbol} — check API key or IP restrictions")
+        return None
+    if len(data) < 10:
+        log.warning(f"[BINANCE] Not enough bars for {symbol}: got {len(data)}, need 10+")
         return None
     # Binance kline format: [open_time, open, high, low, close, volume, ...]
-    return [{"o": float(k[1]), "h": float(k[2]), "l": float(k[3]),
+    bars = [{"o": float(k[1]), "h": float(k[2]), "l": float(k[3]),
              "c": float(k[4]), "v": float(k[5])} for k in data]
+    log.debug(f"[BINANCE] {symbol} — {len(bars)} bars, latest close: {bars[-1]['c']}")
+    return bars
 
 def binance_fetch_price(symbol):
     """Get latest price from Binance."""
@@ -2907,6 +2913,16 @@ def main():
         log.error("Cannot connect to Alpaca — check ALPACA_KEY and ALPACA_SECRET")
     else:
         log.info(f"Connected — Portfolio: ${float(account_info.get('portfolio_value',0)):,.2f}")
+
+    # Verify Binance connectivity if enabled
+    if USE_BINANCE:
+        log.info("[BINANCE] Testing connection...")
+        test_bars = binance_fetch_bars("BTCUSDT", limit=5)
+        if test_bars:
+            log.info(f"[BINANCE] Connected — BTC latest: ${test_bars[-1]['c']:,.2f}")
+        else:
+            log.error("[BINANCE] Cannot fetch data — check BINANCE_KEY/BINANCE_SECRET and Railway IP whitelist")
+            log.error("[BINANCE] Note: Binance may require IP whitelisting in API settings")
 
     # Verify Binance connection (if configured)
     if USE_BINANCE:
