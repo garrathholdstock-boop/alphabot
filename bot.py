@@ -2143,6 +2143,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .container {{ padding: 24px; max-width: 1100px; margin: 0 auto; }}
   .grid4 {{ display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }}
   .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }}
+  .regime-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
   .card {{ background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 18px 20px; }}
   .card-green {{ border-color: rgba(0,255,136,0.15); }}
   .card-blue  {{ border-color: rgba(0,170,255,0.15); }}
@@ -2182,7 +2183,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .refresh {{ display: none; }}
 
     /* Regime cards — ALWAYS stack vertically on mobile */
-    .regime-grid {{ grid-template-columns: 1fr !important; gap: 8px !important; }}
+    .regime-grid {{ display: grid !important; grid-template-columns: 1fr !important; gap: 8px !important; }}
     .regime-stats {{ flex-wrap: wrap; gap: 6px !important; }}
     .regime-desc {{ display: none; }}
     .regime-title {{ font-size: 20px !important; }}
@@ -2264,7 +2265,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <div class="container">
 
   <!-- Market Regime Banners -->
-  <div class="regime-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;width:100%;box-sizing:border-box">
+  <div class="regime-grid" style="margin-bottom:16px">
     <!-- Stocks Regime -->
     <div style="padding:12px 14px;border-radius:12px;background:{regime_bg};border:1px solid {regime_border}">
       <div style="margin-bottom:8px">
