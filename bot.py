@@ -74,25 +74,40 @@ _last_binance_call  = 0.0
 _binance_ban_until  = 0.0   # epoch time when ban expires — stop ALL calls until then
 
 # ── Safety settings ───────────────────────────────────────────
-MAX_DAILY_LOSS      = 50.0    # $ shut off if day loss hits this
+# ─────────────────────────────────────────────────────────────
+# ACCOUNT SIZE — set STARTING_BALANCE in Railway Variables, everything scales
+# ─────────────────────────────────────────────────────────────
+STARTING_BALANCE    = float(os.getenv("STARTING_BALANCE", "1000.0"))  # $ — set in Railway Variables
+
+# All risk limits as % of portfolio — scale automatically forever
+MAX_DAILY_LOSS_PCT      = 0.5   # 0.5%  → $5 on $1k  | $50 on $10k
+MAX_DAILY_SPEND_PCT     = 50.0  # 50%   → $500 on $1k | $5,000 on $10k
+MAX_EXPOSURE_PCT        = 30.0  # 30%   → $300 on $1k | $3,000 on $10k
+DAILY_PROFIT_TARGET_PCT = 2.0   # 2%    → $20 on $1k  | $200 on $10k
+MAX_TRADE_PCT           = 5.0   # 5%    → $50 on $1k  | $500 on $10k
+
+# Computed from STARTING_BALANCE — do not edit these directly
+MAX_DAILY_LOSS         = STARTING_BALANCE * MAX_DAILY_LOSS_PCT / 100
+MAX_DAILY_SPEND        = STARTING_BALANCE * MAX_DAILY_SPEND_PCT / 100
+MAX_PORTFOLIO_EXPOSURE = STARTING_BALANCE * MAX_EXPOSURE_PCT / 100
+DAILY_PROFIT_TARGET    = STARTING_BALANCE * DAILY_PROFIT_TARGET_PCT / 100
+MAX_TRADE_VALUE        = STARTING_BALANCE * MAX_TRADE_PCT / 100
+
 STOP_LOSS_PCT       = 5.0     # % swing stop (wide — give stocks room to breathe)
 TRAILING_STOP_PCT   = 2.0     # % trail — only activates after TRAIL_TRIGGER_PCT profit
 TRAIL_TRIGGER_PCT   = 3.0     # % profit required before trailing stop activates
 TAKE_PROFIT_PCT     = 10.0    # % take profit — wider to match wider stop
-MAX_HOLD_DAYS       = 5       # days max hold (extended to match wider stop logic)
+MAX_HOLD_DAYS       = 5       # days max hold
 GAP_DOWN_PCT        = 3.0     # % gap down at open triggers immediate sell
 MAX_POSITIONS       = 3       # per-bot position limit
-MAX_TOTAL_POSITIONS = 3       # GLOBAL cap — hard limit, no exceptions (quality > quantity)
-MAX_DAILY_SPEND     = 5000.0
-MAX_PORTFOLIO_EXPOSURE = 3000.0
-DAILY_PROFIT_TARGET = 200.0   # $ — lowered: survival > profit in early phase
+MAX_TOTAL_POSITIONS = 3       # GLOBAL cap — hard limit, no exceptions
 MAX_TRADES_PER_DAY  = 5       # hard cap on total trades per day across all bots
 CYCLE_SECONDS          = 60
 INTRADAY_CYCLE_SECONDS = 10
 
 # ── Risk-based position sizing ────────────────────────────────
 RISK_PER_TRADE_PCT  = 1.0     # % of portfolio to risk per trade
-MAX_TRADE_VALUE     = 500.0   # $ hard cap on any single trade
+MAX_TRADE_VALUE     = STARTING_BALANCE * MAX_TRADE_PCT / 100  # auto-scaled
 
 # ── Signal quality threshold ──────────────────────────────────
 MIN_SIGNAL_SCORE    = 5       # 0-11 score — trade if score >= this
@@ -130,7 +145,7 @@ MACRO_KEYWORDS        = [      # macro news terms that trigger full pause
 # ── Crypto regime settings ────────────────────────────────────
 BTC_MA_PERIOD         = 20     # BTC moving average period
 BTC_CRASH_PCT         = 5.0    # % BTC single-day drop = volatility spike
-CRYPTO_MAX_EXPOSURE   = 2000.0 # $ max total in open crypto positions
+CRYPTO_MAX_EXPOSURE   = STARTING_BALANCE * CRYPTO_EXPOSURE_PCT / 100
 
 # ── Intraday scanner settings ────────────────────────────────
 INTRADAY_TIMEFRAME      = "1Hour"   # bar size for stock intraday scanner
@@ -142,7 +157,7 @@ INTRADAY_VOL_RATIO      = 1.5       # volume confirmation
 INTRADAY_TAKE_PROFIT    = 2.5       # % — smaller target for intraday
 INTRADAY_STOP_LOSS      = 1.0       # % — tighter stop for intraday
 INTRADAY_MAX_POSITIONS  = 2         # separate limit from swing positions
-INTRADAY_MAX_TRADE      = 300.0     # $ — smaller size per intraday trade
+INTRADAY_MAX_TRADE      = STARTING_BALANCE * INTRADAY_TRADE_PCT / 100
 INTRADAY_START_HOUR_ET  = 10        # don't trade first 30 mins (volatile open)
 INTRADAY_END_HOUR_ET    = 15        # stop at 3pm ET — avoid volatile close
 
@@ -154,7 +169,7 @@ CRYPTO_INTRADAY_EMA_SLOW  = 13
 CRYPTO_INTRADAY_TP        = 2.0     # % take profit — crypto moves fast
 CRYPTO_INTRADAY_SL        = 1.0     # % stop loss
 CRYPTO_INTRADAY_MAX_POS   = 2       # separate from swing crypto positions
-CRYPTO_INTRADAY_MAX_TRADE = 200.0   # $ per intraday crypto trade
+CRYPTO_INTRADAY_MAX_TRADE = STARTING_BALANCE * CRYPTO_INTRADAY_PCT / 100
 CRYPTO_INTRADAY_VOL_RATIO = 1.5
 
 # ── Small cap settings ───────────────────────────────────────
@@ -162,7 +177,7 @@ SMALLCAP_MIN_PRICE    = 2.0    # $ minimum price
 SMALLCAP_MAX_PRICE    = 20.0   # $ maximum price
 SMALLCAP_POOL_SIZE    = 50     # number of small caps to maintain
 SMALLCAP_STOP_LOSS    = 1.5    # % tighter stop-loss for small caps
-SMALLCAP_MAX_TRADE    = 250.0  # $ smaller position size for small caps
+SMALLCAP_MAX_TRADE    = STARTING_BALANCE * SMALLCAP_TRADE_PCT / 100
 SMALLCAP_VOL_RATIO    = 2.0    # higher volume confirmation required
 SMALLCAP_REFRESH_DAYS = 7      # refresh pool every 7 days
 
@@ -3948,6 +3963,63 @@ def main():
 
             # Refresh account info each cycle
             account_info = alpaca_get("/v2/account") or account_info
+
+            # ── Dynamic limit scaling from live balances ──────
+            # Reads actual balance from BOTH Alpaca and Binance.
+            # Total portfolio = Alpaca + Binance combined.
+            # Stock limits scale from Alpaca balance.
+            # Crypto limits scale from Binance balance.
+            # Deposit more to either → limits scale up automatically.
+            # Never needs manual adjustment.
+            if account_info:
+                alpaca_pv = float(account_info.get("portfolio_value", 1000))
+
+                # Fetch Binance USDT balance (skip if banned)
+                binance_pv = 0.0
+                if USE_BINANCE and time.time() >= _binance_ban_until:
+                    try:
+                        binance_pv = binance_get_balance("USDT") or 0.0
+                    except:
+                        binance_pv = 0.0
+
+                # Total combined portfolio
+                total_pv = alpaca_pv + binance_pv
+
+                # Stock limits scale from Alpaca balance only
+                alpaca_ratio = alpaca_pv / total_pv if total_pv > 0 else 1.0
+
+                # Crypto limits scale from Binance balance only
+                binance_ratio = binance_pv / total_pv if total_pv > 0 else 0.0
+
+                global MAX_DAILY_LOSS, MAX_DAILY_SPEND, MAX_PORTFOLIO_EXPOSURE
+                global DAILY_PROFIT_TARGET, MAX_TRADE_VALUE, CRYPTO_MAX_EXPOSURE
+                global INTRADAY_MAX_TRADE, CRYPTO_INTRADAY_MAX_TRADE, SMALLCAP_MAX_TRADE
+
+                # Global limits — based on total portfolio
+                MAX_DAILY_LOSS         = total_pv * MAX_DAILY_LOSS_PCT / 100
+                DAILY_PROFIT_TARGET    = total_pv * DAILY_PROFIT_TARGET_PCT / 100
+
+                # Stock limits — proportional to Alpaca balance
+                MAX_DAILY_SPEND        = alpaca_pv * MAX_DAILY_SPEND_PCT / 100
+                MAX_PORTFOLIO_EXPOSURE = alpaca_pv * MAX_EXPOSURE_PCT / 100
+                MAX_TRADE_VALUE        = alpaca_pv * MAX_TRADE_PCT / 100
+                INTRADAY_MAX_TRADE     = alpaca_pv * 0.03
+                SMALLCAP_MAX_TRADE     = alpaca_pv * 0.025
+
+                # Crypto limits — proportional to Binance balance
+                # If no Binance balance yet, use a small % of Alpaca as fallback
+                crypto_base            = binance_pv if binance_pv > 0 else alpaca_pv * 0.20
+                CRYPTO_MAX_EXPOSURE    = crypto_base * MAX_EXPOSURE_PCT / 100
+                CRYPTO_INTRADAY_MAX_TRADE = crypto_base * 0.02
+
+                log.info(
+                    f"[SIZING] Alpaca:${alpaca_pv:,.2f} ({alpaca_ratio*100:.0f}%) + "
+                    f"Binance:${binance_pv:,.2f} ({binance_ratio*100:.0f}%) = "
+                    f"Total:${total_pv:,.2f} | "
+                    f"StockTrade:${MAX_TRADE_VALUE:.0f} "
+                    f"CryptoTrade:${CRYPTO_INTRADAY_MAX_TRADE:.0f} "
+                    f"DailyLoss:${MAX_DAILY_LOSS:.0f}"
+                )
 
             # Update performance analytics
             if account_info:
