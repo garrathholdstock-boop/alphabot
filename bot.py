@@ -257,6 +257,46 @@ global_risk = {
     "vix_level":        None,    # latest VIX reading for vol sizing
 }
 
+# ── Sector correlation map ───────────────────────────────────
+# Prevents holding multiple stocks from the same sector simultaneously
+SECTOR_MAP = {
+    # Semiconductors
+    "NVDA":"SEMI","AMD":"SEMI","INTC":"SEMI","QCOM":"SEMI","AVGO":"SEMI",
+    "MU":"SEMI","AMAT":"SEMI","LRCX":"SEMI","KLAC":"SEMI","TXN":"SEMI","MRVL":"SEMI","SOXL":"SEMI",
+    # Mega cap tech
+    "AAPL":"BIGTECH","MSFT":"BIGTECH","GOOGL":"BIGTECH","AMZN":"BIGTECH",
+    "META":"BIGTECH","NFLX":"BIGTECH","ORCL":"BIGTECH","ADBE":"BIGTECH",
+    # EV
+    "TSLA":"EV","RIVN":"EV","LCID":"EV","NIO":"EV","XPEV":"EV","LI":"EV",
+    "BLNK":"EV","CHPT":"EV","WKHS":"EV","NKLA":"EV",
+    # Crypto-adjacent
+    "COIN":"CRYPTO_STOCK","MARA":"CRYPTO_STOCK","RIOT":"CRYPTO_STOCK","HOOD":"CRYPTO_STOCK",
+    # Fintech
+    "SQ":"FINTECH","PYPL":"FINTECH","SOFI":"FINTECH","AFRM":"FINTECH","UPST":"FINTECH","NU":"FINTECH",
+    # AI/Cloud
+    "PLTR":"AI","AI":"AI","PATH":"AI","SNOW":"AI","DDOG":"AI",
+    "NET":"AI","CRWD":"AI","ZS":"AI","OKTA":"AI","MDB":"AI",
+    # Energy
+    "XOM":"ENERGY","CVX":"ENERGY","OXY":"ENERGY","SLB":"ENERGY","HAL":"ENERGY",
+    "MPC":"ENERGY","VLO":"ENERGY","PSX":"ENERGY","DVN":"ENERGY","FANG":"ENERGY",
+    # Biotech
+    "MRNA":"BIOTECH","BNTX":"BIOTECH","NVAX":"BIOTECH","HIMS":"BIOTECH",
+    "TDOC":"BIOTECH","ACCD":"BIOTECH","SDGR":"BIOTECH","RXRX":"BIOTECH","BEAM":"BIOTECH",
+    # Crypto pairs — each is its own sector
+    "BTC/USD":"BTC","ETH/USD":"ETH","BTCUSDT":"BTC","ETHUSDT":"ETH",
+}
+MAX_SECTOR_POSITIONS = 1  # only 1 stock per sector at a time
+
+def sectors_held():
+    """Return set of sectors currently held across all bots."""
+    held = {}
+    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+        for sym in st.positions:
+            sector = SECTOR_MAP.get(sym)
+            if sector:
+                held[sector] = held.get(sector, 0) + 1
+    return held
+
 # ── Performance analytics ─────────────────────────────────────
 perf = {
     "all_trades":      [],       # every completed trade
@@ -321,9 +361,11 @@ def alpaca_get(path, base=None):
     try:
         r = requests.get((base or ALPACA_BASE) + path, headers=HEADERS, timeout=10)
         r.raise_for_status()
+        record_api_success()
         return r.json()
     except Exception as e:
         log.warning(f"GET {path}: {e}")
+        record_api_failure("alpaca")
         return None
 
 def alpaca_post(path, body):
@@ -368,6 +410,31 @@ def update_exchange_stop(symbol, qty, new_stop_price):
 
 # Track exchange stop order IDs per position
 exchange_stops = {}  # { symbol: order_id }
+
+# ── API health tracking ───────────────────────────────────────
+api_health = {
+    "alpaca_fails":  0,    # consecutive Alpaca failures
+    "data_fails":    0,    # consecutive data fetch failures
+    "last_success":  None, # timestamp of last successful API call
+    "max_fails":     5,    # kill switch if this many consecutive failures
+}
+
+def record_api_success():
+    api_health["alpaca_fails"] = 0
+    api_health["data_fails"]   = 0
+    api_health["last_success"] = datetime.now().isoformat()
+
+def record_api_failure(source="alpaca"):
+    key = f"{source}_fails"
+    api_health[key] = api_health.get(key, 0) + 1
+    total_fails = api_health["alpaca_fails"] + api_health["data_fails"]
+    if total_fails >= api_health["max_fails"] and not kill_switch["active"]:
+        kill_switch["active"]       = True
+        kill_switch["reason"]       = f"API kill: {total_fails} consecutive failures ({source})"
+        kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
+        for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+            st.shutoff = True
+        log.error(f"[API KILL] {total_fails} consecutive API failures — all bots stopped to prevent blind trading")
 
 # ── Global kill switch ────────────────────────────────────────
 kill_switch = {
@@ -573,7 +640,9 @@ def fetch_bars_batch(symbols, limit=30):
             r = requests.get(url, headers=HEADERS, timeout=30)
             if not r.ok:
                 log.warning(f"[BATCH] Bars fetch failed: {r.status_code}")
+                record_api_failure("data")
                 continue
+            record_api_success()
             data = r.json().get("bars", {})
             for sym, bars in data.items():
                 if bars and len(bars) >= 15:
@@ -632,6 +701,9 @@ def fetch_bars(symbol, crypto=False):
 def fetch_latest_price(symbol, crypto=False):
     """Fetch latest price. Routes crypto to Binance if configured."""
     if crypto and USE_BINANCE:
+        # Hard stop — never call Binance during a ban
+        if time.time() < _binance_ban_until:
+            return None
         return binance_fetch_price(symbol)
     try:
         if crypto:
@@ -1284,6 +1356,12 @@ def run_intraday_cycle(watchlist, st):
         if s["symbol"] in all_symbols_held():
             log.info(f"[INTRADAY] SKIP {s['symbol']} — already held by another bot")
             continue
+        # Sector correlation cap
+        sym_sector = SECTOR_MAP.get(s["symbol"])
+        if sym_sector:
+            if sectors_held().get(sym_sector, 0) >= MAX_SECTOR_POSITIONS:
+                log.info(f"[INTRADAY] SKIP {s['symbol']} — sector {sym_sector} full")
+                continue
         qty = max(1, int(INTRADAY_MAX_TRADE / s["price"]))
         trade_val = qty * s["price"]
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
@@ -1339,12 +1417,12 @@ def run_crypto_intraday_cycle(watchlist, st):
     """15-minute bar scanner for crypto spikes. Runs 24/7."""
     st.check_reset()
     if st.shutoff: return
+    # Ban check FIRST — before anything else touches Binance
+    if USE_BINANCE and time.time() < _binance_ban_until:
+        return  # silent skip during ban — no Binance calls at all
     if crypto_regime["mode"] == "BEAR":
         log.info("[CRYPTO_ID] Bear mode — skipping intraday buys")
         return
-    # Skip if Binance is rate limited — don't hammer during ban
-    if USE_BINANCE and time.time() < _binance_ban_until:
-        return  # silent skip during ban
 
     st.running    = True
     st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1578,6 +1656,28 @@ import threading as _threading
 _state_lock = _threading.Lock()
 
 # ── Volatility-adjusted trade sizing ─────────────────────────
+def equity_curve_size_factor():
+    """Auto-reduce position size based on current drawdown from peak portfolio.
+    If bot is losing, it trades smaller — protecting remaining capital.
+    Returns a multiplier between 0.25 and 1.0."""
+    if perf["peak_portfolio"] <= 0 or not account_info:
+        return 1.0
+    current_pv  = float(account_info.get("portfolio_value", perf["peak_portfolio"]))
+    drawdown_pct = ((perf["peak_portfolio"] - current_pv) / perf["peak_portfolio"]) * 100
+    if drawdown_pct <= 0:
+        return 1.0    # at or above peak — full size
+    if drawdown_pct >= 10:
+        log.warning(f"[EQUITY CURVE] Drawdown {drawdown_pct:.1f}% — trading at 25% size")
+        return 0.25   # 10%+ drawdown — quarter size
+    if drawdown_pct >= 5:
+        log.info(f"[EQUITY CURVE] Drawdown {drawdown_pct:.1f}% — trading at 50% size")
+        return 0.5    # 5-10% drawdown — half size
+    if drawdown_pct >= 2:
+        log.info(f"[EQUITY CURVE] Drawdown {drawdown_pct:.1f}% — trading at 75% size")
+        return 0.75   # 2-5% drawdown — 3/4 size
+    return 1.0
+
+
 def vol_adjusted_size(base_size):
     """Scale position size down when VIX is elevated."""
     vix = global_risk.get("vix_level")
@@ -1607,17 +1707,100 @@ def is_loss_streak_paused():
         return True
     return False
 
+# Dynamic kill switch config
+RAPID_LOSS_COUNT   = 3     # number of losses
+RAPID_LOSS_MINUTES = 15    # within this many minutes
+RAPID_LOSS_AMOUNT  = 30.0  # OR total loss > this $ in window
+
 def record_trade_result(pnl, symbol):
-    """Track loss streaks and trigger pause if needed."""
-    perf["all_trades"].append({"pnl": pnl, "symbol": symbol, "time": datetime.now().isoformat()})
+    """Track loss streaks, rapid losses, and trigger pauses/kill if needed."""
+    now_iso = datetime.now().isoformat()
+    perf["all_trades"].append({
+        "pnl": pnl, "symbol": symbol, "time": now_iso,
+        "score": None,  # filled by caller if available
+    })
     if pnl < 0:
         global_risk["loss_streak"] += 1
         if global_risk["loss_streak"] >= LOSS_STREAK_LIMIT:
             pause_until = datetime.now() + timedelta(seconds=LOSS_STREAK_PAUSE)
             global_risk["paused_until"] = pause_until
-            log.warning(f"[RISK] {LOSS_STREAK_LIMIT} consecutive losses — pausing all trading for 1 hour until {pause_until.strftime('%H:%M')}")
+            log.warning(f"[RISK] {LOSS_STREAK_LIMIT} consecutive losses — pausing until {pause_until.strftime('%H:%M')}")
     else:
-        global_risk["loss_streak"] = 0  # reset on win
+        global_risk["loss_streak"] = 0
+
+    # Dynamic kill switch — X losses in Y minutes
+    window_start = datetime.now() - timedelta(minutes=RAPID_LOSS_MINUTES)
+    recent_losses = [
+        t for t in perf["all_trades"]
+        if t["pnl"] < 0
+        and datetime.fromisoformat(t["time"]) > window_start
+    ]
+    recent_loss_total = sum(abs(t["pnl"]) for t in recent_losses)
+    if len(recent_losses) >= RAPID_LOSS_COUNT or recent_loss_total >= RAPID_LOSS_AMOUNT:
+        if not kill_switch["active"]:
+            kill_switch["active"]       = True
+            kill_switch["reason"]       = f"Dynamic kill: {len(recent_losses)} losses (${recent_loss_total:.2f}) in {RAPID_LOSS_MINUTES}min"
+            kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
+            for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+                st.shutoff = True
+            log.warning(f"[DYNAMIC KILL] {kill_switch['reason']} — all bots stopped!")
+
+def record_trade_with_score(pnl, symbol, score=None, signal=None, rsi=None, vol_ratio=None, hold_hours=None):
+    """Enhanced trade recording that logs signal quality vs outcome.
+    This is the data that tells you where your real edge is."""
+    record_trade_result(pnl, symbol)
+    # Enrich the last trade record with signal context
+    if perf["all_trades"]:
+        perf["all_trades"][-1].update({
+            "score":      score,
+            "signal":     signal,
+            "rsi":        rsi,
+            "vol_ratio":  vol_ratio,
+            "hold_hours": hold_hours,
+            "outcome":    "WIN" if pnl > 0 else "LOSS",
+        })
+
+def analyse_edge():
+    """Analyse signal score vs win rate to find your real edge.
+    Run this to understand which setups actually work."""
+    trades = [t for t in perf["all_trades"] if t.get("score") is not None and t.get("pnl") is not None]
+    if len(trades) < 5:
+        return "Not enough trades yet (need 5+)"
+
+    # Group by score bucket
+    buckets = {}
+    for t in trades:
+        bucket = f"{int(t['score'])}-{int(t['score'])+1}"
+        if bucket not in buckets:
+            buckets[bucket] = {"wins": 0, "losses": 0, "total_pnl": 0}
+        if t["pnl"] > 0:
+            buckets[bucket]["wins"] += 1
+        else:
+            buckets[bucket]["losses"] += 1
+        buckets[bucket]["total_pnl"] += t["pnl"]
+
+    lines = ["SIGNAL SCORE vs OUTCOME ANALYSIS", "=" * 40]
+    for bucket in sorted(buckets.keys()):
+        b = buckets[bucket]
+        total = b["wins"] + b["losses"]
+        win_rate = int(b["wins"] / total * 100) if total > 0 else 0
+        lines.append(
+            f"  Score {bucket}: {total} trades | "
+            f"Win rate: {win_rate}% | "
+            f"P&L: ${b['total_pnl']:+.2f} | "
+            f"{'✅ EDGE' if win_rate >= 55 else '❌ NO EDGE'}"
+        )
+
+    # Best and worst performing scores
+    best = max(buckets.items(), key=lambda x: x[1]["total_pnl"])
+    worst = min(buckets.items(), key=lambda x: x[1]["total_pnl"])
+    lines.append(f"  Best score bucket:  {best[0]} (${best[1]['total_pnl']:+.2f})")
+    lines.append(f"  Worst score bucket: {worst[0]} (${worst[1]['total_pnl']:+.2f})")
+    rec = "Raise MIN_SIGNAL_SCORE to " + best[0].split("-")[0] if best[0] != sorted(buckets.keys())[0] else "Keep current threshold"
+    lines.append(f"  Recommendation: {rec}")
+    lines.append("=" * 40)
+    return "\n".join(lines)
+
 
 # ── Breakout signal ───────────────────────────────────────────
 # ── Relative Strength vs SPY ─────────────────────────────────
@@ -2176,9 +2359,9 @@ def calc_unrealized_pnl(st):
 def check_stop_losses(st, crypto=False):
     """Check all open positions for stop-loss, trailing stop, take-profit, max hold days.
     Also checks unrealized P&L against daily loss limit."""
-    # Skip live price checks if Binance is banned — use cached prices instead
+    # Hard stop — skip ALL live price fetches during Binance ban
     if crypto and USE_BINANCE and time.time() < _binance_ban_until:
-        log.debug("[STOPS] Binance banned — using cached prices for stop checks")
+        return  # positions safe — exchange stops protect them during ban
     now = datetime.now()
 
     # FIX: Check TOTAL loss including unrealized open positions
@@ -2273,24 +2456,21 @@ def run_cycle(watchlist, st, crypto=False):
         log.info(f"[{st.label}] Market closed ({et.strftime('%H:%M ET')})")
         return
 
+    # Ban check and kill switch BEFORE setting running=True or touching any data
+    if crypto and USE_BINANCE and time.time() < _binance_ban_until:
+        remaining = int(_binance_ban_until - time.time())
+        log.info(f"[{st.label}] Binance ban active ({remaining}s remaining) — skipping cycle silently")
+        return
+
+    if kill_switch["active"]:
+        log.info(f"[{st.label}] Kill switch active — no trading")
+        return
+
     st.running     = True
     st.last_cycle  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
     regime = market_regime["mode"]
     log.info(f"[{st.label}] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Regime: {regime}")
-
-    # Skip entire cycle if Binance is banned — no point trying
-    if crypto and USE_BINANCE and time.time() < _binance_ban_until:
-        remaining = int(_binance_ban_until - time.time())
-        log.info(f"[{st.label}] Binance ban active ({remaining}s remaining) — skipping cycle silently")
-        st.running = False
-        return
-
-    # Global kill switch — stop all trading immediately
-    if kill_switch["active"]:
-        log.info(f"[{st.label}] Kill switch active — no trading")
-        st.running = False
-        return
 
     check_stop_losses(st, crypto=crypto)
     if st.shutoff: return
@@ -2372,6 +2552,13 @@ def run_cycle(watchlist, st, crypto=False):
         if s["symbol"] in all_symbols_held():
             log.info(f"[{st.label}] SKIP {s['symbol']} — already held by another bot")
             continue
+        # Sector correlation cap — prevent holding multiple stocks in same sector
+        sym_sector = SECTOR_MAP.get(s["symbol"])
+        if sym_sector:
+            held_sectors = sectors_held()
+            if held_sectors.get(sym_sector, 0) >= MAX_SECTOR_POSITIONS:
+                log.info(f"[{st.label}] SKIP {s['symbol']} — sector {sym_sector} already at max ({MAX_SECTOR_POSITIONS})")
+                continue
         # Wash sale cooldown — don't re-buy a stock sold at a loss today
         cooldown_expiry = st.loss_cooldown.get(s["symbol"], 0)
         if time.time() < cooldown_expiry:
@@ -2396,7 +2583,7 @@ def run_cycle(watchlist, st, crypto=False):
         stop_pct   = CRYPTO_STOP_PCT if crypto else STOP_LOSS_PCT
         base_size  = risk_based_size(pv, stop_pct)
         # Apply vol adjustment and news boost on top
-        adj_size   = vol_adjusted_size(base_size) * news_size_multiplier(s["symbol"])
+        adj_size   = vol_adjusted_size(base_size) * news_size_multiplier(s["symbol"]) * equity_curve_size_factor()
         adj_size   = min(adj_size, MAX_TRADE_VALUE * 1.5)
         qty = max(0.0001, round(adj_size / s["price"], 6)) if crypto else max(1, int(adj_size / s["price"]))
         trade_val = qty * s["price"]
@@ -2470,6 +2657,7 @@ def run_cycle(watchlist, st, crypto=False):
                 "breakdown": breakdown})
             st.positions[s["symbol"]]["entry_ts"] = datetime.now().isoformat()
             st.positions[s["symbol"]]["entry_breakdown"] = breakdown
+            st.positions[s["symbol"]]["signal_score"] = sig_score
             pos_count += 1
 
     # Close SELL positions
@@ -2554,6 +2742,9 @@ def send_daily_summary():
         f"{stocks_near_miss}\n{crypto_near_miss}"
     )
 
+    # Edge analysis
+    edge_analysis = analyse_edge()
+
     body = (f"AlphaBot Daily Summary\n{'='*40}\n"
             f"Date: {datetime.now().strftime('%A, %d %B %Y')}\n"
             f"Mode: {'LIVE' if IS_LIVE else 'Paper'} Trading\n"
@@ -2561,6 +2752,7 @@ def send_daily_summary():
             f"{section(state)}\n{section(smallcap_state)}\n{section(intraday_state)}\n{section(crypto_state)}\n{section(crypto_intraday_state)}\n"
             f"{news_summary}"
             f"{near_miss_summary}\n"
+            f"\nEDGE ANALYSIS\n{edge_analysis}\n"
             f"{'='*40}\nSent by AlphaBot on Railway")
     try:
         msg = MIMEMultipart()
@@ -3699,11 +3891,12 @@ def main():
             # Watchdog — log health every cycle so you can detect silent failures
             now_ts = time.time()
             last_watchdog = now_ts
-            log.info(f"[WATCHDOG] Cycle {cycle} alive | Stocks P&L: ${state.daily_pnl:+.2f} | Crypto P&L: ${crypto_state.daily_pnl:+.2f} | Positions: {len(state.positions)}S/{len(crypto_state.positions)}C | {datetime.now().strftime('%H:%M:%S')}")
+            log.info(f"[WATCHDOG] Cycle {cycle} alive | Stocks P&L: ${state.daily_pnl:+.2f} | Crypto P&L: ${crypto_state.daily_pnl:+.2f} | Positions: {len(state.positions)}S/{len(crypto_state.positions)}C | API fails: {api_health['alpaca_fails']} | {datetime.now().strftime('%H:%M:%S')}")
 
-            # Verify exchange stops still exist every 10 cycles (~10 mins)
-            if cycle % 10 == 0 and state.positions:
+            # Every 10 cycles: verify exchange stops AND reconcile positions with broker
+            if cycle % 10 == 0:
                 try:
+                    # ── Stop order verification ──
                     open_orders = alpaca_get("/v2/orders?status=open") or []
                     stop_syms = {o["symbol"] for o in open_orders if o.get("type") == "stop"}
                     for sym, pos in state.positions.items():
@@ -3712,8 +3905,46 @@ def main():
                             stop_order = place_stop_order_alpaca(sym, pos["qty"], round(pos["stop_price"], 2))
                             if stop_order and stop_order.get("id"):
                                 exchange_stops[sym] = stop_order["id"]
+
+                    # ── Position reconciliation ──
+                    broker_positions = alpaca_get("/v2/positions") or []
+                    broker_syms = {p["symbol"] for p in broker_positions}
+                    local_syms  = set(state.positions.keys())
+
+                    # Positions we think we have but broker doesn't
+                    phantom = local_syms - broker_syms
+                    for sym in phantom:
+                        log.warning(f"[RECONCILE] {sym} in local state but NOT on broker — removing phantom position")
+                        del state.positions[sym]
+
+                    # Positions broker has that we don't know about
+                    unknown = broker_syms - local_syms
+                    for p in broker_positions:
+                        sym = p["symbol"]
+                        if sym in unknown:
+                            entry = float(p.get("avg_entry_price", 0))
+                            qty   = float(p.get("qty", 0))
+                            stop  = entry * (1 - STOP_LOSS_PCT / 100)
+                            tp    = entry * (1 + TAKE_PROFIT_PCT / 100)
+                            state.positions[sym] = {
+                                "qty": qty, "entry_price": entry, "stop_price": stop,
+                                "highest_price": entry, "take_profit_price": tp,
+                                "entry_date": datetime.now().date().isoformat(),
+                                "days_held": 0, "entry_ts": datetime.now().isoformat(),
+                            }
+                            log.warning(f"[RECONCILE] {sym} found on broker but missing locally — re-added")
+                            # Place exchange stop for newly discovered position
+                            stop_order = place_stop_order_alpaca(sym, qty, round(stop, 2))
+                            if stop_order and stop_order.get("id"):
+                                exchange_stops[sym] = stop_order["id"]
+
+                    if phantom or unknown:
+                        log.info(f"[RECONCILE] Fixed {len(phantom)} phantom + {len(unknown)} missing positions")
+                    else:
+                        log.info(f"[RECONCILE] Positions in sync ({len(broker_syms)} on broker)")
+
                 except Exception as e:
-                    log.warning(f"[WATCHDOG] Stop check failed: {e}")
+                    log.warning(f"[WATCHDOG] Reconciliation failed: {e}")
 
             # Refresh account info each cycle
             account_info = alpaca_get("/v2/account") or account_info
