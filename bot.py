@@ -3599,8 +3599,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data.encode())
             return
-        with _state_lock:
-            html = build_dashboard()
+        try:
+            with _state_lock:
+                html = build_dashboard()
+        except Exception as e:
+            log.error(f"[DASHBOARD] build_dashboard() failed: {e}")
+            import traceback
+            log.error(traceback.format_exc())
+            html = f"<html><body style='background:#111;color:#fff;padding:40px;font-family:monospace'><h2>Dashboard Error</h2><pre>{e}</pre></body></html>"
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
