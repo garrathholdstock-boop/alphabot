@@ -1241,6 +1241,9 @@ def run_crypto_intraday_cycle(watchlist, st):
     if crypto_regime["mode"] == "BEAR":
         log.info("[CRYPTO_ID] Bear mode — skipping intraday buys")
         return
+    # Skip if Binance is rate limited — don't hammer during ban
+    if USE_BINANCE and time.time() < _binance_ban_until:
+        return  # silent skip during ban
 
     st.running    = True
     st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1250,8 +1253,11 @@ def run_crypto_intraday_cycle(watchlist, st):
     check_intraday_positions(st, crypto=True)
     if st.shutoff: st.running = False; return
 
+    # Limit to top 10 coins when using Binance to avoid rate limits
+    # Full list runs fine on Alpaca crypto
+    scan_list = watchlist[:10] if USE_BINANCE else watchlist
     results = []
-    for sym in watchlist:
+    for sym in scan_list:
         bars = fetch_intraday_bars(sym, timeframe=CRYPTO_INTRADAY_TIMEFRAME,
                                    limit=CRYPTO_INTRADAY_BARS, crypto=True)
         if not bars or len(bars) < 14: continue
@@ -1398,7 +1404,8 @@ def update_crypto_regime():
     """Check BTC trend and volatility to determine crypto BULL or BEAR mode."""
     global crypto_regime
 
-    btc_bars = fetch_bars("BTC/USD", crypto=True)
+    btc_symbol = "BTCUSDT" if USE_BINANCE else "BTC/USD"
+    btc_bars = fetch_bars(btc_symbol, crypto=True)
     if not btc_bars or len(btc_bars) < BTC_MA_PERIOD:
         log.info("[CRYPTO REGIME] Not enough BTC data — staying in current mode")
         return crypto_regime["mode"]
@@ -1899,6 +1906,9 @@ def calc_unrealized_pnl(st):
 def check_stop_losses(st, crypto=False):
     """Check all open positions for stop-loss, trailing stop, take-profit, max hold days.
     Also checks unrealized P&L against daily loss limit."""
+    # Skip live price checks if Binance is banned — use cached prices instead
+    if crypto and USE_BINANCE and time.time() < _binance_ban_until:
+        log.debug("[STOPS] Binance banned — using cached prices for stop checks")
     now = datetime.now()
 
     # FIX: Check TOTAL loss including unrealized open positions
@@ -1998,6 +2008,13 @@ def run_cycle(watchlist, st, crypto=False):
     st.cycle_count += 1
     regime = market_regime["mode"]
     log.info(f"[{st.label}] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Regime: {regime}")
+
+    # Skip entire cycle if Binance is banned — no point trying
+    if crypto and USE_BINANCE and time.time() < _binance_ban_until:
+        remaining = int(_binance_ban_until - time.time())
+        log.info(f"[{st.label}] Binance ban active ({remaining}s remaining) — skipping cycle silently")
+        st.running = False
+        return
 
     check_stop_losses(st, crypto=crypto)
     if st.shutoff: return
