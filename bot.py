@@ -42,6 +42,13 @@ DATA_BASE      = "https://data.alpaca.markets"
 NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "")       # from newsapi.org — free tier
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")     # from console.anthropic.com
 
+# ── Binance (crypto only) ─────────────────────────────────────
+BINANCE_KEY    = os.environ.get("BINANCE_KEY",    "")
+BINANCE_SECRET = os.environ.get("BINANCE_SECRET", "")
+BINANCE_BASE   = "https://api.binance.com"
+BINANCE_TEST   = "https://testnet.binance.vision"   # paper trading endpoint
+USE_BINANCE    = bool(BINANCE_KEY)                  # auto-detected from env vars
+
 # ── Safety settings ───────────────────────────────────────────
 MAX_DAILY_LOSS      = 50.0    # $ shut off if day loss hits this
 STOP_LOSS_PCT       = 2.0     # % initial stop-loss below entry
@@ -122,12 +129,48 @@ US_WATCHLIST = [
     "GME","AMC","SPCE","WKHS","NKLA","OPEN","DKNG","CLOV","WISH","LCID",
 ]
 
-CRYPTO_WATCHLIST = [
+# ── Crypto watchlist ─────────────────────────────────────────
+# Alpaca format (used as fallback if Binance not configured): COIN/USD
+# Binance format (used when USE_BINANCE=True): COINUSDT
+# The bot auto-selects format based on USE_BINANCE flag
+
+CRYPTO_WATCHLIST_ALPACA = [
     "BTC/USD","ETH/USD","SOL/USD","AVAX/USD","DOGE/USD","SHIB/USD",
     "LTC/USD","BCH/USD","LINK/USD","DOT/USD","UNI/USD","AAVE/USD",
     "XTZ/USD","BAT/USD","CRV/USD","GRT/USD","MKR/USD","MATIC/USD",
     "ALGO/USD","XLM/USD","SUSHI/USD","YFI/USD","ETH/BTC",
 ]
+
+# Top 100 coins on Binance by volume — auto-refreshes weekly
+CRYPTO_WATCHLIST_BINANCE = [
+    # Large caps
+    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT",
+    "AVAXUSDT","DOGEUSDT","DOTUSDT","MATICUSDT","LINKUSDT","LTCUSDT",
+    "BCHUSDT","XLMUSDT","ATOMUSDT","ETCUSDT","FILUSDT","NEARUSDT",
+    "ALGOUSDT","VETUSDT","ICPUSDT","FTMUSDT","SANDUSDT","MANAUSDT",
+    # Mid caps — high volatility
+    "SHIBUSDT","PEPEUSDT","FLOKIUSDT","BONKUSDT","WIFUSDT","MEMEUSDT",
+    "AAVEUSDT","UNIUSDT","CRVUSDT","MKRUSDT","COMPUSDT","SNXUSDT",
+    "SUSHIUSDT","YFIUSDT","GRTUSDT","BATUSDT","ZRXUSDT","STORJUSDT",
+    # AI & tech tokens
+    "FETUSDT","AGIXUSDT","OCEANUSDT","RNDRУСDT","WLDUSDT","TAOУСDT",
+    "AIUSDT","ARKMUSDT","NMRUSDT","CORTEXUSDT",
+    # Layer 2 & infrastructure
+    "ARBUSDT","OPUSDT","STRKUSDT","ZKUSDT","MANTAUSDT","SCROLLUSDT",
+    "METISUSDT","BOBIUSDT","CELOUSDT","GLMRUSDT",
+    # Gaming & NFT
+    "AXSUSDT","SANDUSDT","MANAUSDT","GALAUSDT","IMXUSDT","FLOWUSDT",
+    "ENJUSDT","CHZUSDT","RARIUSDT","HIGHUSDT",
+    # DeFi
+    "JUPUSDT","RAYUSDT","ORCAUSDT","GMXUSDT","DYDXUSDT","PERPUSDT",
+    "KNCUSDT","BALUSDT","IDEXUSDT","LOOPUSDT",
+    # Other high-volume
+    "APTUSDT","SUIUSDT","SEIUSDT","TIAUSDT","INJUSDT","RUNEUSDT",
+    "KASUSDT","CFXUSDT","STXUSDT","HBARUSDT",
+]
+
+# Active list — switches based on USE_BINANCE flag
+CRYPTO_WATCHLIST = CRYPTO_WATCHLIST_BINANCE if USE_BINANCE else CRYPTO_WATCHLIST_ALPACA
 
 # ── Shared state (read by dashboard, written by bot) ─────────
 class BotState:
@@ -230,8 +273,114 @@ def alpaca_post(path, body):
         log.warning(f"POST {path}: {e}")
         return None
 
+# ── Binance API helpers ───────────────────────────────────────
+import hashlib, hmac, urllib.parse
+
+def _binance_sign(params):
+    """Sign Binance request with HMAC-SHA256."""
+    query = urllib.parse.urlencode(params)
+    sig   = hmac.new(BINANCE_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+    return query + "&signature=" + sig
+
+def _binance_ts():
+    return int(time.time() * 1000)
+
+BINANCE_HEADERS = {"X-MBX-APIKEY": BINANCE_KEY}
+
+def binance_get(path, params=None, signed=False):
+    try:
+        p = params or {}
+        if signed:
+            p["timestamp"] = _binance_ts()
+            url = f"{BINANCE_BASE}{path}?{_binance_sign(p)}"
+        else:
+            url = f"{BINANCE_BASE}{path}" + (f"?{urllib.parse.urlencode(p)}" if p else "")
+        r = requests.get(url, headers=BINANCE_HEADERS, timeout=10)
+        if not r.ok:
+            log.warning(f"Binance GET {path}: {r.status_code} {r.text[:100]}")
+            return None
+        return r.json()
+    except Exception as e:
+        log.warning(f"Binance GET {path}: {e}")
+        return None
+
+def binance_post(path, params):
+    try:
+        params["timestamp"] = _binance_ts()
+        url  = f"{BINANCE_BASE}{path}"
+        body = _binance_sign(params)
+        r = requests.post(url, data=body, headers=BINANCE_HEADERS, timeout=10)
+        if not r.ok:
+            log.warning(f"Binance POST {path}: {r.status_code} {r.text[:200]}")
+            return None
+        return r.json()
+    except Exception as e:
+        log.warning(f"Binance POST {path}: {e}")
+        return None
+
+def binance_fetch_bars(symbol, interval="1d", limit=35):
+    """Fetch OHLCV bars from Binance. interval: 1d, 1h, 15m etc."""
+    data = binance_get("/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
+    if not data or len(data) < 10:
+        return None
+    # Binance kline format: [open_time, open, high, low, close, volume, ...]
+    return [{"o": float(k[1]), "h": float(k[2]), "l": float(k[3]),
+             "c": float(k[4]), "v": float(k[5])} for k in data]
+
+def binance_fetch_price(symbol):
+    """Get latest price from Binance."""
+    data = binance_get("/api/v3/ticker/price", {"symbol": symbol})
+    return float(data["price"]) if data and "price" in data else None
+
+def binance_place_order(symbol, side, usdt_amount):
+    """Place a market order on Binance. usdt_amount = $ to spend."""
+    # Get current price to calculate qty
+    price = binance_fetch_price(symbol)
+    if not price:
+        log.error(f"[BINANCE] Cannot get price for {symbol}")
+        return None
+    # Binance requires qty in base asset — calculate from USDT amount
+    qty = round(usdt_amount / price, 6)
+    result = binance_post("/api/v3/order", {
+        "symbol":    symbol,
+        "side":      side.upper(),
+        "type":      "MARKET",
+        "quantity":  qty,
+    })
+    if result:
+        log.info(f"[BINANCE] ORDER {side.upper()} {qty} {symbol} @ ~${price:.4f}")
+    return result
+
+def binance_get_balance(asset="USDT"):
+    """Get available balance for an asset."""
+    data = binance_get("/api/v3/account", signed=True)
+    if not data:
+        return 0.0
+    for b in data.get("balances", []):
+        if b["asset"] == asset:
+            return float(b["free"])
+    return 0.0
+
+def binance_get_top_coins(limit=100):
+    """Get top coins by 24h volume from Binance. Returns USDT pairs only."""
+    tickers = binance_get("/api/v3/ticker/24hr")
+    if not tickers:
+        return CRYPTO_WATCHLIST_BINANCE  # fallback to static list
+    usdt = [t for t in tickers
+            if t["symbol"].endswith("USDT")
+            and float(t.get("quoteVolume", 0)) > 1_000_000  # min $1M daily volume
+            and not any(bad in t["symbol"] for bad in ["UP","DOWN","BEAR","BULL","LEVERAGE"])]
+    usdt.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
+    top = [t["symbol"] for t in usdt[:limit]]
+    log.info(f"[BINANCE] Top {len(top)} coins by volume fetched")
+    return top if top else CRYPTO_WATCHLIST_BINANCE
+
 # ── Market data ───────────────────────────────────────────────
 def fetch_bars(symbol, crypto=False):
+    """Fetch daily OHLCV bars. Routes crypto to Binance if configured."""
+    if crypto and USE_BINANCE:
+        bars = binance_fetch_bars(symbol, interval="1d", limit=35)
+        return bars if bars and len(bars) >= 15 else None
     end   = datetime.utcnow()
     start = end - timedelta(days=60)
     s, e  = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
@@ -249,6 +398,9 @@ def fetch_bars(symbol, crypto=False):
     except: return None
 
 def fetch_latest_price(symbol, crypto=False):
+    """Fetch latest price. Routes crypto to Binance if configured."""
+    if crypto and USE_BINANCE:
+        return binance_fetch_price(symbol)
     try:
         if crypto:
             enc = requests.utils.quote(symbol, safe="")
@@ -652,8 +804,18 @@ def check_macro_news():
         log.debug(f"[CIRCUIT] Macro check error: {e}")
 
 # ── Intraday bar fetchers ─────────────────────────────────────
+# Binance interval map: convert Alpaca-style timeframes to Binance format
+BINANCE_INTERVAL_MAP = {
+    "1Min": "1m", "5Min": "5m", "15Min": "15m", "30Min": "30m",
+    "1Hour": "1h", "2Hour": "2h", "4Hour": "4h", "1Day": "1d",
+}
+
 def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
-    """Fetch sub-daily bars (1h for stocks, 15min for crypto)."""
+    """Fetch sub-daily bars. Routes crypto to Binance if configured."""
+    if crypto and USE_BINANCE:
+        binance_tf = BINANCE_INTERVAL_MAP.get(timeframe, "15m")
+        bars = binance_fetch_bars(symbol, interval=binance_tf, limit=limit)
+        return bars if bars and len(bars) >= 10 else None
     try:
         if crypto:
             enc = requests.utils.quote(symbol, safe="")
@@ -1140,6 +1302,12 @@ def is_market_open():
 
 # ── Orders ────────────────────────────────────────────────────
 def place_order(symbol, side, qty, crypto=False):
+    """Place order. Routes crypto to Binance if configured, otherwise Alpaca."""
+    if crypto and USE_BINANCE:
+        # Binance uses USDT amount not qty — calculate from qty * price
+        price = binance_fetch_price(symbol)
+        usdt  = float(qty) * price if price else float(qty)
+        return binance_place_order(symbol, side, usdt)
     result = alpaca_post("/v2/orders", {
         "symbol": symbol, "qty": str(qty), "side": side,
         "type": "market", "time_in_force": "gtc" if crypto else "day",
@@ -1625,6 +1793,9 @@ def build_dashboard():
     sc_dot     = ("dot-green" if smallcap_state.running else "dot-gold") if not smallcap_state.shutoff else "dot-red"
     sc_status  = "Shut Off" if smallcap_state.shutoff else ("Running" if smallcap_state.running else "Idle")
 
+    # Binance status
+    binance_status = f"✅ Binance ({len(CRYPTO_WATCHLIST)} coins)" if USE_BINANCE else "⚠ Alpaca (25 coins only)"
+
     # Intraday state
     id_dot     = ("dot-green" if intraday_state.running else "dot-gold") if not intraday_state.shutoff else "dot-red"
     id_status  = "Shut Off" if intraday_state.shutoff else ("Running" if intraday_state.running else ("Window Closed" if not is_intraday_window() else "Idle"))
@@ -1900,6 +2071,7 @@ def build_dashboard():
         sc_last      = smallcap_state.last_cycle or "—",
         sc_pool_size = len(smallcap_pool["symbols"]),
         sc_refresh   = smallcap_pool.get("last_refresh", "Not yet"),
+        binance_label= "Binance" if USE_BINANCE else "Alpaca",
         id_dot       = id_dot,
         id_status    = id_status,
         id_cycle     = intraday_state.cycle_count,
@@ -1938,7 +2110,7 @@ def build_dashboard():
         c_regime_bg    = "rgba(255,68,102,0.08)" if c_regime == "BEAR" else "rgba(0,255,136,0.05)",
         c_regime_border= "rgba(255,68,102,0.25)" if c_regime == "BEAR" else "rgba(0,255,136,0.15)",
         c_regime_icon  = "🐻" if c_regime == "BEAR" else "🐂",
-        c_regime_desc  = ("Pausing buys · Protecting capital" if c_regime == "BEAR" else "Normal crypto trading"),
+        c_regime_desc  = ("Pausing buys · Protecting capital" if c_regime == "BEAR" else f"Normal trading · {binance_status}"),
         btc_str        = btc_str,
         btc_ma_str     = btc_ma_str,
         btc_chg_str    = btc_chg_str,
@@ -2121,6 +2293,18 @@ def main():
     else:
         log.info(f"Connected — Portfolio: ${float(account_info.get('portfolio_value',0)):,.2f}")
 
+    # Verify Binance connection (if configured)
+    if USE_BINANCE:
+        bal = binance_get_balance("USDT")
+        if bal is not None:
+            log.info(f"[BINANCE] Connected — USDT balance: ${bal:,.2f}")
+            log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins")
+        else:
+            log.warning("[BINANCE] Could not connect — check BINANCE_KEY and BINANCE_SECRET")
+    else:
+        log.info("[BINANCE] Not configured — using Alpaca for crypto (25 coins)")
+        log.info("[BINANCE] Add BINANCE_KEY + BINANCE_SECRET to Railway to enable 100 coins")
+
     last_email_day = None
     cycle = 0
 
@@ -2138,6 +2322,16 @@ def main():
                 update_market_regime()
                 check_circuit_breaker()  # intraday crash detection
             update_crypto_regime()  # always runs — crypto is 24/7
+
+            # Refresh Binance top-100 coins weekly (Monday morning)
+            et_now = datetime.now(ZoneInfo("America/New_York"))
+            if (USE_BINANCE and et_now.weekday() == 0
+                    and et_now.hour == 9 and et_now.minute < 2):
+                log.info("[BINANCE] Refreshing top coins list...")
+                fresh = binance_get_top_coins(100)
+                if fresh:
+                    CRYPTO_WATCHLIST[:] = fresh
+                    log.info(f"[BINANCE] Watchlist updated: {len(CRYPTO_WATCHLIST)} coins")
 
             # Refresh small cap pool if needed (runs in background thread)
             if should_refresh_smallcap() and is_market_open():
