@@ -43,27 +43,75 @@ NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "")       # from newsapi.org —
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")     # from console.anthropic.com
 
 # ── Binance (crypto only) ─────────────────────────────────────
+# Live Binance keys (real money when IS_LIVE=true)
 BINANCE_KEY    = os.environ.get("BINANCE_KEY",    "")
 BINANCE_SECRET = os.environ.get("BINANCE_SECRET", "")
-BINANCE_BASE   = "https://api.binance.com"
-BINANCE_TEST   = "https://testnet.binance.vision"   # paper trading endpoint
-USE_BINANCE    = bool(BINANCE_KEY)                  # auto-detected from env vars
-BINANCE_DELAY  = 0.12   # seconds between Binance API calls (max ~8/sec, we use ~8/sec safely)
-_last_binance_call = 0.0  # timestamp of last call for rate limiting
+
+# Testnet keys (virtual money — safe to test)
+BINANCE_TESTNET_KEY    = os.environ.get("BINANCE_TESTNET_KEY",    "")
+BINANCE_TESTNET_SECRET = os.environ.get("BINANCE_TESTNET_SECRET", "")
+BINANCE_USE_TESTNET    = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
+
+# Auto-select correct endpoint and keys
+if BINANCE_USE_TESTNET and BINANCE_TESTNET_KEY:
+    BINANCE_BASE   = "https://testnet.binance.vision"
+    _BIN_KEY       = BINANCE_TESTNET_KEY
+    _BIN_SECRET    = BINANCE_TESTNET_SECRET
+    USE_BINANCE    = True
+elif BINANCE_KEY:
+    BINANCE_BASE   = "https://api.binance.com"
+    _BIN_KEY       = BINANCE_KEY
+    _BIN_SECRET    = BINANCE_SECRET
+    USE_BINANCE    = True
+else:
+    BINANCE_BASE   = "https://api.binance.com"
+    _BIN_KEY       = ""
+    _BIN_SECRET    = ""
+    USE_BINANCE    = False
+
+BINANCE_DELAY  = 0.12   # seconds between Binance API calls
+_last_binance_call = 0.0
 
 # ── Safety settings ───────────────────────────────────────────
 MAX_DAILY_LOSS      = 50.0    # $ shut off if day loss hits this
-STOP_LOSS_PCT       = 2.0     # % initial stop-loss below entry
-TRAILING_STOP_PCT   = 2.0     # % trailing stop trails behind highest price
-TAKE_PROFIT_PCT     = 5.0     # % auto sell when position up this much
-MAX_HOLD_DAYS       = 3       # days max hold before forced exit
+STOP_LOSS_PCT       = 5.0     # % swing stop (wide — give stocks room to breathe)
+TRAILING_STOP_PCT   = 2.0     # % trail — only activates after TRAIL_TRIGGER_PCT profit
+TRAIL_TRIGGER_PCT   = 3.0     # % profit required before trailing stop activates
+TAKE_PROFIT_PCT     = 10.0    # % take profit — wider to match wider stop
+MAX_HOLD_DAYS       = 5       # days max hold (extended to match wider stop logic)
 GAP_DOWN_PCT        = 3.0     # % gap down at open triggers immediate sell
-MAX_POSITIONS       = 3
-MAX_TRADE_VALUE     = 500.0
+MAX_POSITIONS       = 3       # per-bot position limit
+MAX_TOTAL_POSITIONS = 3       # GLOBAL cap — hard limit, no exceptions (quality > quantity)
 MAX_DAILY_SPEND     = 5000.0
-MAX_PORTFOLIO_EXPOSURE = 2000.0  # $ max total in open positions at once
-DAILY_PROFIT_TARGET = 2000.0
-CYCLE_SECONDS       = 60
+MAX_PORTFOLIO_EXPOSURE = 3000.0
+DAILY_PROFIT_TARGET = 200.0   # $ — lowered: survival > profit in early phase
+MAX_TRADES_PER_DAY  = 5       # hard cap on total trades per day across all bots
+CYCLE_SECONDS          = 60
+INTRADAY_CYCLE_SECONDS = 10
+
+# ── Risk-based position sizing ────────────────────────────────
+RISK_PER_TRADE_PCT  = 1.0     # % of portfolio to risk per trade
+MAX_TRADE_VALUE     = 500.0   # $ hard cap on any single trade
+
+# ── Signal quality threshold ──────────────────────────────────
+MIN_SIGNAL_SCORE    = 5       # 0-11 score — trade if score >= this
+                              # Multiple factors must align but no single one required
+
+# ── Performance & risk analytics ─────────────────────────────
+LOSS_STREAK_LIMIT   = 3       # consecutive losses → pause 2 hours
+LOSS_STREAK_PAUSE   = 7200    # seconds to pause after loss streak (2 hours)
+
+# ── Volatility sizing ─────────────────────────────────────────
+VIX_LOW_THRESHOLD   = 15.0
+VIX_HIGH_THRESHOLD  = 25.0
+VIX_EXTREME         = 35.0
+
+# ── News boost ────────────────────────────────────────────────
+NEWS_POSITIVE_BOOST = 1.5     # multiply trade size for positive-news stocks
+
+# ── Crypto stops (wider — crypto is more volatile) ────────────
+CRYPTO_STOP_PCT     = 4.0     # % crypto swing stop
+CRYPTO_TRAIL_PCT    = 3.0     # % crypto trailing stop
 
 # ── Market regime settings ────────────────────────────────────
 VIX_FEAR_THRESHOLD    = 25.0   # VIX above this = fear, pause bull buys
@@ -184,6 +232,7 @@ class BotState:
         self.cycle_count     = 0
         self.running         = False
         self.candidates      = []
+        self.trades_today    = 0       # count of completed trades today
 
     def check_reset(self):
         today = datetime.now().date()
@@ -194,9 +243,25 @@ class BotState:
 state            = BotState("STOCKS")
 crypto_state     = BotState("CRYPTO")
 smallcap_state   = BotState("SMALLCAP")
-intraday_state   = BotState("INTRADAY")       # stock intraday (1h bars)
-crypto_intraday_state = BotState("CRYPTO_ID") # crypto intraday (15m bars)
+intraday_state   = BotState("INTRADAY")
+crypto_intraday_state = BotState("CRYPTO_ID")
 account_info = {}
+
+# ── Global risk state ─────────────────────────────────────────
+global_risk = {
+    "loss_streak":      0,       # consecutive losses across all bots
+    "paused_until":     None,    # datetime when loss streak pause ends
+    "total_positions":  0,       # live count across all bots
+    "vix_level":        None,    # latest VIX reading for vol sizing
+}
+
+# ── Performance analytics ─────────────────────────────────────
+perf = {
+    "all_trades":      [],       # every completed trade
+    "peak_portfolio":  0.0,      # highest portfolio value seen
+    "max_drawdown":    0.0,      # worst peak-to-trough %
+    "sharpe_daily":    [],       # daily returns for Sharpe calculation
+}
 
 # ── Small cap pool (refreshes weekly) ────────────────────────
 smallcap_pool = {
@@ -268,19 +333,53 @@ def alpaca_post(path, body):
         log.warning(f"POST {path}: {e}")
         return None
 
+def place_stop_order_alpaca(symbol, qty, stop_price):
+    """Place a real stop-loss order on Alpaca exchange — NOT software stop."""
+    result = alpaca_post("/v2/orders", {
+        "symbol":        symbol,
+        "qty":           str(qty),
+        "side":          "sell",
+        "type":          "stop",
+        "stop_price":    str(round(stop_price, 2)),
+        "time_in_force": "gtc",
+    })
+    if result:
+        log.info(f"[STOP ORDER] Placed exchange stop for {symbol} @ ${stop_price:.2f} id:{result.get('id','')[:8]}")
+    return result
+
+def cancel_stop_order_alpaca(order_id):
+    """Cancel an exchange stop order."""
+    try:
+        r = requests.delete(f"{ALPACA_BASE}/v2/orders/{order_id}", headers=HEADERS, timeout=10)
+        return r.ok
+    except: return False
+
+def update_exchange_stop(symbol, qty, new_stop_price):
+    """Cancel old exchange stop and place new one at updated trailing price."""
+    old_id = exchange_stops.get(symbol)
+    if old_id:
+        cancel_stop_order_alpaca(old_id)
+    new_order = place_stop_order_alpaca(symbol, qty, round(new_stop_price, 2))
+    if new_order and new_order.get("id"):
+        exchange_stops[symbol] = new_order["id"]
+        log.info(f"[TRAIL] Updated exchange stop {symbol} → ${new_stop_price:.2f}")
+
+# Track exchange stop order IDs per position
+exchange_stops = {}  # { symbol: order_id }
+
 # ── Binance API helpers ───────────────────────────────────────
 import hashlib, hmac, urllib.parse
 
 def _binance_sign(params):
     """Sign Binance request with HMAC-SHA256."""
     query = urllib.parse.urlencode(params)
-    sig   = hmac.new(BINANCE_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+    sig   = hmac.new(_BIN_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
     return query + "&signature=" + sig
 
 def _binance_ts():
     return int(time.time() * 1000)
 
-BINANCE_HEADERS = {"X-MBX-APIKEY": BINANCE_KEY}
+BINANCE_HEADERS = {"X-MBX-APIKEY": _BIN_KEY}
 
 def binance_get(path, params=None, signed=False):
     global _last_binance_call
@@ -339,20 +438,49 @@ def binance_fetch_price(symbol):
     data = binance_get("/api/v3/ticker/price", {"symbol": symbol})
     return float(data["price"]) if data and "price" in data else None
 
+# Cache exchange info to avoid repeated API calls
+_binance_lot_cache = {}
+
+def binance_get_lot_size(symbol):
+    """Get min qty and step size for a symbol from Binance exchange info."""
+    if symbol in _binance_lot_cache:
+        return _binance_lot_cache[symbol]
+    try:
+        data = binance_get("/api/v3/exchangeInfo", {"symbol": symbol})
+        if not data: return 0.0001, 0.0001
+        for filt in data.get("symbols", [{}])[0].get("filters", []):
+            if filt.get("filterType") == "LOT_SIZE":
+                min_qty  = float(filt["minQty"])
+                step_qty = float(filt["stepSize"])
+                _binance_lot_cache[symbol] = (min_qty, step_qty)
+                return min_qty, step_qty
+    except: pass
+    return 0.0001, 0.0001
+
+def round_step(qty, step):
+    """Round qty down to nearest step size."""
+    import math
+    if step <= 0: return qty
+    precision = max(0, -int(math.floor(math.log10(step))))
+    return round(math.floor(qty / step) * step, precision)
+
 def binance_place_order(symbol, side, usdt_amount):
-    """Place a market order on Binance. usdt_amount = $ to spend."""
-    # Get current price to calculate qty
+    """Place a market order on Binance with correct lot size."""
     price = binance_fetch_price(symbol)
     if not price:
         log.error(f"[BINANCE] Cannot get price for {symbol}")
         return None
-    # Binance requires qty in base asset — calculate from USDT amount
-    qty = round(usdt_amount / price, 6)
+    min_qty, step_qty = binance_get_lot_size(symbol)
+    raw_qty = usdt_amount / price
+    qty     = round_step(raw_qty, step_qty)
+    if qty < min_qty:
+        log.warning(f"[BINANCE] {symbol} qty {qty} below min {min_qty} — skipping")
+        return None
     result = binance_post("/api/v3/order", {
-        "symbol":    symbol,
-        "side":      side.upper(),
-        "type":      "MARKET",
-        "quantity":  qty,
+        "symbol":   symbol,
+        "side":     side.upper(),
+        "type":     "MARKET",
+        "quantity": str(qty),
     })
     if result:
         log.info(f"[BINANCE] ORDER {side.upper()} {qty} {symbol} @ ~${price:.4f}")
@@ -530,6 +658,10 @@ def run_morning_news_scan():
 
             result, status = analyse_sentiment_with_claude(symbol, headlines)
             if not result or status != "ok":
+                errors += 1
+                continue
+            # Safety: validate Claude returned expected fields
+            if not isinstance(result.get("score"), (int, float)):
                 errors += 1
                 continue
 
@@ -791,9 +923,11 @@ def check_macro_news():
                 )
                 if r2.ok:
                     result = json.loads(r2.json()["content"][0]["text"].replace("```json","").replace("```","").strip())
-                    if result.get("pause_trading") and result.get("score", 0) >= 7:
+                    score = result.get("score", 0)
+                    # Hard constraint: only pause when Claude is very confident (score >= 7)
+                    if result.get("pause_trading") and isinstance(score, (int,float)) and score >= 7:
                         reason = result.get("reason", f"Macro risk keywords: {', '.join(triggered_keywords[:3])}")
-                        log.warning(f"[CIRCUIT] MACRO PAUSE triggered: {reason} (score:{result['score']})")
+                        log.warning(f"[CIRCUIT] MACRO PAUSE triggered: {reason} (score:{score})")
                         circuit_breaker["macro_paused"] = True
                         circuit_breaker["active"]       = True
                         circuit_breaker["reason"]       = f"Macro news: {reason}"
@@ -944,9 +1078,14 @@ def run_intraday_cycle(watchlist, st):
             INTRADAY_EMA_FAST, INTRADAY_EMA_SLOW,
             INTRADAY_RSI_LIMIT, INTRADAY_VOL_RATIO
         )
+        # VWAP confirmation — only BUY when price is above VWAP
+        vwap_pos = vwap_signal(bars)
+        if signal == "BUY" and vwap_pos == "BELOW":
+            signal = "HOLD"  # price below VWAP — skip intraday buy
+            log.debug(f"[INTRADAY] {sym} BUY suppressed — price below VWAP")
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -1033,9 +1172,13 @@ def run_crypto_intraday_cycle(watchlist, st):
             CRYPTO_INTRADAY_EMA_FAST, CRYPTO_INTRADAY_EMA_SLOW,
             INTRADAY_RSI_LIMIT, CRYPTO_INTRADAY_VOL_RATIO
         )
+        # VWAP filter for crypto intraday
+        vwap_pos = vwap_signal(bars)
+        if signal == "BUY" and vwap_pos == "BELOW":
+            signal = "HOLD"
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -1119,11 +1262,18 @@ def update_market_regime():
         bear_signals += 1
         log.info(f"[REGIME] VIX proxy ${vix_val:.2f} above threshold {VIX_FEAR_THRESHOLD} — fear signal")
 
-    old_mode = market_regime["mode"]
-    new_mode = "BEAR" if bear_signals >= 1 else "BULL"
+    old_mode       = market_regime["mode"]
+    bear_count     = market_regime.get("bear_count", 0)
+    # Require 2 consecutive bear signals before switching (reduces whipsaw)
+    if bear_signals >= 1:
+        bear_count += 1
+    else:
+        bear_count = max(0, bear_count - 1)
+    new_mode = "BEAR" if bear_count >= 2 else "BULL"
 
     market_regime.update({
         "mode":       new_mode,
+        "bear_count": bear_count,
         "vix":        vix_val,
         "spy_price":  spy_price,
         "spy_ma20":   spy_ma20,
@@ -1132,7 +1282,7 @@ def update_market_regime():
     })
 
     if old_mode != new_mode:
-        log.warning(f"[REGIME] Mode changed: {old_mode} -> {new_mode}")
+        log.warning(f"[REGIME] Mode changed: {old_mode} -> {new_mode} (bear_count={bear_count})")
         if new_mode == "BEAR":
             log.warning("[REGIME] BEAR MODE: pausing bull buys, rotating to defensive tickers")
         else:
@@ -1172,8 +1322,14 @@ def update_crypto_regime():
         bear_signals += 1
         log.info(f"[CRYPTO REGIME] BTC daily drop {btc_change:.1f}% — volatility spike")
 
-    old_mode = crypto_regime["mode"]
-    new_mode = "BEAR" if bear_signals >= 1 else "BULL"
+    old_mode   = crypto_regime["mode"]
+    bear_count = crypto_regime.get("bear_count", 0)
+    if bear_signals >= 1:
+        bear_count += 1
+    else:
+        bear_count = max(0, bear_count - 1)
+    new_mode = "BEAR" if bear_count >= 2 else "BULL"
+    crypto_regime["bear_count"] = bear_count
 
     crypto_regime.update({
         "mode":       new_mode,
@@ -1195,8 +1351,204 @@ def update_crypto_regime():
 
 # ── Portfolio exposure check ──────────────────────────────────
 def total_exposure(st):
-    """Calculate total $ currently deployed in open positions."""
     return sum(pos["entry_price"] * pos["qty"] for pos in st.positions.values())
+
+def all_positions_count():
+    """Total open positions across ALL bots."""
+    return (len(state.positions) + len(crypto_state.positions) +
+            len(smallcap_state.positions) + len(intraday_state.positions) +
+            len(crypto_intraday_state.positions))
+
+# ── Volatility-adjusted trade sizing ─────────────────────────
+def vol_adjusted_size(base_size):
+    """Scale position size down when VIX is elevated."""
+    vix = global_risk.get("vix_level")
+    if not vix:
+        return base_size
+    if vix >= VIX_EXTREME:
+        return base_size * 0.25      # -75% in extreme fear
+    if vix >= VIX_HIGH_THRESHOLD:
+        return base_size * 0.50      # -50% in high fear
+    if vix <= VIX_LOW_THRESHOLD:
+        return base_size * 1.25      # +25% in calm market
+    return base_size
+
+# ── News boost ────────────────────────────────────────────────
+def news_size_multiplier(symbol):
+    """Boost size for positive-news stocks, normal for neutral."""
+    if symbol in news_state.get("watch_list", {}):
+        return NEWS_POSITIVE_BOOST
+    return 1.0
+
+# ── Loss streak check ─────────────────────────────────────────
+def is_loss_streak_paused():
+    """Returns True if bot should pause due to consecutive losses."""
+    if global_risk["paused_until"] and datetime.now() < global_risk["paused_until"]:
+        remaining = (global_risk["paused_until"] - datetime.now()).seconds // 60
+        log.info(f"[RISK] Loss streak pause active — {remaining} mins remaining")
+        return True
+    return False
+
+def record_trade_result(pnl, symbol):
+    """Track loss streaks and trigger pause if needed."""
+    perf["all_trades"].append({"pnl": pnl, "symbol": symbol, "time": datetime.now().isoformat()})
+    if pnl < 0:
+        global_risk["loss_streak"] += 1
+        if global_risk["loss_streak"] >= LOSS_STREAK_LIMIT:
+            pause_until = datetime.now() + timedelta(seconds=LOSS_STREAK_PAUSE)
+            global_risk["paused_until"] = pause_until
+            log.warning(f"[RISK] {LOSS_STREAK_LIMIT} consecutive losses — pausing all trading for 1 hour until {pause_until.strftime('%H:%M')}")
+    else:
+        global_risk["loss_streak"] = 0  # reset on win
+
+# ── Breakout signal ───────────────────────────────────────────
+# ── Relative Strength vs SPY ─────────────────────────────────
+_spy_closes_cache = {"closes": [], "last_fetch": None}
+
+def get_spy_closes():
+    """Fetch SPY daily closes, cached so we only call once per cycle."""
+    now = datetime.now()
+    last = _spy_closes_cache["last_fetch"]
+    if last and (now - last).seconds < 300:  # cache 5 mins
+        return _spy_closes_cache["closes"]
+    bars = fetch_bars("SPY", crypto=False)
+    if bars:
+        closes = [b["c"] for b in bars]
+        _spy_closes_cache["closes"] = closes
+        _spy_closes_cache["last_fetch"] = now
+        return closes
+    return _spy_closes_cache["closes"]
+
+def relative_strength_vs_spy(stock_closes):
+    """Compare stock's recent performance to SPY.
+    Returns positive number if stock is outperforming SPY, negative if underperforming."""
+    spy_closes = get_spy_closes()
+    if not spy_closes or len(spy_closes) < 5 or len(stock_closes) < 5:
+        return 0.0
+    periods = min(len(spy_closes), len(stock_closes), 10)
+    stock_ret = (stock_closes[-1] - stock_closes[-periods]) / stock_closes[-periods] * 100
+    spy_ret   = (spy_closes[-1]   - spy_closes[-periods])   / spy_closes[-periods]   * 100
+    return round(stock_ret - spy_ret, 2)  # positive = outperforming SPY
+
+# ── VWAP calculation for intraday ─────────────────────────────
+def calc_vwap(bars):
+    """Volume-weighted average price from intraday bars.
+    Price above VWAP = bullish, below = bearish."""
+    if not bars or len(bars) < 3:
+        return None
+    total_vol = sum(b["v"] for b in bars)
+    if total_vol == 0:
+        return None
+    vwap = sum(((b["h"] + b["l"] + b["c"]) / 3) * b["v"] for b in bars) / total_vol
+    return vwap
+
+def vwap_signal(bars):
+    """Returns 'ABOVE', 'BELOW', or None vs VWAP."""
+    vwap = calc_vwap(bars)
+    if not vwap or not bars:
+        return None
+    price = bars[-1]["c"]
+    pct_from_vwap = ((price - vwap) / vwap) * 100
+    if pct_from_vwap > 0.3:   return "ABOVE"   # meaningfully above VWAP — bullish
+    if pct_from_vwap < -0.3:  return "BELOW"   # meaningfully below VWAP — bearish
+    return "AT"
+
+def is_breakout(closes, lookback=20):
+    """Price breaking above highest close in last N bars."""
+    if len(closes) < lookback + 1: return False
+    return closes[-1] > max(closes[-(lookback+1):-1])
+
+def is_choppy_market():
+    """SPY within 0.5% of MA20 = ranging, no trend — skip trading."""
+    spy_price = market_regime.get("spy_price")
+    spy_ma20  = market_regime.get("spy_ma20")
+    if not spy_price or not spy_ma20: return False
+    return abs((spy_price - spy_ma20) / spy_ma20) * 100 < 0.5
+
+# ── Unified signal scorer (0-11, threshold 5) ────────────────
+def score_signal(sym, price, change, rsi, vol_ratio, closes):
+    """
+    Score a BUY candidate 0-11. Trade if score >= MIN_SIGNAL_SCORE (5).
+    Multiple factors must align — no single factor guarantees a trade.
+
+      Breakout 20-bar high  : +2.0  (strong momentum signal)
+      Strong momentum 5d>3% : +1.0  (meaningful price move)
+      Relative strength SPY : +1.5  (only trade market leaders)
+      Volume 2x+            : +2.0  (strong conviction)
+      Volume 1.5x+          : +1.0  (decent conviction)
+      Volume 1.2x+          : +0.5  (mild confirmation)
+      RSI 50-65 sweet spot  : +1.0  (ideal momentum zone)
+      RSI 40-50 building    : +0.5  (building momentum)
+      MACD bullish          : +1.0  (acceleration confirmed)
+      Positive news         : +1.5  (catalyst — your edge)
+      Negative news         : -5.0  (hard skip)
+      RSI overbought >75    : -1.0  (too extended)
+      Choppy SPY            : -1.0  (low quality environment)
+    """
+    score = 0.0
+
+    # Breakout or strong momentum
+    if is_breakout(closes, lookback=20):
+        score += 2.0
+    elif len(closes) >= 6 and closes[-6] > 0:
+        m5d = (closes[-1] - closes[-6]) / closes[-6] * 100
+        if m5d >= 3.0:   score += 1.0
+        elif m5d >= 1.5: score += 0.5
+
+    # Relative strength vs SPY
+    if relative_strength_vs_spy(closes):
+        score += 1.5
+
+    # Volume conviction
+    if vol_ratio >= 2.0:   score += 2.0
+    elif vol_ratio >= 1.5: score += 1.0
+    elif vol_ratio >= 1.2: score += 0.5
+
+    # RSI quality
+    if rsi:
+        if 50 <= rsi <= 65:  score += 1.0
+        elif 40 <= rsi < 50: score += 0.5
+        elif rsi > 75:       score -= 1.0
+
+    # MACD confirmation
+    if len(closes) >= 35:
+        mv, ms = calc_macd(closes)
+        if mv is not None and ms is not None and mv > ms:
+            score += 1.0
+
+    # News catalyst
+    if sym in news_state.get("watch_list", {}): score += 1.5
+    if sym in news_state.get("skip_list",   {}): score -= 5.0
+
+    # Environment
+    if is_choppy_market(): score -= 1.0
+
+    return round(min(11.0, max(0.0, score)), 1)
+
+# ── Max drawdown tracking ─────────────────────────────────────
+def update_drawdown(portfolio_value):
+    """Track peak portfolio value and calculate max drawdown."""
+    if portfolio_value > perf["peak_portfolio"]:
+        perf["peak_portfolio"] = portfolio_value
+    if perf["peak_portfolio"] > 0:
+        dd = ((perf["peak_portfolio"] - portfolio_value) / perf["peak_portfolio"]) * 100
+        if dd > perf["max_drawdown"]:
+            perf["max_drawdown"] = dd
+
+def calc_profit_factor():
+    """Gross profit / gross loss."""
+    wins   = sum(t["pnl"] for t in perf["all_trades"] if t["pnl"] > 0)
+    losses = sum(abs(t["pnl"]) for t in perf["all_trades"] if t["pnl"] < 0)
+    return round(wins / losses, 2) if losses > 0 else float("inf")
+
+def calc_sharpe():
+    """Simple daily Sharpe ratio estimate."""
+    daily = perf["sharpe_daily"]
+    if len(daily) < 5: return None
+    import statistics
+    avg  = statistics.mean(daily)
+    std  = statistics.stdev(daily)
+    return round((avg / std) * (252 ** 0.5), 2) if std > 0 else None
 
 # ── Indicators ────────────────────────────────────────────────
 def ema(prices, period):
@@ -1308,28 +1660,102 @@ def is_market_open():
     return et.weekday() < 5 and 570 <= mins < 960
 
 # ── Orders ────────────────────────────────────────────────────
-def place_order(symbol, side, qty, crypto=False):
-    """Place order. Routes crypto to Binance if configured, otherwise Alpaca."""
+# ── Slippage model ────────────────────────────────────────────
+# Conservative estimate: 0.1% for large caps, 0.3% for crypto/small caps
+SLIPPAGE_STOCK  = 0.003   # 0.3% — realistic for market orders
+SLIPPAGE_CRYPTO = 0.005   # 0.5% — crypto spreads wider
+
+def apply_slippage(price, side, crypto=False):
+    """Apply conservative slippage to get realistic fill price."""
+    slippage = SLIPPAGE_CRYPTO if crypto else SLIPPAGE_STOCK
+    if side == "buy":
+        return price * (1 + slippage)   # pay more when buying
+    else:
+        return price * (1 - slippage)   # receive less when selling
+
+def query_order_status(order_id, crypto=False):
+    """Check actual fill status of an order."""
+    try:
+        if crypto and USE_BINANCE:
+            return None  # Binance order status checked via account endpoint
+        result = alpaca_get(f"/v2/orders/{order_id}")
+        return result
+    except: return None
+
+def get_actual_fill_price(order_result, side, estimated_price, crypto=False):
+    """Extract actual fill price from order result, fall back to slippage estimate."""
+    if not order_result:
+        return apply_slippage(estimated_price, side, crypto)
+    # Alpaca returns filled_avg_price
+    filled = order_result.get("filled_avg_price")
+    if filled:
+        try:
+            return float(filled)
+        except: pass
+    # Binance returns fills array
+    fills = order_result.get("fills", [])
+    if fills:
+        total_qty   = sum(float(f["qty"]) for f in fills)
+        total_value = sum(float(f["price"]) * float(f["qty"]) for f in fills)
+        if total_qty > 0:
+            return total_value / total_qty
+    # Fall back to slippage model
+    return apply_slippage(estimated_price, side, crypto)
+
+def is_order_filled(order_result):
+    """Check if order was actually filled (not just submitted)."""
+    if not order_result: return False
+    status = order_result.get("status","")
+    # Alpaca statuses
+    if status in ("filled", "partially_filled"): return True
+    # Binance statuses
+    if status in ("FILLED", "PARTIALLY_FILLED"): return True
+    # If no status field but order ID exists, assume submitted
+    if order_result.get("id") or order_result.get("orderId"): return True
+    return False
+
+def place_order(symbol, side, qty, crypto=False, estimated_price=None):
+    """Place order. Routes crypto to Binance if configured, otherwise Alpaca.
+    Returns (order_result, actual_fill_price) tuple."""
     if crypto and USE_BINANCE:
-        # Binance uses USDT amount not qty — calculate from qty * price
-        price = binance_fetch_price(symbol)
+        price = estimated_price or binance_fetch_price(symbol)
         usdt  = float(qty) * price if price else float(qty)
-        return binance_place_order(symbol, side, usdt)
+        result = binance_place_order(symbol, side, usdt)
+        fill_price = get_actual_fill_price(result, side, price or 0, crypto=True)
+        return result, fill_price
     result = alpaca_post("/v2/orders", {
         "symbol": symbol, "qty": str(qty), "side": side,
         "type": "market", "time_in_force": "gtc" if crypto else "day",
     })
-    if result: log.info(f"ORDER {side.upper()} {qty} {symbol}")
-    return result
+    fill_price = get_actual_fill_price(result, side, estimated_price or 0, crypto=False)
+    if result: log.info(f"ORDER {side.upper()} {qty} {symbol} fill~${fill_price:.4f}")
+    return result, fill_price
 
 # ── Bot cycle ─────────────────────────────────────────────────
+def calc_unrealized_pnl(st):
+    """Calculate total unrealized P&L across all open positions."""
+    total = 0.0
+    for sym, pos in st.positions.items():
+        price = pos.get("highest_price", pos["entry_price"])
+        total += (price - pos["entry_price"]) * pos["qty"]
+    return total
+
 def check_stop_losses(st, crypto=False):
-    """Check all open positions for stop-loss, trailing stop, take-profit, max hold days."""
+    """Check all open positions for stop-loss, trailing stop, take-profit, max hold days.
+    Also checks unrealized P&L against daily loss limit."""
     now = datetime.now()
+
+    # FIX: Check TOTAL loss including unrealized open positions
+    unrealized = calc_unrealized_pnl(st)
+    total_loss = st.daily_pnl + unrealized
+    if total_loss <= -MAX_DAILY_LOSS and not st.shutoff:
+        log.warning(f"[{st.label}] Total loss (realized ${st.daily_pnl:.2f} + unrealized ${unrealized:.2f}) = ${total_loss:.2f} — shutting off")
+        st.shutoff = True
+        return
+
     market_just_opened = False
     if not crypto:
         et = datetime.now(ZoneInfo("America/New_York"))
-        # Detect market open window (9:30-9:35 ET) for gap-down check
         mins = et.hour * 60 + et.minute
         market_just_opened = (mins >= 570 and mins <= 575)
 
@@ -1343,14 +1769,21 @@ def check_stop_losses(st, crypto=False):
         high   = pos.get("highest_price", entry)
         pct_from_entry = ((live - entry) / entry) * 100
 
-        # Update highest price seen and trail the stop up
+        # Trail stop — but ONLY after TRAIL_TRIGGER_PCT profit (avoid early stop-outs)
+        pct_profit = ((live - entry) / entry) * 100
+        trail_pct  = CRYPTO_TRAIL_PCT if crypto else TRAILING_STOP_PCT
         if live > high:
             pos["highest_price"] = live
-            new_stop = live * (1 - TRAILING_STOP_PCT / 100)
-            if new_stop > pos["stop_price"]:
-                old_stop = pos["stop_price"]
-                pos["stop_price"] = new_stop
-                log.info(f"[{st.label}] TRAIL {sym} stop raised ${old_stop:.4f} -> ${new_stop:.4f} (high:${live:.4f})")
+            # Only start trailing after position is up TRAIL_TRIGGER_PCT
+            if pct_profit >= TRAIL_TRIGGER_PCT:
+                new_stop = live * (1 - trail_pct / 100)
+                if new_stop > pos["stop_price"]:
+                    old_stop = pos["stop_price"]
+                    pos["stop_price"] = new_stop
+                    log.info(f"[{st.label}] TRAIL {sym} stop raised ${old_stop:.4f} -> ${new_stop:.4f} (profit:{pct_profit:.1f}%)")
+                    # Update the real exchange stop order too
+                    if not crypto and sym in exchange_stops:
+                        update_exchange_stop(sym, pos["qty"], new_stop)
 
         # Update days held
         if pos.get("entry_date"):
@@ -1367,7 +1800,7 @@ def check_stop_losses(st, crypto=False):
         if reason is None and live >= pos.get("take_profit_price", entry * 1.05):
             reason = f"Take-Profit (+{pct_from_entry:.1f}%)"
 
-        # 3. Trailing / hard stop-loss
+        # 3. Trailing / hard stop-loss (crypto uses wider stop)
         if reason is None and live <= pos["stop_price"]:
             reason = f"Stop-Loss ({pct_from_entry:.1f}%)"
 
@@ -1440,7 +1873,8 @@ def run_cycle(watchlist, st, crypto=False):
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
         signal, e9, e21, rsi = get_signal(closes, volumes)
         results.append({"symbol": sym, "price": price, "change": change,
-            "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi, "vol_ratio": vol_ratio})
+            "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
+            "vol_ratio": vol_ratio, "closes": closes})
 
     results.sort(key=lambda x: {"BUY": 0, "HOLD": 1, "SELL": 2}[x["signal"]])
     st.candidates = results
@@ -1448,50 +1882,95 @@ def run_cycle(watchlist, st, crypto=False):
     log.info(f"[{st.label}] {buys} BUY / {len(results)} scanned")
 
     # Open BUY positions
+    # ── RANK candidates by score before deciding ─────────────
+    buy_candidates = [s for s in results if s["signal"] == "BUY"]
+    for s in buy_candidates:
+        s["score"] = score_signal(s["symbol"], s["price"], s["change"],
+                                   s.get("rsi"), s.get("vol_ratio"),
+                                   s.get("closes", [s["price"]]*21))
+    buy_candidates.sort(key=lambda x: x["score"], reverse=True)
+
     pos_count = len(st.positions)
-    for s in results:
-        if s["signal"] != "BUY": continue
+    for s in buy_candidates:
         if pos_count >= MAX_POSITIONS: break
         if s["symbol"] in st.positions: continue
         if st.daily_pnl >= DAILY_PROFIT_TARGET: break
         if st.daily_spend >= MAX_DAILY_SPEND: break
-        # News sentiment skip check (stocks only)
-        if not crypto and s["symbol"] in news_state["skip_list"]:
-            skip_info = news_state["skip_list"][s["symbol"]]
-            log.info(f"[{st.label}] SKIP {s['symbol']} — negative news: {skip_info['reason']}")
+        # Global position cap
+        if all_positions_count() >= MAX_TOTAL_POSITIONS:
+            log.info(f"[{st.label}] Global position cap ({MAX_TOTAL_POSITIONS}) reached — no new buys")
+            break
+        # Loss streak pause
+        if is_loss_streak_paused(): break
+        # News sentiment skip check
+        if not crypto and s["symbol"] in news_state.get("skip_list", {}):
+            log.info(f"[{st.label}] SKIP {s['symbol']} — negative news")
             continue
-        # Circuit breaker — pause all new buys if triggered
+        # Circuit breaker
         if not crypto and circuit_breaker["active"]:
-            log.info(f"[{st.label}] CIRCUIT BREAKER active ({circuit_breaker['reason']}) — no new buys")
+            log.info(f"[{st.label}] CIRCUIT BREAKER active — no new buys")
             break
         # Portfolio exposure cap
         cap = CRYPTO_MAX_EXPOSURE if crypto else MAX_PORTFOLIO_EXPOSURE
-        if total_exposure(st) >= cap:
-            log.info(f"[{st.label}] Max exposure hit (${total_exposure(st):.0f}/${cap:.0f}) — no new buys")
-            break
-        qty = max(0.0001, round(MAX_TRADE_VALUE / s["price"], 6)) if crypto else max(1, int(MAX_TRADE_VALUE / s["price"]))
+        if total_exposure(st) >= cap: break
+        # Risk-based sizing: risk 1% of portfolio, stop distance determines size
+        pv         = float(account_info.get("portfolio_value", 10000))
+        stop_pct   = CRYPTO_STOP_PCT if crypto else STOP_LOSS_PCT
+        base_size  = risk_based_size(pv, stop_pct)
+        # Apply vol adjustment and news boost on top
+        adj_size   = vol_adjusted_size(base_size) * news_size_multiplier(s["symbol"])
+        adj_size   = min(adj_size, MAX_TRADE_VALUE * 1.5)
+        qty = max(0.0001, round(adj_size / s["price"], 6)) if crypto else max(1, int(adj_size / s["price"]))
         trade_val = qty * s["price"]
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
-        stop_price = s["price"] * (1 - STOP_LOSS_PCT / 100)
+        stop_pct_use = CRYPTO_STOP_PCT if crypto else STOP_LOSS_PCT
+        stop_price = s["price"] * (1 - stop_pct_use / 100)
         take_profit_price = s["price"] * (1 + TAKE_PROFIT_PCT / 100)
+        # Score threshold — only trade high-quality setups
+        sig_score = s.get("score", 0)
+        if sig_score < MIN_SIGNAL_SCORE:
+            log.info(f"[{st.label}] SKIP {s['symbol']} score:{sig_score}/10 below threshold {MIN_SIGNAL_SCORE}")
+            continue
+
+        # Choppy market filter — don't trade if SPY is ranging
+        if not crypto and is_choppy_market():
+            log.info(f"[{st.label}] SKIP — choppy market detected, waiting for trend")
+            break
+
+        # Max trades per day hard cap
+        total_trades_today = sum(s2.trades_today for s2 in [state, crypto_state])
+        if total_trades_today >= MAX_TRADES_PER_DAY:
+            log.info(f"[{st.label}] Max trades per day ({MAX_TRADES_PER_DAY}) reached — no more buys today")
+            break
+
+        log.info(f"[{st.label}] ✅ BUY #{pos_count+1} score:{sig_score}/10 {s['symbol']} size:${adj_size:.0f}")
         log.info(f"[{st.label}] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} stop:${stop_price:.4f} target:${take_profit_price:.4f} RSI:{s['rsi']:.1f}")
-        order = place_order(s["symbol"], "buy", qty, crypto=crypto)
+        order, fill_price = place_order(s["symbol"], "buy", qty, crypto=crypto, estimated_price=s["price"])
         if order:
+            # Use actual fill price (with slippage) not just signal price
+            actual_stop  = fill_price * (1 - stop_pct_use / 100)
+            actual_tp    = fill_price * (1 + TAKE_PROFIT_PCT / 100)
             st.positions[s["symbol"]] = {
                 "qty": qty,
-                "entry_price": s["price"],
-                "stop_price": stop_price,
-                "highest_price": s["price"],
-                "take_profit_price": take_profit_price,
+                "entry_price": fill_price,
+                "stop_price": actual_stop,
+                "highest_price": fill_price,
+                "take_profit_price": actual_tp,
                 "entry_date": datetime.now().date().isoformat(),
                 "days_held": 0,
             }
+            # Place real exchange stop order on Alpaca (not just software stop)
+            if not crypto:
+                stop_order = place_stop_order_alpaca(s["symbol"], qty, round(actual_stop, 2))
+                if stop_order and stop_order.get("id"):
+                    exchange_stops[s["symbol"]] = stop_order["id"]
+                    log.info(f"[{st.label}] Exchange stop placed for {s['symbol']} @ ${actual_stop:.2f}")
             st.daily_spend += trade_val
+            st.trades_today += 1
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
-                "price": s["price"], "pnl": None, "reason": "Signal",
+                "price": fill_price, "pnl": None, "reason": "Signal",
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "entry_ts": datetime.now().isoformat()})
-            # Also store entry_ts in position for hold period calc
             st.positions[s["symbol"]]["entry_ts"] = datetime.now().isoformat()
             pos_count += 1
 
@@ -1506,6 +1985,7 @@ def run_cycle(watchlist, st, crypto=False):
         if order:
             del st.positions[s["symbol"]]
             st.daily_pnl += pnl
+            st.trades_today += 1
             entry_ts = pos.get("entry_ts")
             hold_hours = None
             if entry_ts:
@@ -1655,7 +2135,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div style="display:flex;gap:16px;font-size:12px">
         <div><span style="color:#555">SPY </span><span style="font-family:monospace;font-weight:700">{spy_str}</span></div>
         <div><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{spy_ma_str}</span></div>
-        <div><span style="color:#555">VIX </span><span style="font-family:monospace;color:{vix_color}">{vix_str}</span></div>
+        <div><span style="color:#555">VIX </span><span style="font-family:monospace;color:{vix_regime_color}">{vix_str}</span></div>
         <div><span style="color:#555">Exposure </span><span style="font-family:monospace">${exposure:.0f}/${max_exposure:.0f}</span></div>
       </div>
     </div>
@@ -1738,6 +2218,57 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <!-- Screener -->
   {screener_html}
 
+  <!-- Performance Analytics -->
+  <div class="card" style="margin-bottom:20px;border-color:rgba(255,200,0,0.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="section-title" style="color:#ffcc00;margin-bottom:0">📊 Performance Analytics</div>
+      <div style="font-size:11px;color:#555">Updates every cycle</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <div style="text-align:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px">
+        <div class="lbl" style="margin-bottom:4px">Win Rate</div>
+        <div style="font-size:22px;font-weight:700;color:{trades_wr_color}">{win_rate}%</div>
+        <div style="font-size:10px;color:#555">{wins}W / {losses}L</div>
+      </div>
+      <div style="text-align:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px">
+        <div class="lbl" style="margin-bottom:4px">Max Drawdown</div>
+        <div style="font-size:22px;font-weight:700;color:{dd_color}">{max_dd}%</div>
+        <div style="font-size:10px;color:#555">Peak: ${peak_pv}</div>
+      </div>
+      <div style="text-align:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px">
+        <div class="lbl" style="margin-bottom:4px">Profit Factor</div>
+        <div style="font-size:22px;font-weight:700;color:{pf_color}">{profit_factor}</div>
+        <div style="font-size:10px;color:#555">&gt;1.5 = good</div>
+      </div>
+      <div style="text-align:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px">
+        <div class="lbl" style="margin-bottom:4px">Sharpe Ratio</div>
+        <div style="font-size:22px;font-weight:700;color:{sharpe_color}">{sharpe}</div>
+        <div style="font-size:10px;color:#555">&gt;1.0 = good</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:20px;font-size:12px">
+      <span>Loss streak: <b style="color:{streak_color}">{loss_streak}</b> / {streak_limit}</span>
+      <span>Pause: <b style="color:#888">{pause_status}</b></span>
+      <span>VIX level: <b style="color:{vix_color}">{vix_level}</b></span>
+      <span>Size multiplier: <b style="color:#ffcc00">{size_mult}x</b></span>
+      <span>Global positions: <b>{global_pos}</b> / {max_global}</span>
+    </div>
+  </div>
+
+  <!-- Performance Analytics -->
+  <div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.2)">
+    <div class="section-title" style="color:#ffcc00">📊 Performance Analytics</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;font-size:13px">
+      <div><div class="lbl">Win Rate</div><b style="font-size:18px;color:{trades_wr_color}">{win_rate}%</b></div>
+      <div><div class="lbl">Profit Factor</div><b style="font-size:18px;color:{old_pf_color}">{profit_factor}</b></div>
+      <div><div class="lbl">Sharpe Ratio</div><b style="font-size:18px;color:{sharpe_color}">{sharpe}</b></div>
+      <div><div class="lbl">Max Drawdown</div><b style="font-size:18px;color:#ff4466">{max_dd}%</b></div>
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:#555">
+      Loss streak: {loss_streak}/{streak_limit} · {pause_status} · VIX: {vix_level} · Signal min: {signal_threshold}/10 · Global positions: {global_pos}/{max_global}
+    </div>
+  </div>
+
   <!-- Morning News Briefing -->
   <div class="card" style="margin-bottom:20px;border-color:rgba(170,136,255,0.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -1800,14 +2331,69 @@ def build_dashboard():
     sc_dot     = ("dot-green" if smallcap_state.running else "dot-gold") if not smallcap_state.shutoff else "dot-red"
     sc_status  = "Shut Off" if smallcap_state.shutoff else ("Running" if smallcap_state.running else "Idle")
 
+    # Performance analytics for dashboard
+    all_completed = perf["all_trades"]
+    perf_trades = len(all_completed)
+    wins   = [t for t in all_completed if t["pnl"] > 0]
+    losses = [t for t in all_completed if t["pnl"] <= 0]
+    perf_wr    = round(len(wins) / perf_trades * 100) if perf_trades else 0
+    wr_color   = "#00ff88" if perf_wr >= 50 else "#ff4466"
+    pf         = calc_profit_factor()
+    perf_pf    = f"{pf:.2f}" if pf != float("inf") else "∞"
+    pf_color   = "#00ff88" if pf >= 1.5 else ("#ffcc00" if pf >= 1.0 else "#ff4466")
+    sharpe     = calc_sharpe()
+    perf_sharpe = f"{sharpe:.2f}" if sharpe else "—"
+    sh_color   = "#00ff88" if (sharpe and sharpe >= 1.0) else "#ffcc00"
+    perf_dd    = round(perf["max_drawdown"], 1)
+    perf_avg_win  = round(sum(t["pnl"] for t in wins)  / len(wins),  2) if wins   else 0
+    perf_avg_loss = round(abs(sum(t["pnl"] for t in losses) / len(losses)), 2) if losses else 0
+
+
     # Binance status
-    binance_status = f"✅ Binance ({len(CRYPTO_WATCHLIST)} coins)" if USE_BINANCE else "⚠ Alpaca (25 coins only)"
+    if not USE_BINANCE:
+        binance_status = "⚠ Alpaca (25 coins only)"
+    elif BINANCE_USE_TESTNET:
+        binance_status = f"🧪 Binance TESTNET ({len(CRYPTO_WATCHLIST)} coins)"
+    else:
+        binance_status = f"✅ Binance LIVE ({len(CRYPTO_WATCHLIST)} coins)"
 
     # Intraday state
     id_dot     = ("dot-green" if intraday_state.running else "dot-gold") if not intraday_state.shutoff else "dot-red"
     id_status  = "Shut Off" if intraday_state.shutoff else ("Running" if intraday_state.running else ("Window Closed" if not is_intraday_window() else "Idle"))
     cid_dot    = ("dot-green" if crypto_intraday_state.running else "dot-gold") if not crypto_intraday_state.shutoff else "dot-red"
     cid_status = "Shut Off" if crypto_intraday_state.shutoff else ("Running" if crypto_intraday_state.running else "Idle")
+
+    # Performance analytics values
+    all_t = perf["all_trades"]
+    wins_count   = sum(1 for t in all_t if t["pnl"] > 0)
+    losses_count = sum(1 for t in all_t if t["pnl"] <= 0)
+    total_trades = len(all_t)
+    win_rate     = int(wins_count / total_trades * 100) if total_trades else 0
+    trades_wr_color = "green" if win_rate >= 55 else ("orange" if win_rate >= 45 else "red")
+
+    max_dd    = round(perf["max_drawdown"], 1)
+    dd_color  = "green" if max_dd < 5 else ("orange" if max_dd < 10 else "red")
+    peak_pv   = f"{perf['peak_portfolio']:,.0f}"
+
+    pf        = calc_profit_factor()
+    profit_factor = f"{pf:.2f}" if pf != float("inf") else "∞"
+    pf_color  = "green" if pf >= 1.5 else ("orange" if pf >= 1.0 else "red")
+
+    sharpe_val = calc_sharpe()
+    sharpe     = f"{sharpe_val:.2f}" if sharpe_val else "—"
+    sharpe_color = "green" if (sharpe_val and sharpe_val >= 1.0) else ("orange" if (sharpe_val and sharpe_val >= 0.5) else "#888")
+
+    loss_streak  = global_risk["loss_streak"]
+    streak_color = "red" if loss_streak >= LOSS_STREAK_LIMIT else ("orange" if loss_streak >= 2 else "green")
+    pause_until  = global_risk.get("paused_until")
+    pause_status = pause_until.strftime("%H:%M") if pause_until and datetime.now() < pause_until else "None"
+
+    vix_val_now  = global_risk.get("vix_level")
+    vix_level    = f"{vix_val_now:.1f}" if vix_val_now else "—"
+    vix_color    = "red" if (vix_val_now and vix_val_now >= VIX_EXTREME) else ("orange" if (vix_val_now and vix_val_now >= VIX_HIGH_THRESHOLD) else "green")
+    size_mult    = round(vol_adjusted_size(1.0), 2)
+
+    global_pos   = all_positions_count()
 
     # Circuit breaker banner
     if circuit_breaker["active"]:
@@ -2043,6 +2629,7 @@ def build_dashboard():
     return DASHBOARD_HTML.format(
         now            = datetime.now().strftime("%H:%M:%S"),
         circuit_banner = circuit_banner,
+
         mode_badge     = "badge-live" if IS_LIVE else "badge-paper",
         mode_label     = "LIVE" if IS_LIVE else "PAPER",
         portfolio      = portfolio,
@@ -2079,6 +2666,27 @@ def build_dashboard():
         sc_pool_size = len(smallcap_pool["symbols"]),
         sc_refresh   = smallcap_pool.get("last_refresh", "Not yet"),
         binance_label= "Binance" if USE_BINANCE else "Alpaca",
+        win_rate     = win_rate,
+        trades_wr_color = trades_wr_color,
+        wins         = wins_count,
+        losses       = losses_count,
+        max_dd       = max_dd,
+        dd_color     = dd_color,
+        peak_pv      = peak_pv,
+        profit_factor= profit_factor,
+        old_pf_color  = old_pf_color,
+        sharpe       = sharpe,
+        sharpe_color = sharpe_color,
+        loss_streak  = loss_streak,
+        streak_color = streak_color,
+        streak_limit = LOSS_STREAK_LIMIT,
+        pause_status = pause_status,
+        vix_level    = vix_level,
+        vix_color    = vix_color,
+        size_mult    = size_mult,
+        global_pos   = global_pos,
+        max_global   = MAX_TOTAL_POSITIONS,
+        signal_threshold = MIN_SIGNAL_SCORE,
         id_dot       = id_dot,
         id_status    = id_status,
         id_cycle     = intraday_state.cycle_count,
@@ -2110,7 +2718,7 @@ def build_dashboard():
         spy_str        = spy_str,
         spy_ma_str     = spy_ma_str,
         vix_str        = vix_str,
-        vix_color      = "red" if market_regime["vix"] and market_regime["vix"] > VIX_FEAR_THRESHOLD else "e0e0e0",
+        vix_regime_color = "red" if market_regime["vix"] and market_regime["vix"] > VIX_FEAR_THRESHOLD else "#e0e0e0",
         exposure       = exposure,
         c_regime       = c_regime,
         c_regime_color = c_regime_color,
@@ -2302,15 +2910,18 @@ def main():
 
     # Verify Binance connection (if configured)
     if USE_BINANCE:
+        mode = "TESTNET (virtual money)" if BINANCE_USE_TESTNET else ("LIVE (real money)" if IS_LIVE else "PAPER")
+        log.info(f"[BINANCE] Mode: {mode}")
+        log.info(f"[BINANCE] Endpoint: {BINANCE_BASE}")
         bal = binance_get_balance("USDT")
         if bal is not None:
             log.info(f"[BINANCE] Connected — USDT balance: ${bal:,.2f}")
             log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins")
         else:
-            log.warning("[BINANCE] Could not connect — check BINANCE_KEY and BINANCE_SECRET")
+            log.warning("[BINANCE] Could not connect — check keys in Railway Variables")
     else:
         log.info("[BINANCE] Not configured — using Alpaca for crypto (25 coins)")
-        log.info("[BINANCE] Add BINANCE_KEY + BINANCE_SECRET to Railway to enable 100 coins")
+        log.info("[BINANCE] Add BINANCE_KEY + BINANCE_SECRET to Railway to enable")
 
     last_email_day = None
     cycle = 0
@@ -2323,6 +2934,44 @@ def main():
 
             # Refresh account info each cycle
             account_info = alpaca_get("/v2/account") or account_info
+
+            # Update performance analytics
+            if account_info:
+                pv = float(account_info.get("portfolio_value", 0))
+                update_drawdown(pv)
+                # Track daily return for Sharpe
+                last_pv = float(account_info.get("last_equity", pv))
+                if last_pv > 0:
+                    daily_ret = (pv - last_pv) / last_pv * 100
+                    if daily_ret not in perf["sharpe_daily"]:
+                        perf["sharpe_daily"].append(daily_ret)
+                        perf["sharpe_daily"] = perf["sharpe_daily"][-30:]  # keep 30 days
+
+            # ── PANIC KILL SWITCH ────────────────────────────
+            # If portfolio drops 5% from starting value in one day → close everything
+            if account_info:
+                pv = float(account_info.get("portfolio_value", 0))
+                last_pv = float(account_info.get("last_equity", pv))
+                if last_pv > 0:
+                    drawdown_pct = ((pv - last_pv) / last_pv) * 100
+                    if drawdown_pct <= -5.0:
+                        log.warning(f"PANIC KILL SWITCH: Portfolio down {drawdown_pct:.1f}% today (${pv:,.2f} vs ${last_pv:,.2f})")
+                        log.warning("Closing ALL positions and stopping all bots!")
+                        for sym, pos in list(state.positions.items()):
+                            place_order(sym, "sell", pos["qty"], crypto=False, estimated_price=pos["entry_price"])
+                            if sym in exchange_stops:
+                                cancel_stop_order_alpaca(exchange_stops.pop(sym))
+                        for sym, pos in list(crypto_state.positions.items()):
+                            place_order(sym, "sell", pos["qty"], crypto=True, estimated_price=pos["entry_price"])
+                        state.positions.clear()
+                        crypto_state.positions.clear()
+                        state.shutoff = True
+                        crypto_state.shutoff = True
+                        smallcap_state.shutoff = True
+                        intraday_state.shutoff = True
+                        crypto_intraday_state.shutoff = True
+                        circuit_breaker["active"] = True
+                        circuit_breaker["reason"] = f"PANIC: Portfolio -{abs(drawdown_pct):.1f}% today"
 
             # Update market regimes
             if not IS_LIVE or is_market_open():
@@ -2371,8 +3020,13 @@ def main():
                 send_daily_summary()
                 last_email_day = et.date()
 
-            log.info(f"Sleeping {CYCLE_SECONDS}s...")
-            time.sleep(CYCLE_SECONDS)
+            # Intraday bots run on their own faster sub-cycle
+            # Run 6 intraday cycles per 1 swing cycle
+            intraday_cycles = CYCLE_SECONDS // INTRADAY_CYCLE_SECONDS
+            for _ in range(intraday_cycles):
+                run_intraday_cycle(US_WATCHLIST, intraday_state)
+                run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
+                time.sleep(INTRADAY_CYCLE_SECONDS)
 
         except KeyboardInterrupt:
             log.info("Stopped")
