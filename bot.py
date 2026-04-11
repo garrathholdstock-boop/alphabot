@@ -3174,7 +3174,7 @@ def main():
                 threading.Thread(target=morning_tasks, daemon=True).start()
 
             # Daily email at 5pm ET
-            if et.weekday() < 5 and et.hour == 17 and et.minute < 2 and last_email_day != et.date():
+            if et.hour == 17 and et.minute < 2 and last_email_day != et.date():  # every day — crypto runs weekends too
                 send_daily_summary()
                 last_email_day = et.date()
 
