@@ -2172,36 +2172,45 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .tab:hover {{ color: #e0e0e0; }}
   .empty {{ text-align: center; padding: 50px; color: #333; font-size: 15px; }}
   @media(max-width:768px) {{
-    /* Tables — scroll horizontally instead of overflowing */
-    .table-wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-    table {{ min-width: 500px; font-size: 11px; }}
-    th, td {{ padding: 6px 8px; white-space: nowrap; }}
+    /* Container */
+    .container {{ padding: 10px; }}
 
-    /* Header — stack vertically */
-    .header {{ padding: 10px 14px; flex-direction: column; align-items: flex-start; gap: 8px; }}
-    .header-right {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }}
+    /* Header — stack logo and info vertically */
+    .header {{ padding: 10px 14px; flex-direction: column; align-items: flex-start; gap: 6px; }}
+    .header-right {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; width: 100%; }}
+    .header-pnl {{ display: flex; gap: 14px; }}
     .refresh {{ display: none; }}
 
-    /* Grids — stack to single column */
-    .grid4 {{ grid-template-columns: 1fr 1fr; gap: 10px; }}
-    .grid2 {{ grid-template-columns: 1fr; gap: 10px; }}
-    .regime-grid {{ grid-template-columns: 1fr !important; }}
+    /* Regime cards — ALWAYS stack vertically on mobile */
+    .regime-grid {{ grid-template-columns: 1fr !important; gap: 8px !important; }}
     .regime-stats {{ flex-wrap: wrap; gap: 6px !important; }}
     .regime-desc {{ display: none; }}
+    .regime-title {{ font-size: 20px !important; }}
+
+    /* Stats grid — 2 cols */
+    .grid4 {{ grid-template-columns: 1fr 1fr; gap: 10px; }}
+    .grid2 {{ grid-template-columns: 1fr; gap: 10px; }}
 
     /* Cards */
-    .container {{ padding: 10px; }}
     .card {{ padding: 12px 14px; }}
     .big {{ font-size: 18px; }}
     .section-title {{ font-size: 13px; margin-bottom: 10px; }}
-    .lbl {{ font-size: 9px; }}
+    .lbl {{ font-size: 9px; letter-spacing: 1.5px; }}
 
-    /* Tabs — make them scrollable */
-    .tab-bar {{ overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }}
-    .tab {{ padding: 10px 12px; font-size: 10px; }}
-
-    /* Bot status grid — 2 cols on mobile */
+    /* Bot status grid */
     .bot-status-grid {{ grid-template-columns: 1fr 1fr !important; gap: 6px !important; font-size: 11px !important; }}
+
+    /* Tables — horizontal scroll */
+    .table-wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }}
+    table {{ min-width: 480px; font-size: 11px; }}
+    th, td {{ padding: 6px 8px; white-space: nowrap; }}
+
+    /* Tabs */
+    .tab-bar {{ overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; display: flex; }}
+    .tab {{ padding: 10px 12px; font-size: 10px; flex-shrink: 0; }}
+
+    /* Scan panel tables */
+    #scan-stocks, #scan-crypto {{ overflow-x: auto; }}
   }}
 
   @media(max-width:480px) {{
@@ -2209,15 +2218,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .big {{ font-size: 16px; }}
     .card {{ padding: 10px 12px; }}
     .container {{ padding: 8px; }}
-    /* Stack header pnl values */
-    .header-pnl {{ flex-direction: column; gap: 4px; }}
+    table {{ min-width: 420px; font-size: 10px; }}
+    th, td {{ padding: 5px 7px; }}
   }}
 
   @media(max-width:380px) {{
     .grid4 {{ grid-template-columns: 1fr 1fr; }}
-    .big {{ font-size: 15px; }}
-    table {{ font-size: 10px; }}
-    th, td {{ padding: 5px 6px; }}
+    .big {{ font-size: 14px; }}
+    .card {{ padding: 8px 10px; }}
+    table {{ min-width: 380px; font-size: 10px; }}
   }}
 </style>
 </head>
@@ -2234,7 +2243,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
   <div class="header-right">
-    <div class="header-pnl" style="display:flex;gap:16px;align-items:center">
+    <div class="header-pnl">
       <div style="text-align:right">
         <div style="font-size:10px;color:#00aaff">US P&amp;L</div>
         <div style="font-family:monospace;font-size:13px;font-weight:700;color:{stocks_pnl_color}">{stocks_pnl}</div>
@@ -2243,15 +2252,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div style="font-size:10px;color:#00ff88">Crypto P&amp;L</div>
         <div style="font-family:monospace;font-size:13px;font-weight:700;color:{crypto_pnl_color}">{crypto_pnl}</div>
       </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;color:#444">Portfolio</div>
+        <div style="font-family:monospace;font-size:13px;font-weight:700;color:#00aaff">{portfolio}</div>
+      </div>
     </div>
-    <div class="refresh">Auto-refreshes every 60s · {now}</div>
+    <div class="refresh">↻ {now}</div>
   </div>
 </div>
 
 <div class="container">
 
   <!-- Market Regime Banners -->
-  <div class="regime-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+  <div class="regime-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;width:100%;box-sizing:border-box">
     <!-- Stocks Regime -->
     <div style="padding:12px 14px;border-radius:12px;background:{regime_bg};border:1px solid {regime_border}">
       <div style="margin-bottom:8px">
