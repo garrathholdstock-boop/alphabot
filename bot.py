@@ -36,6 +36,8 @@ GMAIL_USER     = os.environ.get("GMAIL_USER",    "garrathholdstock@gmail.com")
 GMAIL_PASS     = os.environ.get("GMAIL_PASS",    "YOUR_GMAIL_APP_PASSWORD")
 EMAIL_TO       = "garrathholdstock@gmail.com"
 PORT           = int(os.environ.get("PORT", 8080))
+DASH_USER      = os.environ.get("DASH_USER", "alpha")
+DASH_PASS      = os.environ.get("DASH_PASS", "bot123")
 
 ALPACA_BASE    = "https://api.alpaca.markets" if IS_LIVE else "https://paper-api.alpaca.markets"
 DATA_BASE      = "https://data.alpaca.markets"
@@ -3585,11 +3587,35 @@ def build_dashboard():
     )
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    def _check_auth(self):
+        """Returns True if request has valid Basic Auth credentials."""
+        import base64
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            return False
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            return username == DASH_USER and password == DASH_PASS
+        except:
+            return False
+
+    def _require_auth(self):
+        """Send 401 response requesting Basic Auth."""
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="AlphaBot Dashboard"')
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write("<html><body style='background:#111;color:#fff;font-family:sans-serif;padding:40px'><h2>AlphaBot - Authentication Required</h2><p>Enter your dashboard credentials.</p></body></html>".encode("utf-8"))
+
     def do_GET(self):
         if self.path == "/health":
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
+            return
+        if not self._check_auth():
+            self._require_auth()
             return
         if self.path == "/api":
             with _state_lock:
@@ -3619,6 +3645,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle kill switch and resume commands from dashboard."""
+        if not self._check_auth():
+            self._require_auth()
+            return
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
 
