@@ -723,6 +723,45 @@ def run_morning_news_scan():
     # Send morning briefing email
     send_morning_briefing(skipped, positive, neutral)
 
+def build_near_miss_section(label, candidates, threshold, top_n=10):
+    """Build a near-miss scorecard showing stocks/coins that almost triggered a trade."""
+    if not candidates:
+        return f"{label} NEAR MISSES\n{'─'*50}\n  No scan data yet\n"
+
+    # Get candidates below threshold, sorted by score descending
+    near_misses = [
+        c for c in candidates
+        if c.get("score", 0) < threshold and c.get("score", 0) > 0
+    ]
+    near_misses.sort(key=lambda x: x.get("score", 0), reverse=True)
+    near_misses = near_misses[:top_n]
+
+    if not near_misses:
+        return f"{label} NEAR MISSES\n{'─'*50}\n  No candidates close to threshold\n"
+
+    lines = []
+    for c in near_misses:
+        score     = c.get("score", 0)
+        gap       = threshold - score
+        sym       = c.get("symbol", "?")
+        price     = c.get("price", 0)
+        rsi       = c.get("rsi")
+        signal    = c.get("signal", "HOLD")
+        vol_ratio = c.get("vol_ratio", 0)
+        sma_cross = "YES" if signal in ("BUY","SELL") else "no"
+        rsi_str   = f"{rsi:.1f}" if rsi else "—"
+        gap_bar   = "█" * int(score) + "░" * int(threshold - score)  # visual bar
+        lines.append(
+            f"  {sym:<10} score:{score:.1f}/{threshold:.0f}  [{gap_bar}]  "
+            f"gap:{gap:.1f}  RSI:{rsi_str}  vol:{vol_ratio:.1f}x  SMA cross:{sma_cross}  "
+            f"${price:.4f}  ← {gap:.1f} away from trade"
+        )
+
+    header = f"{label} NEAR MISSES (top {len(near_misses)}, threshold={threshold})\n{'─'*50}\n"
+    body   = "\n".join(lines)
+    footer = "\n\nHow to read: score/threshold | gap = points needed | SMA cross = crossover signal fired\n"
+    return header + body + footer
+
 def send_morning_briefing(skipped, positive, neutral):
     """Email the morning news briefing before market open."""
     def fmt_item(sym, data, tag):
@@ -730,12 +769,17 @@ def send_morning_briefing(skipped, positive, neutral):
     skip_lines  = "\n".join(fmt_item(s,d,"SKIP ") for s,d in news_state["skip_list"].items()) or "  None all clear!"
     boost_lines = "\n".join(fmt_item(s,d,"BOOST") for s,d in news_state["watch_list"].items()) or "  None today"
 
+    # Build near-miss scorecards
+    stocks_near_miss = build_near_miss_section("US STOCKS", state.candidates, MIN_SIGNAL_SCORE)
+    crypto_near_miss = build_near_miss_section("CRYPTO", crypto_state.candidates, MIN_SIGNAL_SCORE)
+
     body = f"""
 AlphaBot Morning Briefing
 {'='*50}
 Date:     {datetime.now().strftime('%A, %d %B %Y')}
 Time:     {datetime.now().strftime('%H:%M ET')} (market opens at 9:30 ET)
 Stocks scanned: {len(US_WATCHLIST)}
+Signal threshold: {MIN_SIGNAL_SCORE}/10
 
 SKIPPING TODAY ({skipped} stocks — negative news):
 {skip_lines}
@@ -751,6 +795,14 @@ SUMMARY
 
 The bot will automatically avoid skipped stocks today.
 All restrictions clear at midnight and reset tomorrow.
+
+{'='*50}
+SIGNAL SCORECARD — Near Misses
+{'='*50}
+These almost triggered a trade. Use this to tune the threshold.
+
+{stocks_near_miss}
+{crypto_near_miss}
 {'='*50}
 Sent by AlphaBot · Market opens in ~30 minutes
 """.strip()
@@ -2037,12 +2089,23 @@ def send_daily_summary():
         boosts = "\n".join(f"  🟢 {s}: {d['reason']}" for s,d in news_state["watch_list"].items()) or "  None"
         news_summary = f"\nMORNING NEWS SCAN\n{'─'*40}\nSkipped:{'\n'}{skips}\nPositive:{'\n'}{boosts}\n"
 
+    # Near miss scorecards for daily summary
+    stocks_near_miss = build_near_miss_section("US STOCKS", state.candidates, MIN_SIGNAL_SCORE)
+    crypto_near_miss = build_near_miss_section("CRYPTO", crypto_state.candidates, MIN_SIGNAL_SCORE)
+    near_miss_summary = (
+        f"\nSIGNAL SCORECARD — Near Misses\n{'='*40}\n"
+        f"Stocks and crypto that almost traded today.\n"
+        f"Use this to tune MIN_SIGNAL_SCORE (currently {MIN_SIGNAL_SCORE}/10)\n\n"
+        f"{stocks_near_miss}\n{crypto_near_miss}"
+    )
+
     body = (f"AlphaBot Daily Summary\n{'='*40}\n"
             f"Date: {datetime.now().strftime('%A, %d %B %Y')}\n"
             f"Mode: {'LIVE' if IS_LIVE else 'Paper'} Trading\n"
             f"Portfolio: ${float(account_info.get('portfolio_value',0)):,.2f}\n\n"
             f"{section(state)}\n{section(smallcap_state)}\n{section(intraday_state)}\n{section(crypto_state)}\n{section(crypto_intraday_state)}\n"
             f"{news_summary}"
+            f"{near_miss_summary}\n"
             f"{'='*40}\nSent by AlphaBot on Railway")
     try:
         msg = MIMEMultipart()
