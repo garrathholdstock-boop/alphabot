@@ -384,11 +384,22 @@ BINANCE_HEADERS = {"X-MBX-APIKEY": _BIN_KEY}
 
 def binance_get(path, params=None, signed=False):
     global _last_binance_call, _binance_ban_until
-    # Rate limit — pause between calls to stay well under Binance limits
+
+    # ── Ban check — skip ALL calls until ban expires ──
+    now_ts = time.time()
+    if now_ts < _binance_ban_until:
+        remaining = int(_binance_ban_until - now_ts)
+        # Only log once per minute to keep logs clean
+        if remaining % 60 < 2:
+            log.warning(f"[BINANCE] Ban active — {remaining}s remaining ({datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')})")
+        return None  # Hard stop — no call made
+
+    # ── Rate limit — space out calls ──
     elapsed = time.time() - _last_binance_call
     if elapsed < BINANCE_DELAY:
         time.sleep(BINANCE_DELAY - elapsed)
     _last_binance_call = time.time()
+
     try:
         p = params or {}
         if signed:
@@ -398,17 +409,16 @@ def binance_get(path, params=None, signed=False):
             url = f"{BINANCE_BASE}{path}" + (f"?{urllib.parse.urlencode(p)}" if p else "")
         r = requests.get(url, headers=BINANCE_HEADERS, timeout=10)
         if not r.ok:
-            # If rate limited, back off for the ban duration
             if r.status_code == 418 or r.status_code == 429:
-                retry_after = int(r.headers.get("Retry-After", 60))
+                retry_after = int(r.headers.get("Retry-After", 120))
                 _binance_ban_until = time.time() + retry_after
-                log.warning(f"[BINANCE] Rate limited — ban for {retry_after}s. Bot will resume at {datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')}")
-                return None  # Return immediately — do NOT sleep here, let ban tracker handle it
-            log.warning(f"Binance GET {path}: {r.status_code} {r.text[:100]}")
+                log.warning(f"[BINANCE] Rate limited — banned for {retry_after}s. Will retry at {datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')}")
+                return None
+            log.debug(f"[BINANCE] {path}: {r.status_code}")
             return None
         return r.json()
     except Exception as e:
-        log.warning(f"Binance GET {path}: {e}")
+        log.debug(f"[BINANCE] {path}: {e}")
         return None
 
 def binance_post(path, params):
@@ -2140,10 +2150,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .badge-paper {{ background: rgba(255,204,0,0.1); color: #ffcc00; border: 1px solid rgba(255,204,0,0.3); }}
   .badge-live  {{ background: rgba(255,68,102,0.1); color: #ff4466; border: 1px solid rgba(255,68,102,0.3); }}
   .refresh {{ font-size: 11px; color: #444; }}
+  @media(max-width:480px) {{ .refresh {{ display:none; }} }}
   .container {{ padding: 24px; max-width: 1100px; margin: 0 auto; }}
   .grid4 {{ display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }}
   .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }}
-  .regime-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
   .card {{ background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 18px 20px; }}
   .card-green {{ border-color: rgba(0,255,136,0.15); }}
   .card-blue  {{ border-color: rgba(0,170,255,0.15); }}
@@ -2183,7 +2193,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .refresh {{ display: none; }}
 
     /* Regime cards — ALWAYS stack vertically on mobile */
-    .regime-grid {{ display: grid !important; grid-template-columns: 1fr !important; gap: 8px !important; }}
     .regime-stats {{ flex-wrap: wrap; gap: 6px !important; }}
     .regime-desc {{ display: none; }}
     .regime-title {{ font-size: 20px !important; }}
@@ -2265,7 +2274,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <div class="container">
 
   <!-- Market Regime Banners -->
-  <div class="regime-grid" style="margin-bottom:16px">
+  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;width:100%">
     <!-- Stocks Regime -->
     <div style="padding:12px 14px;border-radius:12px;background:{regime_bg};border:1px solid {regime_border}">
       <div style="margin-bottom:8px">
