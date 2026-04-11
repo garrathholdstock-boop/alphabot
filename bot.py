@@ -234,6 +234,7 @@ class BotState:
         self.running         = False
         self.candidates      = []
         self.trades_today    = 0       # count of completed trades today
+        self.loss_cooldown   = {}      # { symbol: expiry_timestamp } — wash sale prevention
 
     def check_reset(self):
         today = datetime.now().date()
@@ -574,6 +575,30 @@ def fetch_bars_batch(symbols, limit=30):
             log.warning(f"[BATCH] Error: {e}")
     log.info(f"[BATCH] Fetched bars for {len(results)}/{len(symbols)} symbols in {len(symbols)//chunk_size + 1} API call(s)")
     return results
+
+
+def check_data_freshness(bars, max_age_hours=2):
+    """Check if bar data is fresh enough to trade on.
+    Returns (is_fresh, age_str) tuple.
+    Stale data causes phantom wins in paper trading that become real losses live."""
+    if not bars:
+        return False, "no data"
+    try:
+        last_bar = bars[-1]
+        bar_time_str = last_bar.get("t", "")
+        if not bar_time_str:
+            return True, "unknown"  # no timestamp — assume ok
+        bar_time = datetime.fromisoformat(bar_time_str.replace("Z", "+00:00"))
+        age = datetime.now(bar_time.tzinfo) - bar_time
+        age_hours = age.total_seconds() / 3600
+        age_str = f"{age_hours:.1f}h old"
+        # Daily bars can be up to 24h old and still valid
+        # Intraday bars should be fresh within max_age_hours
+        if age_hours > max_age_hours:
+            return False, age_str
+        return True, age_str
+    except:
+        return True, "unknown"  # parse error — don't block trading
 
 
 def fetch_bars(symbol, crypto=False):
@@ -1068,6 +1093,32 @@ BINANCE_INTERVAL_MAP = {
     "1Hour": "1h", "2Hour": "2h", "4Hour": "4h", "1Day": "1d",
 }
 
+def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
+    """Batch fetch intraday bars for multiple US stocks — same as fetch_bars_batch but for sub-daily timeframes."""
+    if not symbols:
+        return {}
+    results = {}
+    chunk_size = 100
+    for i in range(0, len(symbols), chunk_size):
+        chunk = symbols[i:i + chunk_size]
+        syms_param = ",".join(chunk)
+        try:
+            url = (f"{DATA_BASE}/v2/stocks/bars"
+                   f"?symbols={requests.utils.quote(syms_param, safe=',')}"
+                   f"&timeframe={timeframe}&limit={limit}&feed=sip&adjustment=raw")
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if not r.ok:
+                log.warning(f"[INTRADAY BATCH] Failed: {r.status_code}")
+                continue
+            data = r.json().get("bars", {})
+            for sym, bars in data.items():
+                if bars and len(bars) >= 10:
+                    results[sym] = bars
+        except Exception as e:
+            log.warning(f"[INTRADAY BATCH] Error: {e}")
+    return results
+
+
 def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
     """Fetch sub-daily bars. Routes crypto to Binance if configured."""
     if crypto and USE_BINANCE:
@@ -1178,10 +1229,12 @@ def run_intraday_cycle(watchlist, st):
     check_intraday_positions(st, crypto=False)
     if st.shutoff: st.running = False; return
 
+    # Batch fetch all intraday bars in one API call
+    bars_batch = fetch_intraday_bars_batch(watchlist, timeframe=INTRADAY_TIMEFRAME, limit=INTRADAY_BARS)
     results = []
     for sym in watchlist:
         if sym in news_state.get("skip_list", {}): continue
-        bars = fetch_intraday_bars(sym, timeframe=INTRADAY_TIMEFRAME, limit=INTRADAY_BARS)
+        bars = bars_batch.get(sym)
         if not bars or len(bars) < 14: continue
         closes  = [b["c"] for b in bars]
         volumes = [b["v"] for b in bars]
@@ -2038,7 +2091,24 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
     # Live trading: use limit orders with 0.5% tolerance for better fills
     # Paper trading: use market orders (slippage model handles simulation)
     if IS_LIVE and estimated_price and not crypto:
-        tolerance = 0.005  # 0.5% tolerance
+        # Check bid/ask spread before placing limit order
+        # If spread > profit target, trade is mathematically not worth taking
+        spread_pct = 0.0
+        try:
+            snap = alpaca_get(f"/v2/stocks/{symbol}/snapshot?feed=sip", base=DATA_BASE)
+            if snap:
+                bid = float(snap.get("latestQuote", {}).get("bp", 0) or 0)
+                ask = float(snap.get("latestQuote", {}).get("ap", 0) or 0)
+                if bid > 0 and ask > 0:
+                    spread_pct = ((ask - bid) / bid) * 100
+                    if spread_pct > 1.0:  # spread wider than 1% — skip trade
+                        log.warning(f"[SPREAD] {symbol} spread too wide ({spread_pct:.2f}%) — skipping to avoid bad fill")
+                        return None, estimated_price
+                    log.info(f"[SPREAD] {symbol} bid:${bid:.2f} ask:${ask:.2f} spread:{spread_pct:.3f}% — OK")
+        except Exception as e:
+            log.debug(f"[SPREAD] Could not check spread for {symbol}: {e}")
+
+        tolerance = max(0.005, spread_pct / 100 + 0.002)  # at least 0.5%, wider if spread is wide
         if side == "buy":
             limit_price = round(estimated_price * (1 + tolerance), 2)
         else:
@@ -2049,9 +2119,8 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
             "time_in_force": "day",
         })
         if result:
-            log.info(f"[LIMIT ORDER] {side.upper()} {symbol} limit:${limit_price:.2f} (signal:${estimated_price:.2f} tolerance:0.5%)")
+            log.info(f"[LIMIT ORDER] {side.upper()} {symbol} limit:${limit_price:.2f} (signal:${estimated_price:.2f} spread:{spread_pct:.3f}%)")
         else:
-            # Fallback to market if limit order fails
             log.warning(f"[LIMIT] Failed for {symbol} — falling back to market order")
             result = alpaca_post("/v2/orders", {
                 "symbol": symbol, "qty": str(qty), "side": side,
@@ -2289,6 +2358,12 @@ def run_cycle(watchlist, st, crypto=False):
         # Global symbol lock — prevent two bots holding the same ticker
         if s["symbol"] in all_symbols_held():
             log.info(f"[{st.label}] SKIP {s['symbol']} — already held by another bot")
+            continue
+        # Wash sale cooldown — don't re-buy a stock sold at a loss today
+        cooldown_expiry = st.loss_cooldown.get(s["symbol"], 0)
+        if time.time() < cooldown_expiry:
+            remaining = int((cooldown_expiry - time.time()) / 60)
+            log.info(f"[{st.label}] SKIP {s['symbol']} — loss cooldown ({remaining}m remaining)")
             continue
         # Loss streak pause
         if is_loss_streak_paused(): break
