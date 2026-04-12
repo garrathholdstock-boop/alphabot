@@ -3683,20 +3683,11 @@ def build_dashboard():
 
 class DashboardHandler(BaseHTTPRequestHandler):
     def _check_auth(self):
-        """Check URL token or session cookie."""
-        # Check URL query param first — works on all mobile browsers
-        if f"token={DASH_TOKEN}" in self.path:
-            return True
-        # Also check cookie for desktop sessions
-        cookies = self.headers.get("Cookie", "")
-        return f"auth={DASH_TOKEN}" in cookies
+        """Auth disabled during paper trading — re-enable before going live."""
+        return True
 
     def _require_auth(self):
-        """Serve a proper login page."""
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-        self.wfile.write(LOGIN_HTML.encode("utf-8"))
+        pass
 
     def do_GET(self):
         if self.path == "/health":
