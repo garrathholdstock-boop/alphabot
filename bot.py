@@ -483,13 +483,16 @@ BINANCE_HEADERS = {"X-MBX-APIKEY": _BIN_KEY}
 def binance_get(path, params=None, signed=False):
     global _last_binance_call, _binance_ban_until
 
-    # ── Ban check — skip ALL calls until ban expires ──
+    # ── Ban check — skip ALL calls until 120s AFTER ban expires ──
+    # 120s buffer prevents triggering a fresh ban as the old one expires
     now_ts = time.time()
-    if now_ts < _binance_ban_until:
+    ban_clear_at = _binance_ban_until + 120
+    if now_ts < ban_clear_at:
         remaining = int(_binance_ban_until - now_ts)
-        # Only log once per minute to keep logs clean
-        if remaining % 60 < 2:
-            log.warning(f"[BINANCE] Ban active — {remaining}s remaining ({datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')})")
+        if remaining > 0 and remaining % 60 < 2:
+            log.warning(f"[BINANCE] Ban active — {remaining}s remaining, will resume at {datetime.fromtimestamp(ban_clear_at).strftime('%H:%M:%S')}")
+        elif remaining <= 0:
+            log.info(f"[BINANCE] Ban expired — waiting 120s safety buffer before resuming")
         return None  # Hard stop — no call made
 
     # ── Rate limit — space out calls ──
@@ -724,8 +727,8 @@ def fetch_bars(symbol, crypto=False):
 def fetch_latest_price(symbol, crypto=False):
     """Fetch latest price. Routes crypto to Binance if configured."""
     if crypto and USE_BINANCE:
-        # Hard stop — never call Binance during a ban
-        if time.time() < _binance_ban_until:
+        # Hard stop — never call Binance during or within 120s after ban
+        if time.time() < (_binance_ban_until + 120):
             return None
         return binance_fetch_price(symbol)
     try:
@@ -1606,6 +1609,9 @@ def update_crypto_regime():
     """Check BTC trend and volatility to determine crypto BULL or BEAR mode."""
     global crypto_regime
 
+    # Skip regime update if banned or within 120s of ban expiry
+    if USE_BINANCE and time.time() < (_binance_ban_until + 120):
+        return crypto_regime["mode"]
     btc_symbol = "BTCUSDT" if USE_BINANCE else "BTC/USD"
     btc_bars = fetch_bars(btc_symbol, crypto=True)
     if not btc_bars or len(btc_bars) < BTC_MA_PERIOD:
@@ -4075,11 +4081,15 @@ def main():
                                 "entry_date": datetime.now().date().isoformat(),
                                 "days_held": 0, "entry_ts": datetime.now().isoformat(),
                             }
-                            log.warning(f"[RECONCILE] {sym} found on broker but missing locally — re-added")
-                            # Place exchange stop for newly discovered position
-                            stop_order = place_stop_order_alpaca(sym, qty, round(stop, 2))
-                            if stop_order and stop_order.get("id"):
-                                exchange_stops[sym] = stop_order["id"]
+                            log.warning(f"[RECONCILE] {sym} found on broker but missing locally — re-added (entry:${entry:.2f} stop:${stop:.2f})")
+                            # Only place stop if not already tracked
+                            if sym not in exchange_stops:
+                                stop_order = place_stop_order_alpaca(sym, qty, round(stop, 2))
+                                if stop_order and stop_order.get("id"):
+                                    exchange_stops[sym] = stop_order["id"]
+                                    log.info(f"[RECONCILE] Exchange stop placed for {sym} @ ${stop:.2f}")
+                                else:
+                                    log.warning(f"[RECONCILE] Could not place stop for {sym} — will retry next reconcile cycle")
 
                     if phantom or unknown:
                         log.info(f"[RECONCILE] Fixed {len(phantom)} phantom + {len(unknown)} missing positions")
@@ -4102,9 +4112,10 @@ def main():
             if account_info:
                 alpaca_pv = float(account_info.get("portfolio_value", 1000))
 
-                # Fetch Binance USDT balance (skip if banned)
+                # Fetch Binance USDT balance — skip if banned OR within 120s of ban expiry
+                # The 120s buffer prevents triggering a fresh ban as the old one expires
                 binance_pv = 0.0
-                if USE_BINANCE and time.time() >= _binance_ban_until:
+                if USE_BINANCE and time.time() >= (_binance_ban_until + 120):
                     try:
                         binance_pv = binance_get_balance("USDT") or 0.0
                     except:
