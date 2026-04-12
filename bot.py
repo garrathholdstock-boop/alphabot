@@ -434,6 +434,9 @@ def update_exchange_stop(symbol, qty, new_stop_price):
 # Track exchange stop order IDs per position
 exchange_stops = {}  # { symbol: order_id }
 
+# Binance balance cache — avoids calling every cycle
+_binance_balance_cache = {"value": 0.0, "ts": 0}
+
 # ── API health tracking ───────────────────────────────────────
 api_health = {
     "alpaca_fails":  0,    # consecutive Alpaca failures
@@ -627,6 +630,8 @@ def binance_get_balance(asset="USDT"):
 
 def binance_get_top_coins(limit=100):
     """Get top coins by 24h volume from Binance. Returns USDT pairs only."""
+    if time.time() < (_binance_ban_until + 300):
+        return CRYPTO_WATCHLIST_BINANCE  # return static list during ban
     tickers = binance_get("/api/v3/ticker/24hr")
     if not tickers:
         return CRYPTO_WATCHLIST_BINANCE  # fallback to static list
@@ -706,6 +711,9 @@ def check_data_freshness(bars, max_age_hours=2):
 def fetch_bars(symbol, crypto=False):
     """Fetch daily OHLCV bars. Routes crypto to Binance if configured."""
     if crypto and USE_BINANCE:
+        # Hard abort if banned or within 5 min buffer
+        if time.time() < (_binance_ban_until + 300):
+            return None
         bars = binance_fetch_bars(symbol, interval="1d", limit=35)
         return bars if bars and len(bars) >= 15 else None
     end   = datetime.utcnow()
@@ -1202,6 +1210,9 @@ def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
     """Batch fetch intraday bars for multiple US stocks — same as fetch_bars_batch but for sub-daily timeframes."""
     if not symbols:
         return {}
+    # For crypto batch calls via Binance, check ban first
+    if USE_BINANCE and time.time() < (_binance_ban_until + 300):
+        return {}
     results = {}
     chunk_size = 100
     for i in range(0, len(symbols), chunk_size):
@@ -1227,6 +1238,9 @@ def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
 def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
     """Fetch sub-daily bars. Routes crypto to Binance if configured."""
     if crypto and USE_BINANCE:
+        # Hard abort if banned or within 5 min buffer
+        if time.time() < (_binance_ban_until + 300):
+            return None
         binance_tf = BINANCE_INTERVAL_MAP.get(timeframe, "15m")
         bars = binance_fetch_bars(symbol, interval=binance_tf, limit=limit)
         return bars if bars and len(bars) >= 10 else None
@@ -1610,7 +1624,7 @@ def update_crypto_regime():
     global crypto_regime
 
     # Skip regime update if banned or within 120s of ban expiry
-    if USE_BINANCE and time.time() < (_binance_ban_until + 120):
+    if USE_BINANCE and time.time() < (_binance_ban_until + 300):
         return crypto_regime["mode"]
     btc_symbol = "BTCUSDT" if USE_BINANCE else "BTC/USD"
     btc_bars = fetch_bars(btc_symbol, crypto=True)
@@ -4112,14 +4126,20 @@ def main():
             if account_info:
                 alpaca_pv = float(account_info.get("portfolio_value", 1000))
 
-                # Fetch Binance USDT balance — skip if banned OR within 120s of ban expiry
-                # The 120s buffer prevents triggering a fresh ban as the old one expires
-                binance_pv = 0.0
-                if USE_BINANCE and time.time() >= (_binance_ban_until + 120):
+                # Fetch Binance balance — cached for 10 mins to minimise API calls
+                # Only fetches when: not banned, 5 min buffer after ban, and cache expired
+                binance_pv = _binance_balance_cache.get("value", 0.0)
+                cache_age  = time.time() - _binance_balance_cache.get("ts", 0)
+                ban_clear  = time.time() >= (_binance_ban_until + 300)  # 5 min buffer
+                if USE_BINANCE and ban_clear and cache_age > 600:  # refresh every 10 mins
                     try:
-                        binance_pv = binance_get_balance("USDT") or 0.0
+                        fresh = binance_get_balance("USDT")
+                        if fresh is not None:
+                            binance_pv = fresh
+                            _binance_balance_cache["value"] = fresh
+                            _binance_balance_cache["ts"]    = time.time()
                     except:
-                        binance_pv = 0.0
+                        pass
 
                 # Total combined portfolio
                 total_pv = alpaca_pv + binance_pv
@@ -4250,7 +4270,10 @@ def main():
             intraday_cycles = CYCLE_SECONDS // INTRADAY_CYCLE_SECONDS
             for _ in range(intraday_cycles):
                 run_intraday_cycle(US_WATCHLIST, intraday_state)
-                run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
+                # Hard ban check before every crypto intraday cycle
+                # This is what was causing re-bans — 6 rapid scans right as ban expired
+                if not (USE_BINANCE and time.time() < (_binance_ban_until + 300)):
+                    run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
                 time.sleep(INTRADAY_CYCLE_SECONDS)
 
         except KeyboardInterrupt:
