@@ -3942,28 +3942,28 @@ def main():
 
     # Verify Binance connectivity if enabled
     if USE_BINANCE:
-        log.info("[BINANCE] Testing connection...")
-        test_bars = binance_fetch_bars("BTCUSDT", limit=5)
-        if test_bars:
-            log.info(f"[BINANCE] Connected — BTC latest: ${test_bars[-1]['c']:,.2f}")
-        else:
-            log.error("[BINANCE] Cannot fetch data — check BINANCE_KEY/BINANCE_SECRET and Railway IP whitelist")
-            log.error("[BINANCE] Note: Binance may require IP whitelisting in API settings")
-
-    # Verify Binance connection (if configured)
-    if USE_BINANCE:
         mode = "TESTNET (virtual money)" if BINANCE_USE_TESTNET else ("LIVE (real money)" if IS_LIVE else "PAPER")
         log.info(f"[BINANCE] Mode: {mode}")
         log.info(f"[BINANCE] Endpoint: {BINANCE_BASE}")
-        bal = binance_get_balance("USDT")
-        if bal is not None:
-            log.info(f"[BINANCE] Connected — USDT balance: ${bal:,.2f}")
-            log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins")
+
+        # ── Check if IP is currently banned before making ANY call ──
+        # First make ONE lightweight ping to check ban status
+        ping = binance_get("/api/v3/ping")  # lightest possible Binance call
+        if time.time() < _binance_ban_until:
+            ban_mins = int((_binance_ban_until - time.time()) / 60)
+            log.warning(f"[BINANCE] IP currently banned — will retry in {ban_mins} minutes. Bot will wait silently.")
+        elif ping is not None:
+            # Not banned — safe to do full connection check
+            bal = binance_get_balance("USDT")
+            if bal is not None:
+                log.info(f"[BINANCE] Connected — USDT balance: ${bal:,.2f}")
+                log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins")
+            else:
+                log.warning("[BINANCE] Could not fetch balance — check keys in Railway Variables")
         else:
-            log.warning("[BINANCE] Could not connect — check keys in Railway Variables")
+            log.warning("[BINANCE] Could not connect — check BINANCE_KEY/BINANCE_SECRET and IP whitelist")
     else:
-        log.info("[BINANCE] Not configured — using Alpaca for crypto (25 coins)")
-        log.info("[BINANCE] Add BINANCE_KEY + BINANCE_SECRET to Railway to enable")
+        log.info("[BINANCE] Not configured — add BINANCE_KEY + BINANCE_SECRET to Railway to enable")
 
     # ── STARTUP RECOVERY — rebuild state from exchange ──────────
     log.info("=== Startup recovery check ===")
