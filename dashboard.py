@@ -234,7 +234,7 @@ function pinCmd(path, label) {{
         <span><span style="color:#555">SPY </span><span style="font-family:monospace;font-weight:700">{spy_str}</span></span>
         <span><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{spy_ma_str}</span></span>
         <span><span style="color:#555">VIX </span><span style="font-family:monospace;color:{vix_regime_color}">{vix_str}</span></span>
-        <span><span style="color:#555">Exp </span><span style="font-family:monospace">${{exposure:.0f}}</span></span>
+        <span><span style="color:#555">Exp </span><span style="font-family:monospace">${exposure_str}</span></span>
       </div>
     </div>
     <div style="padding:12px 14px;border-radius:12px;background:{c_regime_bg};border:1px solid {c_regime_border}">
@@ -244,7 +244,7 @@ function pinCmd(path, label) {{
         <span><span style="color:#555">BTC </span><span style="font-family:monospace;font-weight:700">{btc_str}</span></span>
         <span><span style="color:#555">MA20 </span><span style="font-family:monospace;color:#777">{btc_ma_str}</span></span>
         <span><span style="color:#555">Chg </span><span style="font-family:monospace;color:{btc_chg_color}">{btc_chg_str}</span></span>
-        <span><span style="color:#555">Exp </span><span style="font-family:monospace">${{crypto_exposure:.0f}}</span></span>
+        <span><span style="color:#555">Exp </span><span style="font-family:monospace">${crypto_exposure_str}</span></span>
       </div>
     </div>
   </div>
@@ -268,7 +268,7 @@ function pinCmd(path, label) {{
         <div><div class="lbl">Status</div><span class="dot {stocks_dot}"></span>{stocks_status}</div>
         <div><div class="lbl">Cycle</div>#{stocks_cycle}</div>
         <div><div class="lbl">Open Positions</div><span style="font-weight:700">{stocks_positions}</span></div>
-        <div><div class="lbl">Daily Spend</div>${{stocks_spend}} / ${max_spend}</div>
+        <div><div class="lbl">Daily Spend</div>${stocks_spend} / ${max_spend}</div>
         <div><div class="lbl">Last Run</div><span style="color:#555">{stocks_last}</span></div>
         <div><div class="lbl">Trades Today</div>{stocks_trades}</div>
       </div>
@@ -359,10 +359,12 @@ function pinCmd(path, label) {{
     <div class="tab-bar" style="margin-bottom:0;border-bottom:none">
       <div class="tab tab-stocks active" onclick="showScan('stocks',this)" style="border-bottom:2px solid #00aaff;color:#00aaff">📈 US Stocks Last Scan</div>
       <div class="tab tab-crypto" onclick="showScan('crypto',this)">🪙 Crypto Last Scan</div>
+      <div class="tab" onclick="showScan('smallcap',this)" style="color:#ffcc00">📊 Small Cap Last Scan</div>
     </div>
     <div class="card" style="border-radius:0 12px 12px 12px;margin-top:0">
       <div id="scan-stocks" class="scan-panel active">{stocks_scan_html}</div>
       <div id="scan-crypto" class="scan-panel">{crypto_scan_html}</div>
+      <div id="scan-smallcap" class="scan-panel">{smallcap_scan_html}</div>
     </div>
   </div>
   <script>
@@ -459,6 +461,8 @@ def build_dashboard():
     btc_chg_color  = "red" if crypto_regime["btc_change"] and crypto_regime["btc_change"] < -BTC_CRASH_PCT else "#e0e0e0"
     exposure       = total_exposure(state)
     crypto_exposure = total_exposure(crypto_state)
+    exposure_str        = f"{exposure:.0f}"
+    crypto_exposure_str = f"{crypto_exposure:.0f}"
     def pnl_str(v):   return f"+${v:.2f}" if v >= 0 else f"-${abs(v):.2f}"
     def pnl_color(v): return "green" if v >= 0 else "red"
     def dot_for(st):  return "dot-red" if st.shutoff else ("dot-green" if st.running else "dot-gold")
@@ -686,8 +690,9 @@ def build_dashboard():
                 f'<th>Score</th><th>EMA Cross</th><th>RSI</th><th>Vol</th>'
                 f'</tr></thead><tbody>{rows}</tbody></table></div>')
 
-    stocks_scan_html = build_scan_table(state.candidates, "blue")
-    crypto_scan_html = build_scan_table(crypto_state.candidates, "green")
+    stocks_scan_html  = build_scan_table(state.candidates, "blue")
+    crypto_scan_html  = build_scan_table(crypto_state.candidates, "green")
+    smallcap_scan_html = build_scan_table(smallcap_state.candidates, "gold") if smallcap_state.candidates else '<div class="empty">Small cap pool refreshing — check back after first cycle</div>'
 
     # News section
     if not news_state["scan_complete"]:
@@ -730,6 +735,8 @@ def build_dashboard():
         cid_dot=cid_dot, cid_status=cid_status, cid_cycle=crypto_intraday_state.cycle_count,
         positions_html=positions_html, trades_html=trades_html, screener_html=screener_html,
         stocks_scan_html=stocks_scan_html, crypto_scan_html=crypto_scan_html,
+        smallcap_scan_html=smallcap_scan_html,
+        exposure_str=exposure_str, crypto_exposure_str=crypto_exposure_str,
         win_rate=win_rate, trades_wr_color=trades_wr_color, wins=wins_count, losses=losses_count,
         max_dd=max_dd, dd_color=dd_color, peak_pv=peak_pv,
         profit_factor=profit_factor, pf_color=pf_color,
@@ -744,13 +751,11 @@ def build_dashboard():
         regime_icon="🐻" if regime=="BEAR" else "🐂",
         spy_str=spy_str, spy_ma_str=spy_ma_str, vix_str=vix_str,
         vix_regime_color="red" if market_regime["vix"] and market_regime["vix"] > VIX_FEAR_THRESHOLD else "#e0e0e0",
-        exposure=exposure,
         c_regime=c_regime, c_regime_color="red" if c_regime=="BEAR" else "green",
         c_regime_bg="rgba(255,68,102,0.08)" if c_regime=="BEAR" else "rgba(0,255,136,0.05)",
         c_regime_border="rgba(255,68,102,0.25)" if c_regime=="BEAR" else "rgba(0,255,136,0.15)",
         c_regime_icon="🐻" if c_regime=="BEAR" else "🐂",
         btc_str=btc_str, btc_ma_str=btc_ma_str, btc_chg_str=btc_chg_str, btc_chg_color=btc_chg_color,
-        crypto_exposure=crypto_exposure,
         news_html=news_html, news_scan_time=news_scan_time,
         dash_token=DASH_TOKEN,
         stop_loss=STOP_LOSS_PCT, trailing_stop=TRAILING_STOP_PCT, take_profit=TAKE_PROFIT_PCT,
