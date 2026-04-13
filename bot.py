@@ -4846,8 +4846,8 @@ def build_dashboard():
 
     # Screener — BUY signals summary
     all_cands = (
-        [dict(c, market="Stock") for c in state.candidates if c["signal"]=="BUY"] +
-        [dict(c, market="Crypto") for c in crypto_state.candidates if c["signal"]=="BUY"]
+        [dict(c, market="Stock") for c in state.candidates if c["signal"]=="BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
+        [dict(c, market="Crypto") for c in crypto_state.candidates if c["signal"]=="BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE]
     )
     if all_cands:
         rows = ""
@@ -5825,8 +5825,4 @@ def main():
                     if sym not in stop_syms:
                         log.warning(f"[CRASH RECOVERY] Replacing missing stop for {sym}")
                         place_stop_order_alpaca(sym, pos["qty"], round(pos["stop_price"], 2))
-            except: pass
-            time.sleep(30)
-
-if __name__ == "__main__":
-    main()
+       
