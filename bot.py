@@ -2380,6 +2380,12 @@ def equity_curve_size_factor():
     return 1.0
 
 
+def risk_based_size(portfolio_value, stop_pct, risk_pct=1.0):
+    """Risk 1% of portfolio per trade. Stop distance determines position size."""
+    risk_amount = portfolio_value * (risk_pct / 100)
+    size = risk_amount / (stop_pct / 100)
+    return min(size, MAX_TRADE_VALUE)
+
 def vol_adjusted_size(base_size):
     """Scale position size down when VIX is elevated."""
     vix = global_risk.get("vix_level")
@@ -4890,26 +4896,84 @@ def build_dashboard():
         scored = bear_items + normal_items
 
         for sc, c in scored:
-            sig_class = {"BUY":"sig-buy","SELL":"sig-sell","HOLD":"sig-hold"}.get(c["signal"], "sig-hold")
-            chg_c = "green" if c["change"] >= 0 else "red"
-            rsi_val = f"{c['rsi']:.1f}" if c.get("rsi") else "—"
-            rsi_c = "red" if c.get("rsi") and c["rsi"] > 70 else ("green" if c.get("rsi") and c["rsi"] < 35 else "")
-            vol = f"{c['vol_ratio']:.2f}x" if c.get("vol_ratio") else "—"
+            # ── Smart signal badge ──────────────────────────────
+            ema_crossed = c.get("ema_gap") is not None and c.get("ema_gap", -99) > 0
+            score_ok    = sc >= MIN_SIGNAL_SCORE
+            if score_ok and ema_crossed:
+                # Both conditions met — actually trading
+                sig_html = f'<span class="sig-buy">🟢 BUY {sc:.1f}</span>'
+            elif score_ok and not ema_crossed:
+                # Great score, waiting for EMA crossover
+                sig_html = f'<span style="background:rgba(0,170,255,0.15);color:#00aaff;border:1px solid #00aaff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">👀 WATCH {sc:.1f}</span>'
+            elif not score_ok and ema_crossed:
+                # EMA crossed but score too low
+                sig_html = f'<span style="background:rgba(255,204,0,0.1);color:#ffcc00;border:1px solid #ffcc00;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">⚡ SIGNAL {sc:.1f}</span>'
+            elif c["signal"] == "SELL":
+                sig_html = f'<span class="sig-sell">SELL</span>'
+            else:
+                sig_html = f'<span class="sig-hold">{sc:.1f}/{MIN_SIGNAL_SCORE}</span>'
 
-            # Score bar — visual proximity to threshold
+            # ── Change colour ───────────────────────────────────
+            chg_c = "green" if c["change"] >= 0 else "red"
+
+            # ── RSI colour coding ───────────────────────────────
+            rsi = c.get("rsi")
+            rsi_val = f"{rsi:.1f}" if rsi else "—"
+            if rsi:
+                if 50 <= rsi <= 65:
+                    rsi_color = "#00ff88"   # green — sweet spot
+                    rsi_label = f"{rsi_val} ✅"
+                elif 40 <= rsi < 50:
+                    rsi_color = "#00aaff"   # blue — building
+                    rsi_label = f"{rsi_val} 📈"
+                elif 65 < rsi <= 75:
+                    rsi_color = "#ffcc00"   # gold — getting hot
+                    rsi_label = f"{rsi_val} ⚠"
+                elif rsi > 75:
+                    rsi_color = "#ff4466"   # red — overbought
+                    rsi_label = f"{rsi_val} 🔴"
+                elif rsi < 30:
+                    rsi_color = "#ff8800"   # orange — oversold
+                    rsi_label = f"{rsi_val} 📉"
+                else:
+                    rsi_color = "#555"      # grey — neutral
+                    rsi_label = rsi_val
+            else:
+                rsi_color = "#555"
+                rsi_label = "—"
+
+            # ── Volume colour coding ────────────────────────────
+            vr = c.get("vol_ratio", 0)
+            if vr >= 2.0:
+                vol_color = "#00ff88"   # green — strong conviction
+                vol_label = f"{vr:.2f}x 🔥"
+            elif vr >= 1.5:
+                vol_color = "#00aaff"   # blue — good
+                vol_label = f"{vr:.2f}x ✅"
+            elif vr >= 1.2:
+                vol_color = "#ffcc00"   # gold — mild
+                vol_label = f"{vr:.2f}x ⚠"
+            elif vr > 0:
+                vol_color = "#555"      # grey — weak
+                vol_label = f"{vr:.2f}x"
+            else:
+                vol_color = "#555"
+                vol_label = "—"
+
+            # ── Score bar ───────────────────────────────────────
             threshold = MIN_SIGNAL_SCORE
             score_pct = min(100, int((sc / 11) * 100))
             if sc >= threshold:
-                bar_color = "#00ff88"  # green — above threshold
-                proximity = "✅ TRADE"
+                bar_color = "#00ff88"
+                proximity = f"✅ TRADE {sc:.1f}"
             elif sc >= threshold - 1:
-                bar_color = "#ffcc00"  # gold — very close
+                bar_color = "#ffcc00"
                 proximity = f"🔥 {sc:.1f}/{threshold}"
             elif sc >= threshold - 2:
-                bar_color = "#ff8800"  # orange — close
+                bar_color = "#ff8800"
                 proximity = f"⚡ {sc:.1f}/{threshold}"
             else:
-                bar_color = "#333"     # grey — far
+                bar_color = "#333"
                 proximity = f"{sc:.1f}/{threshold}"
 
             score_bar = f'''<div style="display:flex;align-items:center;gap:6px">
@@ -4945,11 +5009,11 @@ def build_dashboard():
               <td style="font-weight:700" class="{color}">{c['symbol']}{bear_badge}</td>
               <td>${c['price']:.4f}</td>
               <td class="{chg_c}">{'+' if c['change']>=0 else ''}{c['change']:.2f}%</td>
-              <td><span class="{sig_class}">{c['signal']}</span></td>
+              <td>{sig_html}</td>
               <td>{score_bar}</td>
               <td style="color:{ema_col};font-size:11px;font-weight:700">{ema_str}</td>
-              <td class="{rsi_c}">{rsi_val}</td>
-              <td style="color:#777">{vol}</td>
+              <td style="color:{rsi_color};font-size:11px;font-weight:700">{rsi_label}</td>
+              <td style="color:{vol_color};font-size:11px;font-weight:700">{vol_label}</td>
             </tr>"""
 
         count = len(candidates)
