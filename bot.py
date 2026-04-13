@@ -2112,9 +2112,9 @@ def run_crypto_intraday_cycle(watchlist, st):
     check_intraday_positions(st, crypto=True)
     if st.shutoff: st.running = False; return
 
-    # Limit to top 10 coins when using Binance to avoid rate limits
+    # Limit to top 50 coins when using Binance — balances coverage vs rate limits
     # Full list runs fine on Alpaca crypto
-    scan_list = watchlist[:10] if USE_BINANCE else watchlist
+    scan_list = watchlist[:50] if USE_BINANCE else watchlist
     results = []
     for sym in scan_list:
         bars = fetch_intraday_bars(sym, timeframe=CRYPTO_INTRADAY_TIMEFRAME,
@@ -4887,12 +4887,13 @@ def build_dashboard():
                              c.get("closes", [c["price"]]*22))
             scored.append((sc, c))
 
-        # In BEAR mode — pin defensive/inverse ETFs to top of table regardless of score
+        # Sort purely by score descending — best opportunities always at top
+        # BUY > WATCH > SIGNAL all bubble up naturally by score
         bear_syms = set(BEAR_TICKERS)
         bear_items   = [(sc, c) for sc, c in scored if c["symbol"] in bear_syms]
         normal_items = [(sc, c) for sc, c in scored if c["symbol"] not in bear_syms]
         bear_items.sort(key=lambda x: -x[0])
-        normal_items.sort(key=lambda x: (order.get(x[1]["signal"], 1), -x[0]))
+        normal_items.sort(key=lambda x: -x[0])  # score descending only
         scored = bear_items + normal_items
 
         for sc, c in scored:
