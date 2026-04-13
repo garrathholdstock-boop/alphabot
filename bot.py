@@ -10,6 +10,8 @@ import logging
 import smtplib
 import threading
 import requests
+import sqlite3
+import re
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -38,6 +40,9 @@ EMAIL_TO       = "garrathholdstock@gmail.com"
 PORT           = int(os.environ.get("PORT", 8080))
 DASH_USER      = os.environ.get("DASH_USER", "alpha")
 DASH_PASS      = os.environ.get("DASH_PASS", "bot123")
+KILL_PIN       = os.environ.get("KILL_PIN", "1234")  # PIN to confirm kill switch actions
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")  # Bot token from @BotFather
+TELEGRAM_CHAT  = os.environ.get("TELEGRAM_CHAT", "")   # Your chat ID
 import hashlib as _hashlib
 DASH_TOKEN     = _hashlib.md5(f"{DASH_USER}:{DASH_PASS}:alphabot".encode()).hexdigest()
 
@@ -77,6 +82,32 @@ BINANCE_DELAY  = 0.5    # seconds between Binance API calls (conservative — av
 _last_binance_call  = 0.0
 _binance_ban_until  = 0.0   # epoch time when ban expires — stop ALL calls until then
 
+# ── Persist ban state across restarts ────────────────────────
+_BAN_FILE = "/tmp/binance_ban.txt"
+
+def _load_ban_from_disk():
+    """On startup, check if a ban was active before restart."""
+    global _binance_ban_until
+    try:
+        with open(_BAN_FILE, "r") as f:
+            saved = float(f.read().strip())
+            if saved > time.time():
+                _binance_ban_until = saved
+                mins = int((saved - time.time()) / 60)
+                print(f"[BINANCE] Loaded ban from disk — {mins} minutes remaining")
+    except:
+        pass  # no file or expired — start fresh
+
+def _save_ban_to_disk(expiry):
+    """Save ban expiry so next restart knows about it."""
+    try:
+        with open(_BAN_FILE, "w") as f:
+            f.write(str(expiry))
+    except:
+        pass
+
+_load_ban_from_disk()  # Run immediately on import
+
 # ── Safety settings ───────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────
 # ACCOUNT SIZE — set STARTING_BALANCE in Railway Variables, everything scales
@@ -107,9 +138,9 @@ TRAIL_TRIGGER_PCT   = 3.0     # % profit required before trailing stop activates
 TAKE_PROFIT_PCT     = 10.0    # % take profit — wider to match wider stop
 MAX_HOLD_DAYS       = 5       # days max hold
 GAP_DOWN_PCT        = 3.0     # % gap down at open triggers immediate sell
-MAX_POSITIONS       = 3       # per-bot position limit
-MAX_TOTAL_POSITIONS = 3       # GLOBAL cap — hard limit, no exceptions
-MAX_TRADES_PER_DAY  = 5       # hard cap on total trades per day across all bots
+MAX_POSITIONS       = int(os.getenv("MAX_POSITIONS", "3"))        # per-bot position limit
+MAX_TOTAL_POSITIONS = int(os.getenv("MAX_TOTAL_POSITIONS", "3"))   # GLOBAL cap — hard limit
+MAX_TRADES_PER_DAY  = int(os.getenv("MAX_TRADES_PER_DAY", "10"))  # max trades per day across all bots
 CYCLE_SECONDS          = 60
 INTRADAY_CYCLE_SECONDS = 10
 
@@ -118,7 +149,7 @@ RISK_PER_TRADE_PCT  = 1.0     # % of portfolio to risk per trade
 MAX_TRADE_VALUE     = STARTING_BALANCE * MAX_TRADE_PCT / 100  # auto-scaled
 
 # ── Signal quality threshold ──────────────────────────────────
-MIN_SIGNAL_SCORE    = 5       # 0-11 score — trade if score >= this
+MIN_SIGNAL_SCORE    = int(os.getenv("MIN_SIGNAL_SCORE", "5"))  # 5 for paper trading — see action and collect data
                               # Multiple factors must align but no single one required
 
 # ── Performance & risk analytics ─────────────────────────────
@@ -140,7 +171,7 @@ CRYPTO_TRAIL_PCT    = 3.0     # % crypto trailing stop
 # ── Market regime settings ────────────────────────────────────
 VIX_FEAR_THRESHOLD    = 25.0   # VIX above this = fear, pause bull buys
 SPY_MA_PERIOD         = 20     # SPY moving average period for trend filter
-BEAR_TICKERS          = ["SQQQ","UVXY","GLD","SLV","SPXS"]  # buy in stock bear mode
+BEAR_TICKERS          = ["SQQQ","UVXY","GLD","SLV","SPXS","SH","PSQ","SDOW","TLT","VXX"]  # buy in stock bear mode
 SPY_FAST_DROP_PCT     = 3.0    # % SPY single-day drop triggers instant bear mode
 SPY_CIRCUIT_BREAKER   = 5.0    # % SPY intraday drop pauses ALL new buys immediately
 MACRO_KEYWORDS        = [      # macro news terms that trigger full pause
@@ -328,6 +359,265 @@ perf = {
     "sharpe_daily":    [],       # daily returns for Sharpe calculation
 }
 
+# ── Near-miss tracker — persistent follow-up system ─────────
+near_miss_tracker = {}
+
+def record_near_miss(symbol, score, price, crypto=False):
+    today = datetime.now().date().isoformat()
+    key   = f"{symbol}_{today}"
+    if key not in near_miss_tracker:
+        near_miss_tracker[key] = {
+            "symbol": symbol, "date": today, "score": score,
+            "threshold": MIN_SIGNAL_SCORE, "gap": round(MIN_SIGNAL_SCORE - score, 1),
+            "price_at_miss": price, "prices_since": [],
+            "triggered": False, "trigger_date": None, "trigger_price": None,
+            "crypto": crypto, "recorded_at": datetime.now().isoformat(),
+        }
+
+def update_near_miss_prices():
+    for key, nm in list(near_miss_tracker.items()):
+        try:
+            miss_date  = datetime.fromisoformat(nm["date"]).date()
+            days_since = (datetime.now().date() - miss_date).days
+            if days_since > 7 or len(nm["prices_since"]) >= 5:
+                continue
+            price = fetch_latest_price(nm["symbol"], crypto=nm["crypto"])
+            if price:
+                last = nm["prices_since"][-1] if nm["prices_since"] else None
+                if price != last:
+                    nm["prices_since"].append(round(price, 4))
+        except:
+            pass
+
+def mark_near_miss_triggered(symbol):
+    for key, nm in near_miss_tracker.items():
+        if nm["symbol"] == symbol and not nm["triggered"]:
+            nm["triggered"]     = True
+            nm["trigger_date"]  = datetime.now().date().isoformat()
+            nm["trigger_price"] = fetch_latest_price(symbol, crypto=nm["crypto"])
+            log.info(f"[NEAR MISS] {symbol} finally triggered!")
+
+def build_sparkline_html(price_at_miss, prices_since):
+    if not prices_since:
+        return '<span style="color:#444;font-size:11px">Tracking...</span>'
+    all_prices = [price_at_miss] + prices_since
+    min_p = min(all_prices)
+    max_p = max(all_prices)
+    rng   = max_p - min_p if max_p != min_p else 1
+    W, H, P = 80, 28, 3
+    def px(p): return P + ((p - min_p) / rng) * (W - P*2)
+    def py(p): return H - P - ((p - min_p) / rng) * (H - P*2)
+    points = " ".join(f"{px(p):.1f},{py(p):.1f}" for p in all_prices)
+    final  = prices_since[-1]
+    pct    = ((final - price_at_miss) / price_at_miss) * 100
+    color  = "#00ff88" if pct >= 0 else "#ff4466"
+    return (
+        f'<div style="display:flex;align-items:center;gap:8px">'
+        f'<svg width="{W}" height="{H}" style="overflow:visible">'
+        f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.5"/>'
+        f'<circle cx="{px(price_at_miss):.1f}" cy="{py(price_at_miss):.1f}" r="2" fill="#ffcc00"/>'
+        f'<circle cx="{px(final):.1f}" cy="{py(final):.1f}" r="2" fill="{color}"/>'
+        f"</svg>"
+        f'<span style="color:{color};font-size:11px;font-weight:700">{pct:+.1f}%</span>'
+        f"</div>"
+    )
+
+def simulate_near_miss_exit(entry_price, daily_bars):
+    """
+    Simulate what would have happened if we had taken a near-miss trade.
+    Applies real stop loss, trailing stop and take profit rules day by day.
+    Returns detailed simulation result.
+    """
+    if not daily_bars or not entry_price:
+        return None
+
+    stop_pct        = STOP_LOSS_PCT / 100        # 5%
+    trail_pct       = TRAILING_STOP_PCT / 100    # 2%
+    trail_trigger   = TRAIL_TRIGGER_PCT / 100    # 3% profit before trailing activates
+    take_profit_pct = TAKE_PROFIT_PCT / 100      # 10%
+
+    stop_price      = entry_price * (1 - stop_pct)
+    take_profit     = entry_price * (1 + take_profit_pct)
+    trail_high      = entry_price
+    trail_active    = False
+    trail_stop      = None
+
+    exit_price  = None
+    exit_day    = None
+    exit_reason = None
+
+    for day_idx, bar in enumerate(daily_bars[:5]):
+        day_low  = bar.get("l", bar.get("c"))
+        day_high = bar.get("h", bar.get("c"))
+        day_close= bar.get("c")
+
+        # Update trailing high
+        if day_high > trail_high:
+            trail_high = day_high
+
+        # Check if trailing stop should activate
+        profit_pct = (trail_high - entry_price) / entry_price
+        if profit_pct >= trail_trigger:
+            trail_active = True
+            trail_stop   = trail_high * (1 - trail_pct)
+
+        # Check hard stop loss first (worst case intraday)
+        if day_low <= stop_price:
+            exit_price  = stop_price
+            exit_day    = day_idx + 1
+            exit_reason = f"Stop loss hit day {day_idx+1}"
+            break
+
+        # Check trailing stop
+        if trail_active and trail_stop and day_low <= trail_stop:
+            exit_price  = trail_stop
+            exit_day    = day_idx + 1
+            exit_reason = f"Trailing stop hit day {day_idx+1} (locked in after +{profit_pct*100:.1f}%)"
+            break
+
+        # Check take profit
+        if day_high >= take_profit:
+            exit_price  = take_profit
+            exit_day    = day_idx + 1
+            exit_reason = f"Take profit hit day {day_idx+1} 🎯"
+            break
+
+        # Update trailing stop each day
+        if trail_active:
+            trail_stop = max(trail_stop, day_close * (1 - trail_pct))
+
+    # If still open after 5 days — exit at day 5 close
+    if exit_price is None and daily_bars:
+        last_bar    = daily_bars[min(4, len(daily_bars)-1)]
+        exit_price  = last_bar.get("c", entry_price)
+        exit_day    = min(5, len(daily_bars))
+        exit_reason = f"Max hold reached — exited at day {exit_day} close"
+
+    if exit_price is None:
+        return None
+
+    pnl_pct  = ((exit_price - entry_price) / entry_price) * 100
+    trade_val = 400  # default crypto trade size
+    pnl_usd  = (pnl_pct / 100) * trade_val
+
+    return {
+        "entry_price":  entry_price,
+        "exit_price":   round(exit_price, 6),
+        "exit_day":     exit_day,
+        "exit_reason":  exit_reason,
+        "pnl_pct":      round(pnl_pct, 2),
+        "pnl_usd":      round(pnl_usd, 2),
+        "profitable":   pnl_pct > 0,
+        "trail_active": trail_active,
+        "max_profit_pct": round(((trail_high - entry_price) / entry_price) * 100, 2),
+    }
+
+
+def fetch_near_miss_ohlc(symbol, from_date, days=5, crypto=False):
+    """Fetch daily OHLC bars for a symbol starting from a specific date."""
+    try:
+        from_dt = datetime.fromisoformat(from_date)
+        end_dt  = from_dt + timedelta(days=days + 3)  # extra buffer for weekends
+
+        if crypto and USE_BINANCE:
+            if time.time() < (_binance_ban_until + 300):
+                return []
+            start_ts = int(from_dt.timestamp() * 1000)
+            end_ts   = int(end_dt.timestamp() * 1000)
+            data = binance_get("/api/v3/klines", {
+                "symbol": symbol, "interval": "1d",
+                "startTime": start_ts, "endTime": end_ts, "limit": days + 3
+            })
+            if not data:
+                return []
+            return [{"o": float(k[1]), "h": float(k[2]),
+                     "l": float(k[3]), "c": float(k[4])} for k in data]
+        else:
+            # Alpaca stocks
+            start_str = from_dt.strftime("%Y-%m-%dT00:00:00Z")
+            end_str   = end_dt.strftime("%Y-%m-%dT00:00:00Z")
+            resp = alpaca_get(f"/v2/stocks/{symbol}/bars?timeframe=1Day&start={start_str}&end={end_str}&limit={days+3}&feed=iex")
+            if resp and resp.get("bars"):
+                return [{"o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"]} for b in resp["bars"]]
+        return []
+    except Exception as e:
+        log.debug(f"[NEAR MISS SIM] Failed to fetch OHLC for {symbol}: {e}")
+        return []
+
+
+def run_near_miss_simulations():
+    """
+    Run exit simulations on all near-misses that have 3+ days of history.
+    Updates near_miss_tracker with simulation results.
+    """
+    updated = 0
+    for key, nm in near_miss_tracker.items():
+        # Only simulate once we have 3+ days of follow-up
+        if len(nm.get("prices_since", [])) < 3:
+            continue
+        # Skip if already simulated
+        if nm.get("simulation"):
+            continue
+        try:
+            bars = fetch_near_miss_ohlc(
+                nm["symbol"], nm["date"],
+                days=5, crypto=nm.get("crypto", False)
+            )
+            if bars and len(bars) >= 2:
+                sim = simulate_near_miss_exit(nm["price_at_miss"], bars)
+                if sim:
+                    nm["simulation"] = sim
+                    updated += 1
+        except Exception as e:
+            log.debug(f"[NEAR MISS SIM] {nm['symbol']}: {e}")
+    if updated:
+        log.info(f"[NEAR MISS SIM] Ran simulations on {updated} near-misses")
+
+
+def generate_weekly_near_miss_report():
+    misses = [m for m in near_miss_tracker.values() if len(m["prices_since"]) >= 3]
+    if len(misses) < 3:
+        return "Not enough data yet — needs at least 3 near-misses with 3+ days of follow-up."
+    winners  = []
+    losers   = []
+    for m in misses:
+        pct = ((m["prices_since"][-1] - m["price_at_miss"]) / m["price_at_miss"]) * 100
+        m["pct_move"] = round(pct, 2)
+        if pct > 2:  winners.append(m)
+        elif pct < -2: losers.append(m)
+    triggered = [m for m in misses if m["triggered"]]
+    win_rate  = len(winners) / len(misses) * 100 if misses else 0
+    lines = []
+    for m in misses[:20]:
+        prices_str = " → ".join([f"${p:.4f}" for p in [m["price_at_miss"]] + m["prices_since"]])
+        pct    = m.get("pct_move", 0)
+        outcome = "UP" if pct > 2 else ("DOWN" if pct < -2 else "FLAT")
+        trig   = "triggered" if m["triggered"] else "never triggered"
+        lines.append(f"{m['symbol']}: score={m['score']}/{m['threshold']} | {prices_str} | {pct:+.1f}% {outcome} | {trig}")
+    data_summary = "\n".join(lines)
+    prompt = (
+        "You are a quant analyst reviewing near-miss data for an automated trading bot. "
+        f"Threshold: {MIN_SIGNAL_SCORE}/11. Near-misses scored just below and were NOT traded. "
+        f"Data: {data_summary} "
+        f"Stats: {len(misses)} tracked, {len(winners)} went UP, {len(losers)} went DOWN, {len(triggered)} triggered. "
+        "Provide: 1) Verdict: threshold TOO TIGHT or ABOUT RIGHT? "
+        "2) Recommendation: raise/lower/keep MIN_SIGNAL_SCORE? "
+        "3) Top 3 missed opportunities 4) Top 3 good misses 5) One key insight. Be concise."
+    )
+    try:
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-opus-4-5", "max_tokens": 800, "messages": [{"role": "user", "content": prompt}]},
+            timeout=30
+        )
+        if r.ok:
+            return r.json()["content"][0]["text"]
+        return f"Claude unavailable: {r.status_code}"
+    except Exception as e:
+        return f"Claude error: {e}"
+
+
 # ── Small cap pool (refreshes weekly) ────────────────────────
 smallcap_pool = {
     "symbols":       [],
@@ -462,6 +752,354 @@ def record_api_failure(source="alpaca"):
             st.shutoff = True
         log.error(f"[API KILL] {total_fails} consecutive API failures — all bots stopped to prevent blind trading")
 
+# ── Telegram Notifications ───────────────────────────────────
+_last_tg_msg = {}  # rate limit — don't spam same message
+
+def tg(message, category="info", force=False):
+    """Send a Telegram notification. Rate limited per category."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+        return
+    try:
+        # Rate limit — same category max once per 5 minutes unless forced
+        now = time.time()
+        if not force and category in _last_tg_msg:
+            if now - _last_tg_msg[category] < 300:
+                return
+        _last_tg_msg[category] = now
+
+        url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id":    TELEGRAM_CHAT,
+            "text":       message,
+            "parse_mode": "HTML"
+        }, timeout=10)
+        if not resp.ok:
+            log.debug(f"[TG] Failed: {resp.status_code}")
+    except Exception as e:
+        log.debug(f"[TG] Error: {e}")
+
+def tg_critical(message):
+    """Send critical alert — always delivered, no rate limit."""
+    tg(message, category=f"critical_{message[:20]}", force=True)
+
+def tg_trade_buy(symbol, price, score, market="stock"):
+    """Notify on BUY order placed."""
+    emoji = "🟢" if market == "stock" else "💎"
+    now   = datetime.now().strftime("%H:%M:%S")
+    msg   = (f"{emoji} <b>BUY — {symbol}</b>"
+             f"\nPrice: <code>${price:.4f}</code>"
+             f"\nScore: <code>{score:.1f}/11</code>"
+             f"\nMarket: {market.upper()}"
+             f"\nTime: {now} Paris")
+    tg(msg, category=f"buy_{symbol}", force=True)
+
+def tg_trade_sell(symbol, price, pnl, hold_hours, reason, market="stock"):
+    """Notify on SELL order placed."""
+    emoji = "✅" if pnl >= 0 else "❌"
+    sign  = "+" if pnl >= 0 else ""
+    now   = datetime.now().strftime("%H:%M:%S")
+    msg   = (f"{emoji} <b>SELL — {symbol}</b>"
+             f"\nPrice: <code>${price:.4f}</code>"
+             f"\nP&L: <code>{sign}${pnl:.2f}</code>"
+             f"\nHold: {hold_hours:.1f}h"
+             f"\nReason: {reason}"
+             f"\nTime: {now} Paris")
+    tg(msg, category=f"sell_{symbol}", force=True)
+
+def tg_hot_miss(symbol, score, skip_reason, price):
+    """Notify on high-scoring near-miss blocked by limits."""
+    msg = (f"🔥 <b>HOT MISS — {symbol}</b>"
+           f"\nScore: <code>{score:.1f}/11</code> — high quality!"
+           f"\nBlocked by: <b>{skip_reason}</b>"
+           f"\nPrice: <code>${price:.4f}</code>"
+           f"\nConsider raising limits to capture these")
+    tg(msg, category=f"hotmiss_{symbol}", force=True)
+
+
+# ── Trading Intelligence Database ────────────────────────────
+DB_PATH = "/home/alphabot/app/alphabot.db"
+
+def init_db():
+    """Create database tables if they don't exist."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # All completed trades with full signal context
+    c.execute("""CREATE TABLE IF NOT EXISTS trades (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol      TEXT NOT NULL,
+        side        TEXT NOT NULL,
+        qty         REAL,
+        price       REAL,
+        pnl         REAL,
+        score       REAL,
+        rsi         REAL,
+        vol_ratio   REAL,
+        hold_hours  REAL,
+        reason      TEXT,
+        signal_breakdown TEXT,
+        market      TEXT,
+        date        TEXT,
+        time        TEXT,
+        created_at  TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Daily and weekly reports stored for archive
+    c.execute("""CREATE TABLE IF NOT EXISTS reports (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        type        TEXT NOT NULL,
+        date        TEXT NOT NULL,
+        subject     TEXT,
+        body_html   TEXT,
+        body_text   TEXT,
+        created_at  TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Near-miss history with follow-up prices
+    c.execute("""CREATE TABLE IF NOT EXISTS near_misses (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol          TEXT NOT NULL,
+        date            TEXT NOT NULL,
+        score           REAL,
+        threshold       REAL,
+        gap             REAL,
+        price_at_miss   REAL,
+        prices_since    TEXT,
+        pct_move        REAL,
+        triggered       INTEGER DEFAULT 0,
+        trigger_date    TEXT,
+        trigger_price   REAL,
+        crypto          INTEGER DEFAULT 0,
+        created_at      TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Stock leaderboard cache (rebuilt daily)
+    c.execute("""CREATE TABLE IF NOT EXISTS stock_stats (
+        symbol          TEXT PRIMARY KEY,
+        total_trades    INTEGER DEFAULT 0,
+        wins            INTEGER DEFAULT 0,
+        losses          INTEGER DEFAULT 0,
+        total_pnl       REAL DEFAULT 0,
+        best_trade      REAL DEFAULT 0,
+        worst_trade     REAL DEFAULT 0,
+        avg_score       REAL DEFAULT 0,
+        near_miss_count INTEGER DEFAULT 0,
+        last_traded     TEXT,
+        first_traded    TEXT,
+        updated_at      TEXT DEFAULT (datetime('now'))
+    )""")
+
+    conn.commit()
+    conn.close()
+    return True
+
+def db_record_trade(symbol, side, qty, price, pnl, score, rsi, vol_ratio,
+                    hold_hours, reason, breakdown, market="stock"):
+    """Save a completed trade to the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        now = datetime.now()
+        c.execute("""INSERT INTO trades
+            (symbol, side, qty, price, pnl, score, rsi, vol_ratio,
+             hold_hours, reason, signal_breakdown, market, date, time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (symbol, side, qty, price, pnl, score, rsi, vol_ratio,
+             hold_hours, reason, breakdown, market,
+             now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")))
+        conn.commit()
+
+        # Update stock stats
+        c.execute("SELECT * FROM stock_stats WHERE symbol=?", (symbol,))
+        row = c.fetchone()
+        today = now.strftime("%Y-%m-%d")
+        if row:
+            wins   = row[2] + (1 if pnl and pnl > 0 else 0)
+            losses = row[3] + (1 if pnl and pnl < 0 else 0)
+            total  = row[4] + (pnl or 0)
+            best   = max(row[5], pnl or 0)
+            worst  = min(row[6], pnl or 0)
+            trades = row[1] + 1
+            avg_sc = ((row[7] * row[1]) + (score or 0)) / trades if trades > 0 else 0
+            c.execute("""UPDATE stock_stats SET
+                total_trades=?, wins=?, losses=?, total_pnl=?,
+                best_trade=?, worst_trade=?, avg_score=?,
+                last_traded=?, updated_at=datetime('now')
+                WHERE symbol=?""",
+                (trades, wins, losses, round(total,2), round(best,2),
+                 round(worst,2), round(avg_sc,2), today, symbol))
+        else:
+            c.execute("""INSERT INTO stock_stats
+                (symbol, total_trades, wins, losses, total_pnl,
+                 best_trade, worst_trade, avg_score, last_traded, first_traded)
+                VALUES (?,1,?,?,?,?,?,?,?,?)""",
+                (symbol,
+                 1 if pnl and pnl > 0 else 0,
+                 1 if pnl and pnl < 0 else 0,
+                 round(pnl or 0, 2),
+                 round(pnl or 0, 2),
+                 round(pnl or 0, 2),
+                 round(score or 0, 2),
+                 today, today))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"[DB] Failed to record trade: {e}")
+
+def db_record_report(rtype, subject, body_html, body_text=""):
+    """Save a daily or weekly report to the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        today = datetime.now().strftime("%Y-%m-%d")
+        c.execute("""INSERT INTO reports (type, date, subject, body_html, body_text)
+                     VALUES (?,?,?,?,?)""",
+                  (rtype, today, subject, body_html, body_text))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"[DB] Failed to record report: {e}")
+
+def db_record_near_miss(symbol, score, threshold, gap, price, crypto=False, skip_reason="SCORE"):
+    """Save a near-miss to the database with skip reason."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Add skip_reason column if not exists
+        try:
+            c.execute("ALTER TABLE near_misses ADD COLUMN skip_reason TEXT DEFAULT 'SCORE'")
+            conn.commit()
+        except:
+            pass  # Column already exists
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        c.execute("SELECT id FROM near_misses WHERE symbol=? AND date=?", (symbol, today))
+        if not c.fetchone():
+            c.execute("""INSERT INTO near_misses
+                (symbol, date, score, threshold, gap, price_at_miss, crypto, skip_reason)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (symbol, today, score, threshold, round(gap,2), price,
+                 1 if crypto else 0, skip_reason))
+            conn.commit()
+            c.execute("""INSERT INTO stock_stats (symbol, near_miss_count)
+                         VALUES (?, 1)
+                         ON CONFLICT(symbol) DO UPDATE SET
+                         near_miss_count = near_miss_count + 1""", (symbol,))
+            conn.commit()
+        else:
+            # Update skip reason if better reason found
+            c.execute("UPDATE near_misses SET skip_reason=? WHERE symbol=? AND date=?",
+                      (skip_reason, symbol, today))
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"[DB] Failed to record near miss: {e}")
+
+def db_search_symbol(symbol):
+    """Search all history for a symbol — trades, near-misses, stats."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        sym = symbol.upper().strip()
+
+        c.execute("SELECT * FROM trades WHERE symbol=? ORDER BY created_at DESC", (sym,))
+        trades = c.fetchall()
+
+        c.execute("SELECT * FROM near_misses WHERE symbol=? ORDER BY date DESC LIMIT 20", (sym,))
+        misses = c.fetchall()
+
+        c.execute("SELECT * FROM stock_stats WHERE symbol=?", (sym,))
+        stats = c.fetchone()
+
+        conn.close()
+        return {"trades": trades, "near_misses": misses, "stats": stats}
+    except Exception as e:
+        log.warning(f"[DB] Search failed: {e}")
+        return {"trades": [], "near_misses": [], "stats": None}
+
+def db_get_leaderboard(limit=20, period_days=None):
+    """Get stock leaderboard — all time or rolling period."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        if period_days:
+            since = (datetime.now() - timedelta(days=period_days)).strftime("%Y-%m-%d")
+            c.execute("""SELECT symbol,
+                COUNT(*) as trades,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losses,
+                ROUND(SUM(pnl),2) as total_pnl,
+                ROUND(MAX(pnl),2) as best,
+                ROUND(MIN(pnl),2) as worst,
+                ROUND(AVG(score),1) as avg_score
+                FROM trades WHERE side='SELL' AND date >= ?
+                GROUP BY symbol ORDER BY total_pnl DESC LIMIT ?""",
+                (since, limit))
+        else:
+            c.execute("""SELECT symbol, total_trades, wins, losses, total_pnl,
+                best_trade, worst_trade, avg_score
+                FROM stock_stats ORDER BY total_pnl DESC LIMIT ?""", (limit,))
+        rows = c.fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        log.warning(f"[DB] Leaderboard failed: {e}")
+        return []
+
+def db_get_skip_reason_breakdown():
+    """Get breakdown of why near-misses were skipped."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""SELECT skip_reason, COUNT(*) as count,
+                     ROUND(AVG(score),2) as avg_score
+                     FROM near_misses
+                     GROUP BY skip_reason
+                     ORDER BY count DESC""")
+        rows = c.fetchall()
+        conn.close()
+        return rows
+    except:
+        return []
+
+def db_get_reports(limit=30, rtype=None):
+    """Get recent reports for archive."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        if rtype:
+            c.execute("SELECT id, type, date, subject FROM reports WHERE type=? ORDER BY date DESC LIMIT ?",
+                      (rtype, limit))
+        else:
+            c.execute("SELECT id, type, date, subject FROM reports ORDER BY date DESC LIMIT ?",
+                      (limit,))
+        rows = c.fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        return []
+
+def db_get_report_by_id(report_id):
+    """Get full report content by ID."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT * FROM reports WHERE id=?", (report_id,))
+        row = c.fetchone()
+        conn.close()
+        return row
+    except:
+        return None
+
+# Initialise database on startup
+try:
+    init_db()
+    log.info("[DB] Trading Intelligence Database ready")
+except Exception as e:
+    log.warning(f"[DB] Database init failed: {e}")
+
+
 # ── Global kill switch ────────────────────────────────────────
 kill_switch = {
     "active": False,
@@ -516,7 +1154,9 @@ def binance_get(path, params=None, signed=False):
             if r.status_code == 418 or r.status_code == 429:
                 retry_after = int(r.headers.get("Retry-After", 120))
                 _binance_ban_until = time.time() + retry_after
-                log.warning(f"[BINANCE] Rate limited — banned for {retry_after}s. Will retry at {datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')}")
+                _save_ban_to_disk(_binance_ban_until)
+                log.warning(f"[BINANCE] Rate limited — banned for {retry_after}s. Will retry at {datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M:%S')} Paris+2")
+                tg(f"⚠️ <b>Binance Ban Detected</b>\nDuration: {retry_after}s\nRetry at: {datetime.fromtimestamp(_binance_ban_until).strftime('%H:%M')} Paris", category="binance_ban")
                 return None
             log.debug(f"[BINANCE] {path}: {r.status_code}")
             return None
@@ -1562,7 +2202,26 @@ def update_market_regime():
 
     # Fetch SPY bars for MA calculation
     spy_bars = fetch_bars("SPY")
-    vix_bars = fetch_bars("VIXY")  # VIXY is the VIX ETF tradeable via Alpaca
+
+    # Fetch real VIX — try direct feed first, fall back to VIXY ETF
+    vix_bars = None
+    try:
+        from datetime import timezone
+        end   = datetime.now(timezone.utc)
+        start = end - timedelta(days=5)
+        url   = f"/v2/stocks/VIX/bars?timeframe=1Day&start={start.strftime('%Y-%m-%dT%H:%M:%SZ')}&end={end.strftime('%Y-%m-%dT%H:%M:%SZ')}&feed=iex"
+        resp  = alpaca_get(url)
+        if resp and resp.get("bars"):
+            raw = resp["bars"]
+            vix_bars = [{"c": b["c"], "h": b["h"], "l": b["l"], "o": b["o"]} for b in raw]
+            log.info(f"[REGIME] Real VIX: {vix_bars[-1]['c']:.2f}")
+        else:
+            raise ValueError("No VIX bars returned")
+    except Exception:
+        # Fallback to VIXY ETF as VIX proxy — always available
+        vix_bars = fetch_bars("VIXY")
+        if vix_bars:
+            log.info(f"[REGIME] VIX via VIXY proxy: {vix_bars[-1]['c']:.2f}")
 
     spy_price = None
     spy_ma20  = None
@@ -1584,7 +2243,7 @@ def update_market_regime():
         log.info(f"[REGIME] SPY ${spy_price:.2f} below MA20 ${spy_ma20:.2f} — bearish signal")
     if vix_val and vix_val > VIX_FEAR_THRESHOLD:
         bear_signals += 1
-        log.info(f"[REGIME] VIX proxy ${vix_val:.2f} above threshold {VIX_FEAR_THRESHOLD} — fear signal")
+        log.info(f"[REGIME] VIX ${vix_val:.2f} above threshold {VIX_FEAR_THRESHOLD} — fear signal")
 
     old_mode       = market_regime["mode"]
     bear_count     = market_regime.get("bear_count", 0)
@@ -1615,7 +2274,7 @@ def update_market_regime():
     spy_p_str  = f"${spy_price:.2f}"  if spy_price else "N/A"
     spy_m_str  = f"${spy_ma20:.2f}"  if spy_ma20  else "N/A"
     vix_str_   = f"{vix_val:.2f}"    if vix_val   else "N/A"
-    log.info(f"[REGIME] {new_mode} | SPY: {spy_p_str} MA20: {spy_m_str} | VIX proxy: {vix_str_}")
+    log.info(f"[REGIME] {new_mode} | SPY: {spy_p_str} MA20: {spy_m_str} | VIX: {vix_str_}")
     return new_mode
 
 # ── Crypto regime detection ──────────────────────────────────
@@ -1910,9 +2569,9 @@ def is_choppy_market():
     return abs((spy_price - spy_ma20) / spy_ma20) * 100 < 0.5
 
 # ── Unified signal scorer (0-11, threshold 5) ────────────────
-def score_signal(sym, price, change, rsi, vol_ratio, closes):
+def score_signal(sym, price, change, rsi, vol_ratio, closes, bars=None):
     """
-    Score a BUY candidate 0-11. Trade if score >= MIN_SIGNAL_SCORE (5).
+    Score a BUY candidate 0-11. Trade if score >= MIN_SIGNAL_SCORE.
     Multiple factors must align — no single factor guarantees a trade.
 
       Breakout 20-bar high  : +2.0  (strong momentum signal)
@@ -1924,6 +2583,9 @@ def score_signal(sym, price, change, rsi, vol_ratio, closes):
       RSI 50-65 sweet spot  : +1.0  (ideal momentum zone)
       RSI 40-50 building    : +0.5  (building momentum)
       MACD bullish          : +1.0  (acceleration confirmed)
+      ADX > 25 strong trend : +1.5  (kills false signals in choppy markets)
+      ADX 20-25 building    : +0.5  (trend developing)
+      ADX < 20 choppy       : -1.5  (avoid — likely whipsaw)
       Positive news         : +1.5  (catalyst — your edge)
       Negative news         : -5.0  (hard skip)
       RSI overbought >75    : -1.0  (too extended)
@@ -1959,6 +2621,18 @@ def score_signal(sym, price, change, rsi, vol_ratio, closes):
         mv, ms = calc_macd(closes)
         if mv is not None and ms is not None and mv > ms:
             score += 1.0
+
+    # ADX trend strength filter — kills false signals in choppy markets
+    # Grok recommendation: ADX > 25 confirms genuine trend before EMA cross
+    if bars and len(bars) >= 16:
+        adx = calc_adx(bars, period=14)
+        if adx is not None:
+            if adx >= 25:
+                score += 1.5   # strong trend — EMA cross is reliable
+            elif adx >= 20:
+                score += 0.5   # trend developing — moderate confidence
+            else:
+                score -= 1.5   # choppy/ranging — EMA cross likely a whipsaw
 
     # News catalyst
     if sym in news_state.get("watch_list", {}): score += 1.5
@@ -2152,6 +2826,48 @@ def calc_macd(prices):
 
 VOLUME_MIN_RATIO = 1.2  # volume must be at least 1.2x 10-day average to confirm signal
 
+def calc_adx(bars, period=14):
+    """Average Directional Index — measures trend STRENGTH not direction.
+    ADX > 25 = strong trend, good for EMA crossover trades.
+    ADX < 20 = choppy/ranging market, avoid EMA crossover trades."""
+    if not bars or len(bars) < period + 2:
+        return None
+    try:
+        highs  = [b["h"] for b in bars]
+        lows   = [b["l"] for b in bars]
+        closes = [b["c"] for b in bars]
+        tr_list, plus_dm, minus_dm = [], [], []
+        for i in range(1, len(bars)):
+            h, l, pc = highs[i], lows[i], closes[i-1]
+            tr = max(h - l, abs(h - pc), abs(l - pc))
+            pdm = max(highs[i] - highs[i-1], 0) if (highs[i] - highs[i-1]) > (lows[i-1] - lows[i]) else 0
+            mdm = max(lows[i-1] - lows[i], 0) if (lows[i-1] - lows[i]) > (highs[i] - highs[i-1]) else 0
+            tr_list.append(tr); plus_dm.append(pdm); minus_dm.append(mdm)
+        def wilder_smooth(data, n):
+            s = sum(data[:n])
+            result = [s]
+            for v in data[n:]:
+                s = s - s/n + v
+                result.append(s)
+            return result
+        atr   = wilder_smooth(tr_list, period)
+        pdi_s = wilder_smooth(plus_dm, period)
+        mdi_s = wilder_smooth(minus_dm, period)
+        dx_list = []
+        for i in range(len(atr)):
+            if atr[i] == 0: continue
+            pdi = 100 * pdi_s[i] / atr[i]
+            mdi = 100 * mdi_s[i] / atr[i]
+            dx  = 100 * abs(pdi - mdi) / (pdi + mdi) if (pdi + mdi) > 0 else 0
+            dx_list.append(dx)
+        if len(dx_list) < period:
+            return None
+        adx = sum(dx_list[-period:]) / period
+        return round(adx, 1)
+    except:
+        return None
+
+
 def get_signal(closes, volumes=None):
     """
     Signal uses EMA 9/21 crossover (upgraded from SMA) + RSI filter.
@@ -2341,18 +3057,40 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
         except Exception as e:
             log.debug(f"[SPREAD] Could not check spread for {symbol}: {e}")
 
-        tolerance = max(0.005, spread_pct / 100 + 0.002)  # at least 0.5%, wider if spread is wide
+        # Dynamic tolerance — stronger signal = willing to chase more
+        # Also widens in high VIX environments where spreads are naturally wider
+        vix_now     = global_risk.get("vix_level") or 20
+        signal_score = getattr(place_order, "_last_score", 5)  # injected by caller if available
+
+        if signal_score >= 9:
+            base_tol = 0.010   # 1.0% — strong signal, chase it
+        elif signal_score >= 7:
+            base_tol = 0.006   # 0.6% — good signal
+        else:
+            base_tol = 0.003   # 0.3% — borderline, be conservative
+
+        # VIX adjustment — wider spreads in fearful markets
+        if vix_now >= 30:
+            vix_adj = 0.004    # +0.4% in high fear
+        elif vix_now >= 20:
+            vix_adj = 0.002    # +0.2% in elevated fear
+        else:
+            vix_adj = 0.0
+
+        tolerance = max(base_tol + vix_adj, spread_pct / 100 + 0.002)
+
         if side == "buy":
             limit_price = round(estimated_price * (1 + tolerance), 2)
         else:
             limit_price = round(estimated_price * (1 - tolerance), 2)
+
         result = alpaca_post("/v2/orders", {
             "symbol": symbol, "qty": str(qty), "side": side,
             "type": "limit", "limit_price": str(limit_price),
             "time_in_force": "day",
         })
         if result:
-            log.info(f"[LIMIT ORDER] {side.upper()} {symbol} limit:${limit_price:.2f} (signal:${estimated_price:.2f} spread:{spread_pct:.3f}%)")
+            log.info(f"[LIMIT ORDER] {side.upper()} {symbol} limit:${limit_price:.2f} signal:${estimated_price:.2f} tolerance:{tolerance*100:.2f}% score:{signal_score:.1f} VIX:{vix_now:.0f}")
         else:
             log.warning(f"[LIMIT] Failed for {symbol} — falling back to market order")
             result = alpaca_post("/v2/orders", {
@@ -2547,9 +3285,11 @@ def run_cycle(watchlist, st, crypto=False):
             avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
             vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
             signal, e9, e21, rsi = get_signal(closes, volumes)
+            ema_gap = round(((e9 - e21) / e21) * 100, 2) if e9 and e21 and e21 != 0 else None
             results.append({"symbol": sym, "price": price, "change": change,
                 "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
-                "vol_ratio": vol_ratio, "closes": closes})
+                "vol_ratio": vol_ratio, "closes": closes, "bars": bars,
+                "ema_gap": ema_gap})
     else:
         # Crypto — individual calls (Binance handles its own batching)
         for sym in watchlist:
@@ -2563,9 +3303,11 @@ def run_cycle(watchlist, st, crypto=False):
             avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
             vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
             signal, e9, e21, rsi = get_signal(closes, volumes)
+            ema_gap = round(((e9 - e21) / e21) * 100, 2) if e9 and e21 and e21 != 0 else None
             results.append({"symbol": sym, "price": price, "change": change,
                 "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
-                "vol_ratio": vol_ratio, "closes": closes})
+                "vol_ratio": vol_ratio, "closes": closes, "bars": bars,
+                "ema_gap": ema_gap})
 
     results.sort(key=lambda x: {"BUY": 0, "HOLD": 1, "SELL": 2}[x["signal"]])
     st.candidates = results
@@ -2578,8 +3320,77 @@ def run_cycle(watchlist, st, crypto=False):
     for s in buy_candidates:
         s["score"] = score_signal(s["symbol"], s["price"], s["change"],
                                    s.get("rsi"), s.get("vol_ratio"),
-                                   s.get("closes", [s["price"]]*21))
+                                   s.get("closes", [s["price"]]*21),
+                                   bars=s.get("bars"))
     buy_candidates.sort(key=lambda x: x["score"], reverse=True)
+
+    # Track near-misses with skip reasons for ALL scored candidates
+    # This captures WHY each trade was skipped — not just score
+    for s in results:
+        sc = s.get("score") or score_signal(s["symbol"], s["price"], s["change"],
+                         s.get("rsi"), s.get("vol_ratio"),
+                         s.get("closes", [s["price"]]*21),
+                         bars=s.get("bars"))
+        gap = MIN_SIGNAL_SCORE - sc
+
+        # Determine skip reason
+        skip_reason = None
+        if s["signal"] == "BUY" and sc >= MIN_SIGNAL_SCORE:
+            # Would have traded — check if blocked by limits
+            pos_count       = len(st.positions)
+            global_pos      = all_positions_count()
+            daily_trades    = st.daily_trades
+            exposure_pct    = (sum(p.get("value", 0) for p in st.positions.values()) /
+                               max(total_portfolio_value(), 1)) * 100
+
+            if daily_trades >= MAX_TRADES_PER_DAY:
+                skip_reason = "TRADE_LIMIT"
+            elif global_pos >= MAX_TOTAL_POSITIONS:
+                skip_reason = "POS_LIMIT"
+            elif pos_count >= MAX_POSITIONS:
+                skip_reason = "POS_LIMIT"
+            elif exposure_pct >= MAX_EXPOSURE_PCT:
+                skip_reason = "EXPOSURE"
+            elif s["symbol"] in st.positions:
+                skip_reason = "DUPLICATE"
+            else:
+                # Check sector cap
+                sym_sector = next((sec for sec, syms in SECTOR_MAP.items()
+                                   if s["symbol"] in syms), None)
+                if sym_sector:
+                    sector_count = sum(1 for p in st.positions
+                                       if next((sec for sec, syms in SECTOR_MAP.items()
+                                                if p in syms), None) == sym_sector)
+                    if sector_count >= MAX_SECTOR_POSITIONS:
+                        skip_reason = "SECTOR"
+        elif sc < MIN_SIGNAL_SCORE and gap <= 2.0:
+            skip_reason = "SCORE"
+
+        if skip_reason:
+            record_near_miss(s["symbol"], sc, s["price"], crypto=crypto)
+            db_record_near_miss(s["symbol"], sc, MIN_SIGNAL_SCORE, gap, s["price"], crypto=crypto)
+            # Store skip reason in tracker
+            today = datetime.now().date().isoformat()
+            key   = f"{s['symbol']}_{today}"
+            if key in near_miss_tracker:
+                near_miss_tracker[key]["skip_reason"] = skip_reason
+            # Alert on hot misses — high score blocked by limits
+            if sc >= 8.0 and skip_reason in ("POS_LIMIT", "TRADE_LIMIT", "EXPOSURE"):
+                tg_hot_miss(s["symbol"], sc, skip_reason, s["price"])
+            elif sc >= 9.0:  # exceptional signal — always alert
+                tg_hot_miss(s["symbol"], sc, skip_reason, s["price"])
+
+    # Record near-misses — scores just below threshold for 5-day follow-up
+    for s in results:
+        sc = score_signal(s["symbol"], s["price"], s["change"],
+                         s.get("rsi"), s.get("vol_ratio"),
+                         s.get("closes", [s["price"]]*21),
+                         bars=s.get("bars"))
+        s["score"] = sc
+        gap = MIN_SIGNAL_SCORE - sc
+        if 0 < gap <= 2.0:  # within 2 points of threshold
+            record_near_miss(s["symbol"], sc, s["price"], crypto=crypto)
+            db_record_near_miss(s["symbol"], sc, MIN_SIGNAL_SCORE, gap, s["price"], crypto=crypto)
 
     pos_count = len(st.positions)
     for s in buy_candidates:
@@ -2659,7 +3470,15 @@ def run_cycle(watchlist, st, crypto=False):
         )
         log.info(f"[{st.label}] ✅ BUY SIGNAL BREAKDOWN:\n{breakdown}")
         log.info(f"[{st.label}] Executing: BUY {s['symbol']} x{qty} @ ~${s['price']:.4f} | stop:${stop_price:.4f} | target:${take_profit_price:.4f}")
+        mark_near_miss_triggered(s["symbol"])  # track if this was a former near-miss
+        place_order._last_score = sig_score  # pass score to place_order for dynamic tolerance
         order, fill_price = place_order(s["symbol"], "buy", qty, crypto=crypto, estimated_price=s["price"])
+        if order and fill_price:
+            market_type = "crypto" if crypto else "stock"
+            tg_trade_buy(s["symbol"], fill_price, sig_score, market=market_type)
+        if not order:
+            log.warning(f"[{st.label}] ORDER FAILED for {s['symbol']} — tracking as unfilled near-miss")
+            record_near_miss(s["symbol"], sig_score, s["price"], crypto=crypto)
         if order:
             # Use actual fill price (with slippage) not just signal price
             actual_stop  = fill_price * (1 - stop_pct_use / 100)
@@ -2734,6 +3553,107 @@ def run_cycle(watchlist, st, crypto=False):
     st.running = False
 
 # ── Email ─────────────────────────────────────────────────────
+def send_weekly_near_miss_email():
+    """Send weekly near-miss analysis with Claude insights, sparklines and exit simulations."""
+    try:
+        # Run simulations first
+        run_near_miss_simulations()
+
+        misses = [m for m in near_miss_tracker.values() if len(m["prices_since"]) >= 1]
+        if not misses:
+            log.info("[WEEKLY] No near-miss data to report yet")
+            return
+
+        # Claude analysis
+        claude_analysis = generate_weekly_near_miss_report()
+
+        # Build HTML email with sparklines
+        rows = ""
+        for m in sorted(misses, key=lambda x: x.get("pct_move", 0), reverse=True)[:20]:
+            pct      = m.get("pct_move", 0)
+            color    = "#00ff88" if pct >= 0 else "#ff4466"
+            spark    = build_sparkline_html(m["price_at_miss"], m["prices_since"])
+            trig     = "✅ Triggered!" if m["triggered"] else "❌ Never triggered"
+            trig_col = "#00ff88" if m["triggered"] else "#555"
+            rows += (
+                f'<tr>'
+                f'<td style="font-weight:700;color:#00aaff">{m["symbol"]}</td>'
+                f'<td>{m["date"]}</td>'
+                f'<td style="color:#ffcc00">{m["score"]}/{m["threshold"]}</td>'
+                f'<td style="color:#ff8800">{m["gap"]}</td>'
+                f'<td>${m["price_at_miss"]:.4f}</td>'
+                f'<td>{spark}</td>'
+                f'<td style="color:{color};font-weight:700">{pct:+.1f}%</td>'
+                f'<td style="color:{trig_col}">{trig}</td>'
+                f'</tr>'
+            )
+
+        winners = len([m for m in misses if m.get("pct_move", 0) > 2])
+        losers  = len([m for m in misses if m.get("pct_move", 0) < -2])
+        triggered = len([m for m in misses if m["triggered"]])
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head><style>
+  body {{ font-family: 'Segoe UI', sans-serif; background: #090b0e; color: #e0e0e0; padding: 24px; }}
+  h1 {{ color: #00ff88; }} h2 {{ color: #00aaff; border-bottom: 1px solid #1a2a1a; padding-bottom: 8px; }}
+  table {{ width: 100%; border-collapse: collapse; margin: 16px 0; }}
+  th {{ background: #0d1117; color: #555; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; padding: 10px; text-align: left; }}
+  td {{ padding: 10px; border-top: 1px solid #1a1a1a; font-size: 13px; }}
+  .stat {{ display: inline-block; background: #0d1117; border-radius: 8px; padding: 12px 20px; margin: 8px; text-align: center; }}
+  .stat-val {{ font-size: 24px; font-weight: 700; }}
+  .insight {{ background: #0d1117; border-left: 3px solid #00aaff; padding: 16px; margin: 16px 0; border-radius: 4px; white-space: pre-wrap; line-height: 1.6; }}
+</style></head>
+<body>
+<h1>⚡ AlphaBot Weekly Near-Miss Report</h1>
+<p style="color:#555">Week ending {datetime.now().strftime('%B %d, %Y')} · Threshold: {MIN_SIGNAL_SCORE}/11</p>
+
+<div>
+  <div class="stat"><div class="stat-val" style="color:#ffcc00">{len(misses)}</div><div>Near-Misses</div></div>
+  <div class="stat"><div class="stat-val" style="color:#00ff88">{winners}</div><div>Went Up 2%+</div></div>
+  <div class="stat"><div class="stat-val" style="color:#ff4466">{losers}</div><div>Went Down 2%+</div></div>
+  <div class="stat"><div class="stat-val" style="color:#00aaff">{triggered}</div><div>Eventually Triggered</div></div>
+  <div class="stat"><div class="stat-val" style="color:{"#00ff88" if total_sim_pnl >= 0 else "#ff4466"}">${total_sim_pnl:+.2f}</div><div>Simulated P&L</div></div>
+  <div class="stat"><div class="stat-val" style="color:#00ff88">${missed_profit:+.2f}</div><div>Profit Missed</div></div>
+  <div class="stat"><div class="stat-val" style="color:#ff8800">${avoided_loss:.2f}</div><div>Loss Avoided</div></div>
+</div>
+
+<h2>🤖 Claude AI Analysis</h2>
+<div class="insight">{claude_analysis}</div>
+
+<h2>📊 Near-Miss Detail (sorted by outcome)</h2>
+<table>
+  <thead><tr>
+    <th>Symbol</th><th>Date</th><th>Score</th><th>Gap</th>
+    <th>Entry</th><th>Chart</th><th>5-Day</th>
+    <th>Simulated Exit</th><th>Peak</th><th>Status</th>
+  </tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+
+<p style="color:#333;font-size:11px;margin-top:32px">
+  AlphaBot Weekly Report · Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+</p>
+</body></html>"""
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"AlphaBot Weekly Near-Miss Report — {datetime.now().strftime('%b %d')}"
+        msg["From"]    = GMAIL_USER
+        msg["To"]      = EMAIL_TO
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(GMAIL_USER, GMAIL_PASS)
+            s.sendmail(GMAIL_USER, EMAIL_TO, msg.as_string())
+
+        log.info(f"[WEEKLY] Near-miss report sent — {len(misses)} misses analysed")
+        # Archive to database
+        db_record_report("weekly", f"AlphaBot Weekly Near-Miss Report — {datetime.now().strftime('%b %d')}", html, claude_analysis)
+
+    except Exception as e:
+        log.error(f"[WEEKLY] Failed to send report: {e}")
+
+
 def send_daily_summary():
     def section(st):
         sells = [t for t in st.trades if t["side"] == "SELL" and t.get("pnl") is not None]
@@ -2809,6 +3729,443 @@ def send_daily_summary():
         log.info(f"Summary emailed to {EMAIL_TO}")
     except Exception as e:
         log.error(f"Email failed: {e}")
+
+# ── Analytics Dashboard ──────────────────────────────────────
+def build_analytics_page(search_sym=None, report_id=None, period="all"):
+    """Build the Trading Intelligence analytics page."""
+
+    # ── Leaderboard ──
+    period_days = {"90": 90, "30": 30, "all": None}.get(period, None)
+    leaders = db_get_leaderboard(limit=20, period_days=period_days)
+    period_label = {"90": "Last 90 Days", "30": "Last 30 Days", "all": "All Time"}.get(period, "All Time")
+
+    medal = ["🥇","🥈","🥉"]
+    lb_rows = ""
+    for i, row in enumerate(leaders):
+        sym, trades, wins, losses, total_pnl, best, worst, avg_sc = row[:8]
+        win_rate = int(wins/trades*100) if trades > 0 else 0
+        pnl_col  = "#00cc66" if total_pnl >= 0 else "#cc2244"
+        best_col = "#00cc66" if best >= 0 else "#cc2244"
+        worst_col= "#cc2244" if worst < 0 else "#00cc66"
+        rank     = medal[i] if i < 3 else f"#{i+1}"
+        lb_rows += f"""<tr onclick="searchSym('{sym}')" style="cursor:pointer">
+          <td style="color:#888;font-weight:700">{rank}</td>
+          <td style="color:#00aaff;font-weight:700">{sym}</td>
+          <td>{trades}</td>
+          <td style="color:#00cc66">{wins}</td>
+          <td style="color:#cc2244">{losses}</td>
+          <td style="color:#888">{win_rate}%</td>
+          <td style="color:{pnl_col};font-weight:700">${total_pnl:+.2f}</td>
+          <td style="color:{best_col}">${best:+.2f}</td>
+          <td style="color:{worst_col}">${worst:+.2f}</td>
+          <td style="color:#ffcc00">{avg_sc:.1f}</td>
+        </tr>"""
+
+    if not lb_rows:
+        lb_rows = '<tr><td colspan="10" style="text-align:center;color:#555;padding:20px">No trades yet — check back after first week of trading</td></tr>'
+
+    # ── Search results ──
+    search_html = ""
+    if search_sym:
+        results = db_search_symbol(search_sym)
+        stats   = results["stats"]
+        trades  = results["trades"]
+        misses  = results["near_misses"]
+
+        if stats:
+            sym, total_t, wins, losses, total_pnl, best, worst, avg_sc, nm_count, last_t, first_t, _ = stats
+            win_rate = int(wins/total_t*100) if total_t > 0 else 0
+            pnl_col  = "#00cc66" if total_pnl >= 0 else "#cc2244"
+            search_html += f"""
+            <div style="background:#0d1117;border:1px solid #1a3a5c;border-radius:12px;padding:20px;margin-bottom:20px">
+              <div style="font-size:20px;font-weight:700;color:#00aaff;margin-bottom:12px">{sym}</div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+                <div style="background:#111820;border-radius:8px;padding:12px;text-align:center">
+                  <div style="font-size:22px;font-weight:700;color:{pnl_col}">${total_pnl:+.2f}</div>
+                  <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px">Total P&L</div>
+                </div>
+                <div style="background:#111820;border-radius:8px;padding:12px;text-align:center">
+                  <div style="font-size:22px;font-weight:700;color:#e0e0e0">{total_t}</div>
+                  <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px">Trades</div>
+                </div>
+                <div style="background:#111820;border-radius:8px;padding:12px;text-align:center">
+                  <div style="font-size:22px;font-weight:700;color:#00cc66">{win_rate}%</div>
+                  <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px">Win Rate</div>
+                </div>
+                <div style="background:#111820;border-radius:8px;padding:12px;text-align:center">
+                  <div style="font-size:22px;font-weight:700;color:#ffcc00">{nm_count}</div>
+                  <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px">Near Misses</div>
+                </div>
+              </div>"""
+
+            # Trade history
+            if trades:
+                search_html += '<div style="font-size:12px;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Trade History</div>'
+                search_html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+                for h in ["Date","Side","Qty","Price","P&L","Score","Hold"]:
+                    search_html += f'<th style="text-align:left;padding:6px 8px;color:#555;font-size:10px;text-transform:uppercase">{h}</th>'
+                search_html += '</tr></thead><tbody>'
+                for t in trades[:10]:
+                    _, sym2, side, qty, price, pnl, score, rsi, vol, hold, reason, bd, mkt, date, time_, _ = t
+                    pc = "#00cc66" if (pnl or 0) >= 0 else "#cc2244"
+                    sc = "#00aaff" if side == "BUY" else "#ffcc00"
+                    search_html += f"""<tr style="border-top:1px solid #1a1a1a">
+                      <td style="padding:6px 8px;color:#888">{date}</td>
+                      <td style="padding:6px 8px;color:{sc};font-weight:700">{side}</td>
+                      <td style="padding:6px 8px">{qty}</td>
+                      <td style="padding:6px 8px;font-family:monospace">${price:.4f}</td>
+                      <td style="padding:6px 8px;color:{pc};font-weight:700">{f"+${pnl:.2f}" if pnl else "—"}</td>
+                      <td style="padding:6px 8px;color:#ffcc00">{score or "—"}</td>
+                      <td style="padding:6px 8px;color:#555">{f"{hold}h" if hold else "—"}</td>
+                    </tr>"""
+                search_html += '</tbody></table>'
+
+            search_html += "</div>"
+        else:
+            search_html = f'<div style="color:#555;padding:20px;text-align:center">No data found for <b style="color:#00aaff">{search_sym}</b> yet</div>'
+
+    # ── Report archive ──
+    reports = db_get_reports(limit=30)
+    report_rows = ""
+    for r in reports:
+        rid, rtype, rdate, subject = r
+        icon = "📊" if rtype == "daily" else "📈" if rtype == "weekly" else "☀️"
+        type_col = "#00aaff" if rtype == "daily" else "#00cc66" if rtype == "weekly" else "#ffcc00"
+        report_rows += f"""<tr onclick="loadReport({rid})" style="cursor:pointer">
+          <td style="padding:8px;color:{type_col}">{icon} {rtype.title()}</td>
+          <td style="padding:8px;color:#888">{rdate}</td>
+          <td style="padding:8px;color:#e0e0e0">{subject or "—"}</td>
+        </tr>"""
+    if not report_rows:
+        report_rows = '<tr><td colspan="3" style="padding:20px;text-align:center;color:#555">No reports archived yet — first report arrives tonight at 11pm Paris</td></tr>'
+
+    # ── Full report viewer ──
+    report_viewer = ""
+    if report_id:
+        report = db_get_report_by_id(int(report_id))
+        if report:
+            _, rtype, rdate, subject, body_html, body_text, _ = report
+            report_viewer = f"""
+            <div style="background:#0d1117;border:1px solid #1a3a5c;border-radius:12px;padding:20px;margin-bottom:20px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <div style="font-weight:700;color:#e0e0e0">{subject}</div>
+                <div style="color:#555;font-size:12px">{rdate}</div>
+              </div>
+              <div style="border-top:1px solid #1a1a1a;padding-top:16px;font-size:13px;line-height:1.6;color:#ccc;white-space:pre-wrap">{body_text}</div>
+            </div>"""
+
+    # ── Overall stats + expectancy + score curve ──
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Headline stats
+        c.execute("SELECT COUNT(*), SUM(pnl), AVG(score) FROM trades WHERE side='SELL'")
+        row = c.fetchone()
+        total_trades_db = row[0] or 0
+        total_pnl_db    = row[1] or 0
+        avg_score_db    = row[2] or 0
+
+        c.execute("SELECT COUNT(DISTINCT symbol) FROM trades")
+        unique_syms = c.fetchone()[0] or 0
+        c.execute("SELECT COUNT(*) FROM near_misses")
+        total_misses = c.fetchone()[0] or 0
+
+        # Expectancy calculation
+        # Expectancy = (win_rate x avg_win) - (loss_rate x avg_loss)
+        c.execute("""SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN pnl > 0 THEN 1.0 ELSE 0 END) as wins,
+            AVG(CASE WHEN pnl > 0 THEN pnl ELSE NULL END) as avg_win,
+            AVG(CASE WHEN pnl < 0 THEN ABS(pnl) ELSE NULL END) as avg_loss
+            FROM trades WHERE side='SELL' AND pnl IS NOT NULL""")
+        ex = c.fetchone()
+        if ex and ex[0] and ex[0] >= 5:
+            total_ex  = ex[0]
+            win_rate_ex  = (ex[1] or 0) / total_ex
+            loss_rate_ex = 1 - win_rate_ex
+            avg_win_ex   = ex[2] or 0
+            avg_loss_ex  = ex[3] or 0
+            expectancy   = (win_rate_ex * avg_win_ex) - (loss_rate_ex * avg_loss_ex)
+            win_pct_ex   = int(win_rate_ex * 100)
+            exp_color    = "#00cc66" if expectancy > 0 else "#cc2244"
+            exp_label    = f"${expectancy:+.2f}"
+            exp_note     = "✅ Positive Edge" if expectancy > 0 else "❌ Negative Edge"
+        else:
+            expectancy = None
+            exp_color  = "#555"
+            exp_label  = "—"
+            exp_note   = f"Need {5 - (ex[0] if ex and ex[0] else 0)} more trades"
+            win_pct_ex = 0
+
+        # Score bucket analysis — which scores actually make money
+        c.execute("""SELECT
+            CAST(score AS INTEGER) as bucket,
+            COUNT(*) as trades,
+            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+            ROUND(SUM(pnl), 2) as total_pnl,
+            ROUND(AVG(pnl), 2) as avg_pnl
+            FROM trades
+            WHERE side='SELL' AND pnl IS NOT NULL AND score IS NOT NULL
+            GROUP BY bucket
+            ORDER BY bucket""")
+        score_buckets = c.fetchall()
+
+        conn.close()
+    except Exception as e:
+        total_trades_db = total_pnl_db = avg_score_db = unique_syms = total_misses = 0
+        expectancy = None
+        exp_color = "#555"; exp_label = "—"; exp_note = "No data yet"; win_pct_ex = 0
+        score_buckets = []
+
+    pnl_col_db = "#00cc66" if total_pnl_db >= 0 else "#cc2244"
+
+    # ── Build skip reason breakdown ──
+    skip_reasons = db_get_skip_reason_breakdown()
+    reason_labels = {
+        "SCORE":       ("📊", "Score Too Low",     "#ffcc00", "Signal score below threshold"),
+        "TRADE_LIMIT": ("🔢", "Daily Trade Limit", "#ff8800", "Hit max 10 trades for the day"),
+        "POS_LIMIT":   ("📦", "Position Limit",    "#ff4466", "Already at max 3 positions"),
+        "EXPOSURE":    ("💰", "Exposure Limit",    "#ff4466", "Hit 30% portfolio exposure cap"),
+        "SECTOR":      ("🏭", "Sector Cap",        "#aa44ff", "Already holding stock in same sector"),
+        "DUPLICATE":   ("🔁", "Already Held",      "#555555", "Symbol already in portfolio"),
+    }
+    if skip_reasons:
+        sr_cards = ""
+        total_skips = sum(r[1] for r in skip_reasons)
+        for reason, count, avg_sc in skip_reasons:
+            icon, label, color, desc = reason_labels.get(reason, ("❓", reason, "#555", ""))
+            pct = int(count/total_skips*100) if total_skips > 0 else 0
+            sr_cards += f"""
+            <div style="background:#0d1117;border-radius:10px;padding:16px;border-left:3px solid {color}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div style="font-weight:700;color:{color}">{icon} {label}</div>
+                <div style="font-size:20px;font-weight:700;color:{color}">{count}</div>
+              </div>
+              <div style="font-size:11px;color:#555;margin-bottom:8px">{desc}</div>
+              <div style="background:#1a1a1a;border-radius:4px;height:6px;overflow:hidden">
+                <div style="width:{pct}%;height:100%;background:{color};border-radius:4px"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px">
+                <div style="font-size:10px;color:#444">{pct}% of skips</div>
+                <div style="font-size:10px;color:#444">Avg score: {avg_sc}</div>
+              </div>
+            </div>"""
+        skip_reason_html = f"""
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div class="section-title" style="margin:0">🚫 Why Trades Were Skipped</div>
+            <div style="font-size:11px;color:#555">{total_skips} total skips tracked</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+            {sr_cards}
+          </div>
+          <div style="margin-top:14px;font-size:11px;color:#555;padding:10px;background:#0d1117;border-radius:8px">
+            💡 <b style="color:#ffcc00">How to read this:</b>
+            If <b>Position Limit</b> or <b>Trade Limit</b> is high — your limits may be too conservative and you're missing profitable trades.
+            If <b>Score Too Low</b> dominates — your threshold may need tuning.
+            Use the weekly simulation report to quantify the cost of each limit.
+          </div>
+        </div>"""
+    else:
+        skip_reason_html = """
+        <div class="card">
+          <div class="section-title">🚫 Why Trades Were Skipped</div>
+          <div style="color:#555;padding:20px;text-align:center">
+            No skip data yet — populates automatically as the bot runs
+          </div>
+        </div>"""
+
+    # ── Build score curve HTML ──
+    score_curve_html = ""
+    if score_buckets:
+        max_abs_pnl = max(abs(b[3]) for b in score_buckets) or 1
+        bars = ""
+        for bucket, trades, wins, total_pnl, avg_pnl in score_buckets:
+            win_rate  = int(wins/trades*100) if trades > 0 else 0
+            bar_h     = max(4, int((abs(total_pnl) / max_abs_pnl) * 80))
+            bar_col   = "#00cc66" if total_pnl >= 0 else "#cc2244"
+            edge_tag  = "✅" if (win_rate >= 55 and total_pnl > 0) else ("❌" if total_pnl < 0 else "⚠️")
+            bars += f"""<div style="display:flex;flex-direction:column;align-items:center;gap:4px;min-width:50px">
+              <div style="font-size:10px;color:{bar_col};font-weight:700">{edge_tag}</div>
+              <div style="font-size:10px;color:{bar_col}">${total_pnl:+.0f}</div>
+              <div style="width:36px;height:{bar_h}px;background:{bar_col};border-radius:4px 4px 0 0;
+                          display:flex;align-items:flex-end;justify-content:center"></div>
+              <div style="font-size:11px;color:#888;font-weight:700">Score {bucket}</div>
+              <div style="font-size:10px;color:#555">{trades} trades</div>
+              <div style="font-size:10px;color:#555">{win_rate}% win</div>
+            </div>"""
+        score_curve_html = f"""
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div class="section-title" style="margin:0">📊 Score → Profitability Curve</div>
+            <div style="font-size:11px;color:#555">Which signal scores actually make money?</div>
+          </div>
+          <div style="display:flex;gap:16px;align-items:flex-end;padding:16px 8px;
+                      background:#0d1117;border-radius:8px;min-height:120px;overflow-x:auto">
+            {bars}
+          </div>
+          <div style="margin-top:12px;font-size:11px;color:#555;padding:0 8px">
+            ✅ = Profitable bucket (win rate 55%+) &nbsp;·&nbsp;
+            ❌ = Losing bucket — consider raising MIN_SIGNAL_SCORE &nbsp;·&nbsp;
+            ⚠️ = Mixed results — need more data
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:#ffcc00;padding:0 8px">
+            ⚠️ Minimum 30 trades per bucket before adjusting threshold (overfitting risk)
+          </div>
+        </div>"""
+    else:
+        score_curve_html = """
+        <div class="card">
+          <div class="section-title">📊 Score → Profitability Curve</div>
+          <div style="color:#555;padding:20px;text-align:center">
+            No completed trades yet — chart builds automatically as trades close<br>
+            <span style="font-size:11px;color:#333">Will show which signal scores (5,6,7,8+) actually make money</span>
+          </div>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AlphaBot Analytics</title>
+<style>
+  * {{ box-sizing:border-box; margin:0; padding:0; }}
+  body {{ background:#090b0e; color:#e0e0e0; font-family:'Segoe UI',sans-serif; font-size:14px; }}
+  .header {{ background:#0d1117; border-bottom:1px solid #1e2a1e; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; }}
+  .nav {{ display:flex; gap:16px; align-items:center; }}
+  .nav a {{ color:#555; text-decoration:none; font-size:13px; padding:6px 12px; border-radius:6px; }}
+  .nav a:hover {{ color:#e0e0e0; background:rgba(255,255,255,0.05); }}
+  .nav a.active {{ color:#00aaff; background:rgba(0,170,255,0.1); }}
+  .container {{ padding:24px; max-width:1200px; margin:0 auto; }}
+  .section-title {{ font-size:15px; font-weight:700; margin-bottom:14px; color:#e0e0e0; }}
+  .card {{ background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:20px; margin-bottom:20px; }}
+  table {{ width:100%; border-collapse:collapse; font-size:12px; }}
+  th {{ font-size:10px; color:#444; letter-spacing:1.5px; text-transform:uppercase; padding:10px 8px; text-align:left; }}
+  td {{ padding:9px 8px; border-top:1px solid rgba(255,255,255,0.04); font-family:monospace; }}
+  tr:hover td {{ background:rgba(255,255,255,0.02); }}
+  .search-box {{ display:flex; gap:10px; margin-bottom:20px; }}
+  .search-box input {{ flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:10px 14px; color:#e0e0e0; font-size:14px; outline:none; }}
+  .search-box input:focus {{ border-color:#00aaff; }}
+  .search-box button {{ padding:10px 20px; background:#00aaff; border:none; border-radius:8px; color:#090b0e; font-weight:700; cursor:pointer; font-size:13px; }}
+  .period-tabs {{ display:flex; gap:8px; margin-bottom:16px; }}
+  .period-tab {{ padding:6px 16px; border-radius:20px; font-size:12px; cursor:pointer; border:1px solid rgba(255,255,255,0.1); color:#555; background:transparent; }}
+  .period-tab.active {{ background:#00aaff; color:#090b0e; border-color:#00aaff; font-weight:700; }}
+</style>
+</head>
+<body>
+<div class="header">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="width:28px;height:28px;background:linear-gradient(135deg,#00ff88,#00aaff);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px">⚡</div>
+    <span style="font-weight:700;font-size:16px">AlphaBot</span>
+    <span style="font-size:11px;color:#444;margin-left:4px">Analytics</span>
+  </div>
+  <div class="nav">
+    <a href="/">📊 Dashboard</a>
+    <a href="/analytics" class="active">🧠 Analytics</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Overall Stats -->
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:20px">
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:700;color:{pnl_col_db}">${total_pnl_db:+.2f}</div>
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Total P&L</div>
+    </div>
+    <div class="card" style="text-align:center;border-color:rgba({("0,200,100" if expectancy and expectancy > 0 else "200,50,50") },0.3)">
+      <div style="font-size:24px;font-weight:700;color:{exp_color}">{exp_label}</div>
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Expectancy/Trade</div>
+      <div style="font-size:10px;color:{exp_color};margin-top:2px">{exp_note}</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:700;color:#e0e0e0">{total_trades_db}</div>
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Total Trades</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:700;color:#00cc66">{win_pct_ex}%</div>
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Win Rate</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:700;color:#ffcc00">{avg_score_db:.1f}</div>
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Avg Score</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:700;color:#ff8800">{total_misses}</div>
+      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Near Misses</div>
+    </div>
+  </div>
+
+  <!-- Score Curve -->
+  {score_curve_html}
+
+  <!-- Stock Search -->
+  <div class="card">
+    <div class="section-title">🔍 Stock Search</div>
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="Search any ticker — e.g. NVDA, BTCUSDT, AAPL..." 
+             value="{search_sym or ''}" onkeydown="if(event.key==='Enter') doSearch()">
+      <button onclick="doSearch()">Search</button>
+    </div>
+    {search_html}
+  </div>
+
+  <!-- Leaderboard -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div class="section-title" style="margin:0">🏆 Stock Leaderboard — {period_label}</div>
+      <div class="period-tabs">
+        <button class="period-tab {'active' if period=='30' else ''}" onclick="setPeriod('30')">30 Days</button>
+        <button class="period-tab {'active' if period=='90' else ''}" onclick="setPeriod('90')">90 Days</button>
+        <button class="period-tab {'active' if period=='all' else ''}" onclick="setPeriod('all')">All Time</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>Rank</th><th>Symbol</th><th>Trades</th><th>Wins</th><th>Losses</th>
+        <th>Win Rate</th><th>Total P&L</th><th>Best Trade</th><th>Worst Trade</th><th>Avg Score</th>
+      </tr></thead>
+      <tbody>{lb_rows}</tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- Skip Reason Breakdown -->
+  {skip_reason_html}
+
+  <!-- Report Archive -->
+  <div class="card">
+    <div class="section-title">📁 Report Archive</div>
+    {report_viewer}
+    <table>
+      <thead><tr><th>Type</th><th>Date</th><th>Subject</th></tr></thead>
+      <tbody>{report_rows}</tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+function doSearch() {{
+  var sym = document.getElementById('search-input').value.trim().toUpperCase();
+  if (sym) window.location.href = '/analytics?search=' + encodeURIComponent(sym);
+}}
+function searchSym(sym) {{
+  window.location.href = '/analytics?search=' + encodeURIComponent(sym);
+}}
+function setPeriod(p) {{
+  window.location.href = '/analytics?period=' + p;
+}}
+function loadReport(id) {{
+  window.location.href = '/analytics?report_id=' + id;
+}}
+</script>
+</body>
+</html>"""
+
 
 # ── Web dashboard ─────────────────────────────────────────────
 LOGIN_HTML = """<!DOCTYPE html>
@@ -3007,35 +4364,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div style="font-family:monospace;font-size:13px;font-weight:700;color:#00aaff">{portfolio}</div>
       </div>
     </div>
+    <div style="display:flex;align-items:center;gap:12px">
+    <a href="/analytics" style="padding:6px 14px;border-radius:6px;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff;text-decoration:none;font-size:11px;font-weight:700;letter-spacing:1px">🧠 ANALYTICS</a>
     <div class="refresh" id="refresh-timer">↻ {now}</div>
+  </div>
   </div>
 </div>
 <!-- Kill switch controls -->
 <div style="background:#0d1117;border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 24px;display:flex;align-items:center;gap:12px">
   <span style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px">Controls:</span>
-  <button onclick="sendCmd('/kill')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">🛑 KILL ALL BOTS</button>
-  <button onclick="sendCmd('/close-all')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">💰 CLOSE ALL POSITIONS</button>
-  <button onclick="sendCmd('/resume')" style="padding:6px 16px;border-radius:6px;border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">▶ RESUME</button>
+  <button onclick="pinCmd('/kill','🛑 Kill all bots?')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">🛑 KILL ALL BOTS</button>
+  <button onclick="pinCmd('/close-all','💰 Close all positions?')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">💰 CLOSE ALL POSITIONS</button>
+  <button onclick="pinCmd('/resume','▶ Resume all bots?')" style="padding:6px 16px;border-radius:6px;border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">▶ RESUME</button>
   <span id="dash-token" style="display:none">{dash_token}</span>
   <span id="cmd-status" style="font-size:11px;color:#555;margin-left:8px"></span>
 </div>
 <script>
-function sendCmd(path) {{
-  var btn = event.target;
-  var status = document.getElementById('cmd-status');
+function pinCmd(path, label) {{
+  var pin = prompt('Enter PIN to confirm: ' + label);
+  if (pin === null) return;  // cancelled
   var token = document.getElementById('dash-token').textContent;
-  btn.disabled = true;
+  var status = document.getElementById('cmd-status');
+  status.textContent = 'Verifying...';
+  fetch(path + '?token=' + token + '&pin=' + encodeURIComponent(pin), {{method:'POST'}})
+    .then(r => r.json())
+    .then(d => {{
+      if (d.status === 'wrong_pin') {{
+        status.textContent = '❌ Wrong PIN';
+        return;
+      }}
+      status.textContent = '✅ ' + d.status + ' — refreshing...';
+      setTimeout(() => location.reload(), 2000);
+    }})
+    .catch(e => {{
+      status.textContent = '❌ Error: ' + e;
+    }});
+}}
+function sendCmd(path) {{
+  var token = document.getElementById('dash-token').textContent;
+  var status = document.getElementById('cmd-status');
   status.textContent = 'Sending...';
   fetch(path + '?token=' + token, {{method:'POST'}})
     .then(r => r.json())
     .then(d => {{
       status.textContent = '✅ ' + d.status + ' — refreshing...';
-      btn.disabled = false;
       setTimeout(() => location.reload(), 2000);
     }})
     .catch(e => {{
       status.textContent = '❌ Error: ' + e;
-      btn.disabled = false;
     }});
 }}
 </script>
@@ -3496,37 +4872,104 @@ def build_dashboard():
             return f'<div class="empty">No scan data yet — waiting for first cycle</div>'
         rows = ""
         order = {"BUY": 0, "HOLD": 1, "SELL": 2}
-        for c in sorted(candidates, key=lambda x: order.get(x["signal"], 1)):
+
+        # Calculate score for each candidate and sort by score descending
+        scored = []
+        for c in candidates:
+            sc = score_signal(c["symbol"], c["price"], c["change"],
+                             c.get("rsi"), c.get("vol_ratio"),
+                             c.get("closes", [c["price"]]*22))
+            scored.append((sc, c))
+
+        # In BEAR mode — pin defensive/inverse ETFs to top of table regardless of score
+        bear_syms = set(BEAR_TICKERS)
+        bear_items   = [(sc, c) for sc, c in scored if c["symbol"] in bear_syms]
+        normal_items = [(sc, c) for sc, c in scored if c["symbol"] not in bear_syms]
+        bear_items.sort(key=lambda x: -x[0])
+        normal_items.sort(key=lambda x: (order.get(x[1]["signal"], 1), -x[0]))
+        scored = bear_items + normal_items
+
+        for sc, c in scored:
             sig_class = {"BUY":"sig-buy","SELL":"sig-sell","HOLD":"sig-hold"}.get(c["signal"], "sig-hold")
             chg_c = "green" if c["change"] >= 0 else "red"
             rsi_val = f"{c['rsi']:.1f}" if c.get("rsi") else "—"
             rsi_c = "red" if c.get("rsi") and c["rsi"] > 70 else ("green" if c.get("rsi") and c["rsi"] < 35 else "")
             vol = f"{c['vol_ratio']:.2f}x" if c.get("vol_ratio") else "—"
-            s9  = f"${c['sma9']:.4f}" if c.get("sma9") else "—"
-            s21 = f"${c['sma21']:.4f}" if c.get("sma21") else "—"
-            rows += f"""<tr>
-              <td style="font-weight:700" class="{color}">{c['symbol']}</td>
+
+            # Score bar — visual proximity to threshold
+            threshold = MIN_SIGNAL_SCORE
+            score_pct = min(100, int((sc / 11) * 100))
+            if sc >= threshold:
+                bar_color = "#00ff88"  # green — above threshold
+                proximity = "✅ TRADE"
+            elif sc >= threshold - 1:
+                bar_color = "#ffcc00"  # gold — very close
+                proximity = f"🔥 {sc:.1f}/{threshold}"
+            elif sc >= threshold - 2:
+                bar_color = "#ff8800"  # orange — close
+                proximity = f"⚡ {sc:.1f}/{threshold}"
+            else:
+                bar_color = "#333"     # grey — far
+                proximity = f"{sc:.1f}/{threshold}"
+
+            score_bar = f'''<div style="display:flex;align-items:center;gap:6px">
+              <div style="width:50px;height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden">
+                <div style="width:{score_pct}%;height:100%;background:{bar_color};border-radius:3px"></div>
+              </div>
+              <span style="font-size:11px;color:{bar_color};font-weight:700">{proximity}</span>
+            </div>'''
+
+            is_bear_ticker = c["symbol"] in bear_syms
+            bear_badge = '<span style="font-size:9px;background:rgba(255,136,0,0.2);color:#ff8800;border:1px solid rgba(255,136,0,0.4);border-radius:4px;padding:1px 5px;margin-left:4px;font-weight:700">BEAR</span>' if is_bear_ticker else ''
+            row_bg = "background:rgba(255,136,0,0.04);" if is_bear_ticker else ""
+            # EMA gap — shows distance between EMA9 and EMA21
+            ema_gap = c.get("ema_gap")
+            if ema_gap is not None:
+                if ema_gap > 0:
+                    ema_col = "#00ff88"
+                    ema_str = f"+{ema_gap:.2f}% ✅"  # crossed — bullish
+                elif ema_gap > -0.5:
+                    ema_col = "#ffcc00"
+                    ema_str = f"{ema_gap:.2f}% 🔥"  # very close
+                elif ema_gap > -1.5:
+                    ema_col = "#ff8800"
+                    ema_str = f"{ema_gap:.2f}% ⚡"  # close
+                else:
+                    ema_col = "#555"
+                    ema_str = f"{ema_gap:.2f}%"     # far
+            else:
+                ema_col = "#555"
+                ema_str = "—"
+
+            rows += f"""<tr style="{row_bg}">
+              <td style="font-weight:700" class="{color}">{c['symbol']}{bear_badge}</td>
               <td>${c['price']:.4f}</td>
               <td class="{chg_c}">{'+' if c['change']>=0 else ''}{c['change']:.2f}%</td>
               <td><span class="{sig_class}">{c['signal']}</span></td>
+              <td>{score_bar}</td>
+              <td style="color:{ema_col};font-size:11px;font-weight:700">{ema_str}</td>
               <td class="{rsi_c}">{rsi_val}</td>
-              <td style="color:#555">{s9}</td>
-              <td style="color:#555">{s21}</td>
               <td style="color:#777">{vol}</td>
             </tr>"""
+
         count = len(candidates)
         buys  = sum(1 for c in candidates if c["signal"] == "BUY")
         holds = sum(1 for c in candidates if c["signal"] == "HOLD")
         sells = sum(1 for c in candidates if c["signal"] == "SELL")
+        hot   = sum(1 for sc, c in scored if sc >= MIN_SIGNAL_SCORE - 1 and c["signal"] == "HOLD")
         return f"""
-          <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px">
+          <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px;flex-wrap:wrap">
             <span class="green" style="font-weight:700">{buys} BUY</span>
-            <span style="color:#555">{holds} HOLD</span>
+            <span style="color:#ffcc00">{hot} CLOSE</span>
+            <span style="color:#555">{holds - hot} HOLD</span>
             <span class="red">{sells} SELL</span>
             <span style="color:#444;margin-left:auto">{count} total scanned</span>
           </div>
           <div style="overflow-x:auto">
-          <table><thead><tr><th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th><th>RSI</th><th>SMA 9</th><th>SMA 21</th><th>Vol Ratio</th></tr></thead>
+          <table><thead><tr>
+            <th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th>
+            <th>Score</th><th>EMA Cross</th><th>RSI</th><th>Vol</th>
+          </tr></thead>
           <tbody>{rows}</tbody></table></div>"""
 
     # Kill switch banner
@@ -3711,6 +5154,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data.encode())
             return
+        # ── Analytics page ──
+        if self.path.startswith("/analytics"):
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            search_sym = params.get("search", [None])[0]
+            report_id  = params.get("report_id", [None])[0]
+            period     = params.get("period", ["all"])[0]
+            try:
+                html = build_analytics_page(search_sym=search_sym, report_id=report_id, period=period)
+            except Exception as e:
+                log.error(f"[ANALYTICS] Failed: {e}")
+                html = f"<html><body style='background:#111;color:#fff;padding:40px'><h2>Analytics Error</h2><pre>{e}</pre></body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(html.encode())
+            return
+
+        # ── Main dashboard ──
         try:
             with _state_lock:
                 html = build_dashboard()
@@ -3728,6 +5191,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
         """Handle login and kill switch commands."""
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
+
+        # Extract PIN from query string if present
+        from urllib.parse import urlparse, parse_qs
+        parsed_path = urlparse(self.path)
+        query_params = parse_qs(parsed_path.query)
+        submitted_pin = query_params.get("pin", [None])[0]
+
+        # For kill switch paths, verify PIN
+        kill_paths = ["/kill", "/close-all", "/resume"]
+        base_path = parsed_path.path
+        if base_path in kill_paths and submitted_pin is not None:
+            if submitted_pin != KILL_PIN:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "wrong_pin"}).encode())
+                log.warning(f"[SECURITY] Wrong PIN attempt on {base_path}")
+                return
+            self.path = base_path  # strip query for handler below
 
         # Login form submission
         if self.path == "/login":
@@ -3945,28 +5427,14 @@ def main():
     else:
         log.info(f"Connected — Portfolio: ${float(account_info.get('portfolio_value',0)):,.2f}")
 
-    # Verify Binance connectivity if enabled
+    # Binance startup — NO API calls at startup to avoid triggering bans
+    # Bot will connect naturally on first cycle after the 5-min buffer clears
     if USE_BINANCE:
         mode = "TESTNET (virtual money)" if BINANCE_USE_TESTNET else ("LIVE (real money)" if IS_LIVE else "PAPER")
         log.info(f"[BINANCE] Mode: {mode}")
         log.info(f"[BINANCE] Endpoint: {BINANCE_BASE}")
-
-        # ── Check if IP is currently banned before making ANY call ──
-        # First make ONE lightweight ping to check ban status
-        ping = binance_get("/api/v3/ping")  # lightest possible Binance call
-        if time.time() < _binance_ban_until:
-            ban_mins = int((_binance_ban_until - time.time()) / 60)
-            log.warning(f"[BINANCE] IP currently banned — will retry in {ban_mins} minutes. Bot will wait silently.")
-        elif ping is not None:
-            # Not banned — safe to do full connection check
-            bal = binance_get_balance("USDT")
-            if bal is not None:
-                log.info(f"[BINANCE] Connected — USDT balance: ${bal:,.2f}")
-                log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins")
-            else:
-                log.warning("[BINANCE] Could not fetch balance — check keys in Railway Variables")
-        else:
-            log.warning("[BINANCE] Could not connect — check BINANCE_KEY/BINANCE_SECRET and IP whitelist")
+        log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins — will connect on first cycle")
+        log.info(f"[BINANCE] No startup ping — avoids triggering IP ban on restart")
     else:
         log.info("[BINANCE] Not configured — add BINANCE_KEY + BINANCE_SECRET to Railway to enable")
 
@@ -4209,6 +5677,9 @@ def main():
                         circuit_breaker["active"] = True
                         circuit_breaker["reason"] = f"PANIC: Portfolio -{abs(drawdown_pct):.1f}% today"
 
+            # Update near-miss price tracking
+            update_near_miss_prices()
+
             # Update market regimes
             if not IS_LIVE or is_market_open():
                 update_market_regime()
@@ -4252,9 +5723,18 @@ def main():
                 threading.Thread(target=morning_tasks, daemon=True).start()
 
             # Daily email at 5pm ET
-            if et.hour == 17 and et.minute < 2 and last_email_day != et.date():  # every day — crypto runs weekends too
+            if et.hour == 17 and et.minute < 2 and last_email_day != et.date():
                 send_daily_summary()
                 last_email_day = et.date()
+
+            # Weekly near-miss report — every Sunday at 6pm ET
+            if et.weekday() == 6 and et.hour == 18 and et.minute < 2:
+                log.info("[WEEKLY] Generating near-miss analysis report...")
+                threading.Thread(target=send_weekly_near_miss_email, daemon=True).start()
+
+            # Run near-miss simulations daily at noon ET (after enough price history)
+            if et.hour == 12 and et.minute < 2:
+                threading.Thread(target=run_near_miss_simulations, daemon=True).start()
 
             # Intraday bots run on their own faster sub-cycle
             # Run 6 intraday cycles per 1 swing cycle
