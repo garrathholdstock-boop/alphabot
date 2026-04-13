@@ -481,7 +481,7 @@ def build_dashboard():
     else:
         kill_banner = ""
 
-    # Positions table
+    # Positions table — clickable rows expand to show signal breakdown
     all_pos = (
         [(sym, pos, "blue",  "Stock")   for sym, pos in state.positions.items()] +
         [(sym, pos, "green", "Crypto")  for sym, pos in crypto_state.positions.items()] +
@@ -492,9 +492,8 @@ def build_dashboard():
     if all_pos:
         from core.execution import fetch_latest_price
         rows = ""
-        for sym, pos, color, category in all_pos:
+        for idx, (sym, pos, color, category) in enumerate(all_pos):
             is_crypto = category in ("Crypto", "CrypID")
-            # Try to get live price, fall back to highest_price then entry
             try:
                 live = fetch_latest_price(sym, crypto=is_crypto) or pos.get("highest_price", pos["entry_price"])
             except:
@@ -504,19 +503,74 @@ def build_dashboard():
             pnl_pct  = ((live - entry) / entry) * 100
             pnl_c    = "green" if pnl >= 0 else "red"
             sign     = "+" if pnl >= 0 else ""
-            # Entry datetime
             entry_ts = pos.get("entry_ts", "")
             try:
                 dt = datetime.fromisoformat(entry_ts)
                 entry_dt = dt.strftime("%d %b %H:%M")
             except:
                 entry_dt = pos.get("entry_date", "—")
-            # Category badge colour
             cat_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ID":"#aa88ff","CrypID":"#00ff88"}
             cat_color  = cat_colors.get(category, "#555")
+            row_id     = f"pos-detail-{idx}"
+
+            # ── Build signal breakdown panel ──
+            bd = pos.get("entry_breakdown", "")
+            score = pos.get("signal_score", "—")
+            stop_pct  = round(((pos["stop_price"] - entry) / entry) * 100, 1)
+            tp_price  = pos.get("take_profit_price", entry * 1.10)
+            tp_pct    = round(((tp_price - entry) / entry) * 100, 1)
+            days_held = pos.get("days_held", 0)
+
+            if bd:
+                # Parse the text breakdown into nice HTML
+                lines = [l.strip() for l in bd.split("\n") if l.strip() and "─" not in l]
+                bd_rows = ""
+                for line in lines:
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        label = parts[0].strip()
+                        value = parts[1].strip() if len(parts) > 1 else ""
+                        color_val = "#00ff88" if "✅" in value else ("#ff4466" if "🔴" in value or "❌" in value else ("#ffcc00" if "⚠" in value else "#aaa"))
+                        bd_rows += f'<tr><td style="color:#555;font-size:11px;padding:3px 8px;white-space:nowrap">{label}</td><td style="color:{color_val};font-size:11px;padding:3px 8px">{value}</td></tr>'
+                breakdown_html = f'<table style="width:100%;border-collapse:collapse">{bd_rows}</table>'
+            else:
+                breakdown_html = f'<div style="color:#555;font-size:12px">Score: {score}/10 · No detailed breakdown available</div>'
+
+            detail_panel = f'''
+            <tr id="{row_id}" style="display:none">
+              <td colspan="7" style="padding:0">
+                <div style="background:#0a0f0a;border:1px solid rgba(0,255,136,0.15);border-radius:8px;margin:4px 0 8px 0;padding:14px 16px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                    <div style="font-size:13px;font-weight:700;color:#00ff88">📊 Why we bought {sym}</div>
+                    <div style="font-size:11px;color:#555">{entry_dt} · Score: <b style="color:#ffcc00">{score}/10</b></div>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div>
+                      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Signal Metrics</div>
+                      {breakdown_html}
+                    </div>
+                    <div>
+                      <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Position Details</div>
+                      <table style="width:100%;border-collapse:collapse">
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">Entry</td><td style="color:#e0e0e0;font-size:11px;padding:3px 8px;font-family:monospace">${entry:.4f}</td></tr>
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">Live</td><td style="color:#00aaff;font-size:11px;padding:3px 8px;font-family:monospace">${live:.4f}</td></tr>
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">Stop</td><td style="color:#ff4466;font-size:11px;padding:3px 8px;font-family:monospace">${pos["stop_price"]:.4f} ({stop_pct:+.1f}%)</td></tr>
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">Target</td><td style="color:#00ff88;font-size:11px;padding:3px 8px;font-family:monospace">${tp_price:.4f} ({tp_pct:+.1f}%)</td></tr>
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">Qty</td><td style="color:#e0e0e0;font-size:11px;padding:3px 8px;font-family:monospace">{pos["qty"]}</td></tr>
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">Days held</td><td style="color:#e0e0e0;font-size:11px;padding:3px 8px">{days_held}</td></tr>
+                        <tr><td style="color:#555;font-size:11px;padding:3px 8px">P&L</td><td style="color:{'#00ff88' if pnl>=0 else '#ff4466'};font-size:11px;padding:3px 8px;font-weight:700">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td></tr>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>'''
+
             rows += (
-                f'<tr>'
-                f'<td style="font-weight:700" class="{color}">{sym}</td>'
+                f'<tr onclick="togglePos(\'{row_id}\')" style="cursor:pointer" '
+                f'onmouseover="this.style.background=\'rgba(255,255,255,0.03)\'" '
+                f'onmouseout="this.style.background=\'transparent\'">'
+                f'<td style="font-weight:700" class="{color}">▶ {sym}</td>'
                 f'<td><span style="font-size:10px;color:{cat_color};font-weight:700">{category}</span></td>'
                 f'<td style="color:#555;font-size:11px">{entry_dt}</td>'
                 f'<td style="font-family:monospace">${entry:.4f}</td>'
@@ -524,13 +578,31 @@ def build_dashboard():
                 f'<td class="red" style="font-family:monospace">${pos["stop_price"]:.4f}</td>'
                 f'<td class="{pnl_c}" style="font-weight:700;font-family:monospace">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
                 f'</tr>'
+                f'{detail_panel}'
             )
+
         positions_html = (
             f'<div class="card" style="margin-bottom:20px">'
-            f'<div class="section-title">Open Positions ({len(all_pos)})</div>'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+            f'<div class="section-title" style="margin:0">Open Positions ({len(all_pos)})</div>'
+            f'<div style="font-size:11px;color:#555">Tap any row to see why we bought it</div>'
+            f'</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Symbol</th><th>Type</th><th>Entry Time</th><th>Entry $</th><th>Live $</th><th>Stop</th><th>P&L</th>'
             f'</tr></thead><tbody>{rows}</tbody></table></div></div>'
+            f'<script>'
+            f'function togglePos(id) {{'
+            f'  var el = document.getElementById(id);'
+            f'  var row = el.previousElementSibling;'
+            f'  if (el.style.display === "none") {{'
+            f'    el.style.display = "table-row";'
+            f'    row.querySelector("td:first-child").textContent = row.querySelector("td:first-child").textContent.replace("▶","▼");'
+            f'  }} else {{'
+            f'    el.style.display = "none";'
+            f'    row.querySelector("td:first-child").textContent = row.querySelector("td:first-child").textContent.replace("▼","▶");'
+            f'  }}'
+            f'}}'
+            f'</script>'
         )
     else:
         positions_html = ""
@@ -722,7 +794,21 @@ def build_dashboard():
 
     stocks_scan_html  = build_scan_table(state.candidates, "blue")
     crypto_scan_html  = build_scan_table(crypto_state.candidates, "green")
-    smallcap_scan_html = build_scan_table(smallcap_state.candidates, "gold") if smallcap_state.candidates else '<div class="empty">Small cap pool refreshing — check back after first cycle</div>'
+    if smallcap_state.candidates:
+        smallcap_scan_html = build_scan_table(smallcap_state.candidates, "gold")
+    elif smallcap_pool.get("symbols"):
+        pool_size = len(smallcap_pool["symbols"])
+        last_refresh = smallcap_pool.get("last_refresh", "—")
+        smallcap_scan_html = (
+            f'<div style="padding:20px;text-align:center;color:#555">'
+            f'<div style="font-size:14px;color:#ffcc00;margin-bottom:8px">📊 Pool ready — {pool_size} stocks loaded</div>'
+            f'<div style="font-size:12px">Refreshed: {last_refresh}</div>'
+            f'<div style="font-size:12px;margin-top:4px">Scan results will appear after next cycle</div>'
+            f'<div style="font-size:11px;color:#444;margin-top:8px">Top stocks: {", ".join(smallcap_pool["symbols"][:8])}</div>'
+            f'</div>'
+        )
+    else:
+        smallcap_scan_html = '<div class="empty">Small cap pool refreshing — check back after first cycle (takes ~5 mins)</div>'
 
     # News section
     if not news_state["scan_complete"]:
