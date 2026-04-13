@@ -483,25 +483,55 @@ def build_dashboard():
 
     # Positions table
     all_pos = (
-        [(sym, pos, "blue", False) for sym, pos in state.positions.items()] +
-        [(sym, pos, "green", True) for sym, pos in crypto_state.positions.items()]
+        [(sym, pos, "blue",  "Stock")   for sym, pos in state.positions.items()] +
+        [(sym, pos, "green", "Crypto")  for sym, pos in crypto_state.positions.items()] +
+        [(sym, pos, "gold",  "SmCap")   for sym, pos in smallcap_state.positions.items()] +
+        [(sym, pos, "blue",  "ID")      for sym, pos in intraday_state.positions.items()] +
+        [(sym, pos, "green", "CrypID")  for sym, pos in crypto_intraday_state.positions.items()]
     )
     if all_pos:
+        from core.execution import fetch_latest_price
         rows = ""
-        for sym, pos, color, is_crypto in all_pos:
-            live  = pos.get("highest_price", pos["entry_price"])
-            pnl   = (live - pos["entry_price"]) * pos["qty"]
-            pnl_c = "green" if pnl >= 0 else "red"
-            rows += (f'<tr><td style="font-weight:700" class="{color}">{sym}</td>'
-                     f'<td>{"Crypto" if is_crypto else "Stock"}</td>'
-                     f'<td>{pos["qty"]}</td><td>${pos["entry_price"]:.4f}</td>'
-                     f'<td class="red">${pos["stop_price"]:.4f}</td>'
-                     f'<td class="{pnl_c}" style="font-weight:700">{chr(43) if pnl>=0 else ""}${pnl:.2f}</td></tr>')
-        positions_html = (f'<div class="card" style="margin-bottom:20px">'
-                          f'<div class="section-title">Open Positions ({len(all_pos)})</div>'
-                          f'<div class="table-wrap"><table><thead><tr>'
-                          f'<th>Symbol</th><th>Type</th><th>Qty</th><th>Entry</th><th>Stop</th><th>P&L</th>'
-                          f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
+        for sym, pos, color, category in all_pos:
+            is_crypto = category in ("Crypto", "CrypID")
+            # Try to get live price, fall back to highest_price then entry
+            try:
+                live = fetch_latest_price(sym, crypto=is_crypto) or pos.get("highest_price", pos["entry_price"])
+            except:
+                live = pos.get("highest_price", pos["entry_price"])
+            entry    = pos["entry_price"]
+            pnl      = (live - entry) * pos["qty"]
+            pnl_pct  = ((live - entry) / entry) * 100
+            pnl_c    = "green" if pnl >= 0 else "red"
+            sign     = "+" if pnl >= 0 else ""
+            # Entry datetime
+            entry_ts = pos.get("entry_ts", "")
+            try:
+                dt = datetime.fromisoformat(entry_ts)
+                entry_dt = dt.strftime("%d %b %H:%M")
+            except:
+                entry_dt = pos.get("entry_date", "—")
+            # Category badge colour
+            cat_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ID":"#aa88ff","CrypID":"#00ff88"}
+            cat_color  = cat_colors.get(category, "#555")
+            rows += (
+                f'<tr>'
+                f'<td style="font-weight:700" class="{color}">{sym}</td>'
+                f'<td><span style="font-size:10px;color:{cat_color};font-weight:700">{category}</span></td>'
+                f'<td style="color:#555;font-size:11px">{entry_dt}</td>'
+                f'<td style="font-family:monospace">${entry:.4f}</td>'
+                f'<td style="font-family:monospace;color:#00aaff">${live:.4f}</td>'
+                f'<td class="red" style="font-family:monospace">${pos["stop_price"]:.4f}</td>'
+                f'<td class="{pnl_c}" style="font-weight:700;font-family:monospace">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
+                f'</tr>'
+            )
+        positions_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">Open Positions ({len(all_pos)})</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Symbol</th><th>Type</th><th>Entry Time</th><th>Entry $</th><th>Live $</th><th>Stop</th><th>P&L</th>'
+            f'</tr></thead><tbody>{rows}</tbody></table></div></div>'
+        )
     else:
         positions_html = ""
 
