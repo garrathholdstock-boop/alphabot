@@ -5825,4 +5825,8 @@ def main():
                     if sym not in stop_syms:
                         log.warning(f"[CRASH RECOVERY] Replacing missing stop for {sym}")
                         place_stop_order_alpaca(sym, pos["qty"], round(pos["stop_price"], 2))
-       
+            except: pass
+            time.sleep(30)
+
+if __name__ == "__main__":
+    main()
