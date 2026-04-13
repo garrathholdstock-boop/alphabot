@@ -2203,8 +2203,9 @@ def update_market_regime():
     # Fetch SPY bars for MA calculation
     spy_bars = fetch_bars("SPY")
 
-    # Fetch real VIX — try direct feed first, fall back to VIXY ETF
+    # Fetch real VIX — try multiple sources
     vix_bars = None
+    vix_val  = None
     try:
         from datetime import timezone
         end   = datetime.now(timezone.utc)
@@ -2214,27 +2215,33 @@ def update_market_regime():
         if resp and resp.get("bars"):
             raw = resp["bars"]
             vix_bars = [{"c": b["c"], "h": b["h"], "l": b["l"], "o": b["o"]} for b in raw]
-            log.info(f"[REGIME] Real VIX: {vix_bars[-1]['c']:.2f}")
+            vix_val  = vix_bars[-1]["c"]
+            log.info(f"[REGIME] Real VIX: {vix_val:.2f}")
         else:
             raise ValueError("No VIX bars returned")
     except Exception:
-        # Fallback to VIXY ETF as VIX proxy — always available
-        vix_bars = fetch_bars("VIXY")
-        if vix_bars:
-            log.info(f"[REGIME] VIX via VIXY proxy: {vix_bars[-1]['c']:.2f}")
+        # Try UVXY as proxy — scale down (UVXY ~= VIX * 1.5 roughly)
+        try:
+            uvxy_bars = fetch_bars("UVXY")
+            if uvxy_bars:
+                raw_uvxy = uvxy_bars[-1]["c"]
+                vix_val  = raw_uvxy * 0.65  # scale to approximate VIX
+                log.info(f"[REGIME] VIX via UVXY proxy: {vix_val:.2f} (UVXY=${raw_uvxy:.2f})")
+        except Exception:
+            pass
+
+    # If we still don't have VIX — don't let missing data trigger bear mode
+    # Just use SPY MA alone for regime detection
+    if vix_val is None:
+        log.info("[REGIME] VIX unavailable — using SPY MA only for regime")
 
     spy_price = None
     spy_ma20  = None
-    vix_val   = None
 
     if spy_bars and len(spy_bars) >= SPY_MA_PERIOD:
         closes    = [b["c"] for b in spy_bars]
         spy_price = closes[-1]
         spy_ma20  = sum(closes[-SPY_MA_PERIOD:]) / SPY_MA_PERIOD
-
-    # Try VIXY as VIX proxy, fallback to hardcoded neutral
-    if vix_bars:
-        vix_val = vix_bars[-1]["c"]
 
     # Determine regime
     bear_signals = 0
