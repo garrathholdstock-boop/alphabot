@@ -75,169 +75,50 @@ except ImportError:
 
 # ── Small cap pool management ─────────────────────────────────
 def refresh_smallcap_pool():
-    """
-    Smart small cap pool refresh using Finviz screener + Claude AI curation.
-
-    Step 1 — Finviz screener: fetches stocks already filtered by:
-      - Price $2-$20
-      - Volume > 500k
-      - Relative volume > 1.5x (moving TODAY)
-      - Market cap < $300M (true small cap)
-      - Country: USA, Exchange: NYSE/NASDAQ
-
-    Step 2 — Claude AI: ranks and curates the list considering:
-      - Current market regime (BULL/BEAR)
-      - Sector momentum
-      - Recent macro environment
-      - Returns top 50 highest conviction picks
-
-    Result: A focused, high-quality pool of 50 stocks refreshed weekly.
-    Much faster and smarter than scanning 8,000 stocks individually.
-    """
-    import requests as req
     global smallcap_pool
-    log.info("[SMALLCAP] 🧠 Starting smart pool refresh (Finviz + Claude)...")
-
-    # ── Step 1: Finviz screener ───────────────────────────────
-    finviz_pool = []
+    log.info("[SMALLCAP] Refreshing small cap pool...")
     try:
-        # Finviz screener URL — pre-filtered small caps with unusual volume
-        # f_geo=USA, f_exch=nasd|nyse, price 2-20, vol>500k, rel vol>1.5x, mktcap<300M
-        url = (
-            "https://finviz.com/screener.ashx"
-            "?v=111&f=geo_usa,exch_nasd|nyse,"
-            "sh_price_2to20,sh_avgvol_500to,"
-            "sh_relvol_o1.5,cap_small|micro"
-            "&ft=4&o=-relativevolume"
-        )
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-        }
-        r = req.get(url, headers=headers, timeout=15)
-        if r.ok:
-            import re
-            # Extract ticker symbols from Finviz HTML
-            tickers = re.findall(r'ticker=([A-Z]{1,5})"', r.text)
-            # Deduplicate while preserving order
-            seen = set()
-            for t in tickers:
-                if t not in seen and t not in US_WATCHLIST:
-                    seen.add(t)
-                    finviz_pool.append(t)
-            log.info(f"[SMALLCAP] Finviz returned {len(finviz_pool)} candidates")
-        else:
-            log.warning(f"[SMALLCAP] Finviz failed: {r.status_code}")
+        assets = alpaca_get("/v2/assets?status=active&asset_class=us_equity")
+        if not assets:
+            log.warning("[SMALLCAP] Could not fetch assets from Alpaca")
+            return
+        candidates = [
+            a for a in assets
+            if (a.get("tradable")
+                and a.get("exchange") in ("NYSE","NASDAQ","ARCA")
+                and a.get("status") == "active"
+                and not a.get("symbol","").endswith(("W","R","P","Q"))
+                and len(a.get("symbol","")) <= 5)
+        ]
+        log.info(f"[SMALLCAP] {len(candidates)} tradable candidates found")
+        scored = []
+        checked = 0
+        for asset in candidates:
+            sym = asset.get("symbol","")
+            if not sym or sym in US_WATCHLIST: continue
+            bars = fetch_bars(sym)
+            if not bars or len(bars) < 10: continue
+            price = bars[-1]["c"]
+            if not (SMALLCAP_MIN_PRICE <= price <= SMALLCAP_MAX_PRICE): continue
+            volumes = [b["v"] for b in bars]
+            avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
+            if avg_vol < 50000: continue
+            closes   = [b["c"] for b in bars]
+            momentum = (closes[-1] - closes[-5]) / closes[-5] * 100 if len(closes) >= 5 else 0
+            sc       = avg_vol * (1 + abs(momentum) / 100)
+            scored.append({"symbol": sym, "price": price, "avg_vol": avg_vol, "momentum": momentum, "score": sc})
+            checked += 1
+            if checked >= 300: break
+            time.sleep(0.1)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        from core.config import SMALLCAP_POOL_SIZE
+        pool = [s["symbol"] for s in scored[:SMALLCAP_POOL_SIZE]]
+        smallcap_pool["symbols"]          = pool
+        smallcap_pool["last_refresh"]     = datetime.now().strftime("%Y-%m-%d %H:%M")
+        smallcap_pool["last_refresh_day"] = datetime.now().date()
+        log.info(f"[SMALLCAP] Pool refreshed: {len(pool)} stocks | Top 5: {pool[:5]}")
     except Exception as e:
-        log.warning(f"[SMALLCAP] Finviz error: {e}")
-
-    # ── Fallback: use Alpaca assets if Finviz fails ───────────
-    if len(finviz_pool) < 10:
-        log.info("[SMALLCAP] Finviz insufficient — falling back to Alpaca asset list")
-        try:
-            assets = alpaca_get("/v2/assets?status=active&asset_class=us_equity")
-            if assets:
-                candidates = [
-                    a["symbol"] for a in assets
-                    if (a.get("tradable")
-                        and a.get("exchange") in ("NYSE","NASDAQ","ARCA")
-                        and a.get("status") == "active"
-                        and not a.get("symbol","").endswith(("W","R","P","Q"))
-                        and len(a.get("symbol","")) <= 5
-                        and a["symbol"] not in US_WATCHLIST)
-                ]
-                # Quick price filter using batch fetch on sample
-                import random
-                sample = random.sample(candidates, min(200, len(candidates)))
-                bars_batch = fetch_bars_batch(sample[:100])
-                for sym, bars in bars_batch.items():
-                    if not bars: continue
-                    price = bars[-1]["c"]
-                    volumes = [b["v"] for b in bars]
-                    avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
-                    if (SMALLCAP_MIN_PRICE <= price <= SMALLCAP_MAX_PRICE
-                            and avg_vol >= 200000):
-                        finviz_pool.append(sym)
-                log.info(f"[SMALLCAP] Alpaca fallback: {len(finviz_pool)} candidates")
-        except Exception as e:
-            log.error(f"[SMALLCAP] Alpaca fallback error: {e}")
-
-    if not finviz_pool:
-        log.error("[SMALLCAP] No candidates found — keeping existing pool")
-        return
-
-    # ── Step 2: Claude AI curation ────────────────────────────
-    final_pool = finviz_pool[:50]  # default — top 50 by Finviz relative volume
-    claude_api_key = cfg.CLAUDE_API_KEY
-
-    if claude_api_key and len(finviz_pool) > 20:
-        try:
-            regime      = market_regime.get("mode", "BULL")
-            vix         = market_regime.get("vix", "unknown")
-            spy_trend   = market_regime.get("spy_trend", "unknown")
-            c_regime    = crypto_regime.get("mode", "BULL")
-            ticker_list = ", ".join(finviz_pool[:100])  # send top 100 to Claude
-
-            prompt = (
-                f"You are a quant analyst helping select small cap stocks for a momentum trading bot. "
-                f"Current market conditions: Regime={regime}, VIX={vix}, SPY={spy_trend}, Crypto={c_regime}. "
-                f"These stocks were pre-filtered by Finviz: high relative volume (1.5x+), price $2-$20, "
-                f"volume >500k, small/micro cap, US listed. Sorted by relative volume descending.\n\n"
-                f"Tickers: {ticker_list}\n\n"
-                f"Select the best 50 tickers for momentum trading this week. Consider:\n"
-                f"1. Current regime ({regime}) — in BEAR prefer defensive/short sectors\n"
-                f"2. Avoid: penny stock traps, reverse mergers, shell companies, Chinese RTOs\n"
-                f"3. Prefer: real businesses, sector momentum, catalyst-driven moves\n"
-                f"4. In BULL: prefer tech, energy, biotech with volume\n"
-                f"5. In BEAR: prefer gold miners, utilities, defensive plays\n\n"
-                f"Return ONLY a JSON array of exactly 50 ticker symbols, no explanation. "
-                f"Example: [\"SIRI\",\"PLUG\",\"NOK\",...]\n"
-                f"If fewer than 50 available, return all of them."
-            )
-
-            r = req.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": claude_api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 500,
-                    "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=30
-            )
-            if r.ok:
-                import json as _json
-                text = r.json()["content"][0]["text"].strip()
-                # Extract JSON array from response
-                import re
-                match = re.search(r'\[.*?\]', text, re.DOTALL)
-                if match:
-                    curated = _json.loads(match.group())
-                    # Validate — only keep tickers that were in original Finviz list
-                    curated = [t for t in curated if isinstance(t, str) and t.upper() in set(finviz_pool)]
-                    if len(curated) >= 10:
-                        final_pool = curated[:50]
-                        log.info(f"[SMALLCAP] ✅ Claude curated {len(final_pool)} stocks from {len(finviz_pool)} Finviz candidates")
-                    else:
-                        log.warning(f"[SMALLCAP] Claude returned too few valid tickers ({len(curated)}) — using Finviz order")
-            else:
-                log.warning(f"[SMALLCAP] Claude API failed: {r.status_code} — using Finviz order")
-        except Exception as e:
-            log.warning(f"[SMALLCAP] Claude curation error: {e} — using Finviz order")
-    else:
-        log.info("[SMALLCAP] Skipping Claude curation (no API key or insufficient candidates)")
-
-    # ── Update pool ───────────────────────────────────────────
-    from core.config import SMALLCAP_POOL_SIZE
-    smallcap_pool["symbols"]          = final_pool[:SMALLCAP_POOL_SIZE]
-    smallcap_pool["last_refresh"]     = datetime.now().strftime("%Y-%m-%d %H:%M")
-    smallcap_pool["last_refresh_day"] = datetime.now().date()
-    smallcap_pool["source"]           = "finviz+claude" if claude_api_key else "finviz"
-    log.info(f"[SMALLCAP] Pool ready: {len(final_pool)} stocks | Source: {smallcap_pool['source']} | Top 8: {final_pool[:8]}")
+        log.error(f"[SMALLCAP] Pool refresh error: {e}")
 
 def should_refresh_smallcap():
     from core.config import SMALLCAP_REFRESH_DAYS
@@ -326,12 +207,15 @@ def run_cycle(watchlist, st, crypto=False):
         avg_vol = sum(volumes[-11:-1]) / 10 if len(volumes) >= 11 else 1
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
         signal, e9, e21, rsi = get_signal(closes, volumes)
-        sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars) if signal == "BUY" else 0
+        # Calculate ema_gap for ALL signals — shows EMA cross proximity in dashboard
+        ema_gap = round(((e9 - e21) / e21) * 100, 2) if e9 and e21 and e21 != 0 else None
+        # Score all candidates so dashboard can rank and colour them properly
+        sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars)
         results.append({
             "symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": e9, "sma21": e21,
             "rsi": rsi, "vol_ratio": vol_ratio, "score": sig_score,
-            "closes": closes,
+            "closes": closes, "ema_gap": ema_gap,
         })
 
     results.sort(key=lambda x: (-x.get("score", 0), {"BUY":0,"HOLD":1,"SELL":2}.get(x["signal"], 1)))
@@ -545,9 +429,11 @@ def run_cycle_smallcap(watchlist, st):
         avg_vol   = sum(volumes[-10:]) / min(10, len(volumes))
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
         signal, e9, e21, rsi = get_signal_smallcap(closes, volumes)
+        ema_gap = round(((e9 - e21) / e21) * 100, 2) if e9 and e21 and e21 != 0 else None
+        sc = score_signal(sym, price, change, rsi, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
-            "vol_ratio": vol_ratio, "smallcap": True})
+            "vol_ratio": vol_ratio, "smallcap": True, "ema_gap": ema_gap, "score": sc})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -637,9 +523,12 @@ def run_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
+        ema_gap = round(((ef - es) / es) * 100, 2) if ef and es and es != 0 else None
+        sc = score_signal(sym, price, change, rsi_val, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True,
+            "ema_gap": ema_gap, "score": sc})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -744,9 +633,12 @@ def run_crypto_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
+        ema_gap = round(((ef - es) / es) * 100, 2) if ef and es and es != 0 else None
+        sc = score_signal(sym, price, change, rsi_val, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True,
+            "ema_gap": ema_gap, "score": sc})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
