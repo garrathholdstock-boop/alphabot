@@ -2239,7 +2239,7 @@ def update_market_regime():
                 vixy_bars = fetch_bars("VIXY")
                 if vixy_bars:
                     raw_vixy = vixy_bars[-1]["c"]
-                    vix_val  = raw_vixy * 1.8  # VIXY price * ~1.8 approximates VIX level
+                    vix_val  = raw_vixy * 0.57  # VIXY price * ~0.57 approximates VIX level
                     log.info(f"[REGIME] VIX via VIXY proxy: {vix_val:.2f} (VIXY=${raw_vixy:.2f})")
             except Exception:
                 pass
