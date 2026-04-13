@@ -2203,32 +2203,46 @@ def update_market_regime():
     # Fetch SPY bars for MA calculation
     spy_bars = fetch_bars("SPY")
 
-    # Fetch real VIX — try multiple sources
+    # Fetch real VIX — premium Alpaca subscription supports VIX directly
     vix_bars = None
     vix_val  = None
     try:
         from datetime import timezone
         end   = datetime.now(timezone.utc)
         start = end - timedelta(days=5)
-        url   = f"/v2/stocks/VIX/bars?timeframe=1Day&start={start.strftime('%Y-%m-%dT%H:%M:%SZ')}&end={end.strftime('%Y-%m-%dT%H:%M:%SZ')}&feed=iex"
+        # Try SIP feed first (premium subscription)
+        url   = f"/v2/stocks/VIX/bars?timeframe=1Day&start={start.strftime('%Y-%m-%dT%H:%M:%SZ')}&end={end.strftime('%Y-%m-%dT%H:%M:%SZ')}&feed=sip"
         resp  = alpaca_get(url)
         if resp and resp.get("bars"):
             raw = resp["bars"]
             vix_bars = [{"c": b["c"], "h": b["h"], "l": b["l"], "o": b["o"]} for b in raw]
             vix_val  = vix_bars[-1]["c"]
-            log.info(f"[REGIME] Real VIX: {vix_val:.2f}")
+            log.info(f"[REGIME] Real VIX (SIP): {vix_val:.2f}")
         else:
-            raise ValueError("No VIX bars returned")
+            raise ValueError("No VIX bars returned from SIP")
     except Exception:
-        # Try UVXY as proxy — scale down (UVXY ~= VIX * 1.5 roughly)
         try:
-            uvxy_bars = fetch_bars("UVXY")
-            if uvxy_bars:
-                raw_uvxy = uvxy_bars[-1]["c"]
-                vix_val  = raw_uvxy * 0.65  # scale to approximate VIX
-                log.info(f"[REGIME] VIX via UVXY proxy: {vix_val:.2f} (UVXY=${raw_uvxy:.2f})")
+            # Try snapshot for latest VIX price
+            snap = alpaca_get(f"/v2/stocks/VIX/snapshot?feed=sip")
+            if snap:
+                vix_val = snap.get("latestTrade", {}).get("p") or snap.get("latestQuote", {}).get("ap")
+                if vix_val:
+                    vix_val = float(vix_val)
+                    log.info(f"[REGIME] Real VIX (snapshot): {vix_val:.2f}")
+                else:
+                    raise ValueError("No price in snapshot")
+            else:
+                raise ValueError("No snapshot returned")
         except Exception:
-            pass
+            # Fall back to VIXY as proxy — VIXY tracks VIX cleanly (not leveraged like UVXY)
+            try:
+                vixy_bars = fetch_bars("VIXY")
+                if vixy_bars:
+                    raw_vixy = vixy_bars[-1]["c"]
+                    vix_val  = raw_vixy * 1.8  # VIXY price * ~1.8 approximates VIX level
+                    log.info(f"[REGIME] VIX via VIXY proxy: {vix_val:.2f} (VIXY=${raw_vixy:.2f})")
+            except Exception:
+                pass
 
     # If we still don't have VIX — don't let missing data trigger bear mode
     # Just use SPY MA alone for regime detection
