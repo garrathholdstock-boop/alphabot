@@ -229,6 +229,18 @@ def check_stop_losses(st, crypto=False):
             reason = f"Take-Profit (+{pct:.1f}%)"
         elif days >= MAX_HOLD_DAYS:
             reason = f"Max-Hold ({days}d)"
+        else:
+            # Opportunity cost exit — don't hold dead capital when better trades wait
+            # If held >24hrs, P&L flat (<0.5%), and 2+ high-score candidates waiting
+            hold_hrs = (now - datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600 if pos.get("entry_ts") else 0
+            if hold_hrs >= 24 and abs(pct) < 0.5:
+                from core.config import MIN_SIGNAL_SCORE
+                waiting = [c for c in st.candidates
+                           if c.get("score", 0) >= MIN_SIGNAL_SCORE + 2
+                           and c["symbol"] not in st.positions
+                           and c.get("ema_gap", -99) > 0]
+                if len(waiting) >= 2:
+                    reason = f"Opportunity-Cost ({pct:+.1f}% after {hold_hrs:.0f}h — {len(waiting)} better signals waiting)"
 
         if reason:
             _close_position(st, sym, pos, live, reason, now, crypto)
