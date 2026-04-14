@@ -504,9 +504,22 @@ def build_dashboard():
             pnl_c    = "green" if pnl >= 0 else "red"
             sign     = "+" if pnl >= 0 else ""
             entry_ts = pos.get("entry_ts", "")
+            paris = ZoneInfo("Europe/Paris")
+            now_paris = datetime.now(paris)
             try:
                 dt = datetime.fromisoformat(entry_ts)
-                entry_dt = dt.strftime("%d %b %H:%M")
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                dt_paris = dt.astimezone(paris)
+                held = now_paris - dt_paris
+                held_hrs  = int(held.total_seconds() // 3600)
+                held_mins = int((held.total_seconds() % 3600) // 60)
+                if held_hrs >= 24:
+                    held_days = held_hrs // 24
+                    held_rem  = held_hrs % 24
+                    entry_dt  = f"Held {held_days}d {held_rem}h"
+                else:
+                    entry_dt  = f"Held {held_hrs}h {held_mins}m"
             except:
                 entry_dt = pos.get("entry_date", "—")
             cat_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ID":"#aa88ff","CrypID":"#00ff88"}
@@ -826,7 +839,7 @@ def build_dashboard():
     news_scan_time = f"Last scan: {news_state.get('last_scan_time', '')} ET" if news_state.get("last_scan_time") else "Scans at 9:00 AM ET daily"
 
     return DASHBOARD_HTML.format(
-        now=datetime.now().strftime("%H:%M:%S"),
+        now=datetime.now(ZoneInfo("Europe/Paris")).strftime("%H:%M:%S"),
         circuit_banner=circuit_banner, kill_banner=kill_banner,
         mode_badge="badge-live" if IS_LIVE else "badge-paper",
         mode_label="LIVE" if IS_LIVE else "PAPER",
@@ -1141,7 +1154,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if base_path == "/kill":
-            kill_switch.update({"active": True, "reason": "Manual kill from dashboard", "activated_at": datetime.now().strftime("%H:%M:%S")})
+            kill_switch.update({"active": True, "reason": "Manual kill from dashboard", "activated_at": datetime.now(ZoneInfo("Europe/Paris")).strftime("%H:%M:%S")})
             for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
                 st.shutoff = True
             log.warning("[KILL SWITCH] Manual kill activated from dashboard")
@@ -1163,7 +1176,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             for sym, pos in list(crypto_state.positions.items()):
                 place_order(sym, "sell", pos["qty"], crypto=True, estimated_price=pos["entry_price"])
             state.positions.clear(); crypto_state.positions.clear()
-            kill_switch.update({"active": True, "reason": "Close all — liquidated from dashboard", "activated_at": datetime.now().strftime("%H:%M:%S")})
+            kill_switch.update({"active": True, "reason": "Close all — liquidated from dashboard", "activated_at": datetime.now(ZoneInfo("Europe/Paris")).strftime("%H:%M:%S")})
             for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
                 st.shutoff = True
             self._json(json.dumps({"status": "closed"}))
