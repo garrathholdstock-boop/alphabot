@@ -8,6 +8,10 @@ import time
 import threading
 import logging
 from datetime import datetime, timedelta
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from core.config import (
     log, IS_LIVE, USE_BINANCE, CYCLE_SECONDS, INTRADAY_CYCLE_SECONDS,
@@ -175,7 +179,7 @@ def run_cycle(watchlist, st, crypto=False):
         log.info(f"[{st.label}] BEAR MODE — rotating to defensive tickers")
 
     st.running    = True
-    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.last_cycle = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
     log.info(f"[{st.label}] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Positions: {len(st.positions)}")
 
@@ -207,15 +211,12 @@ def run_cycle(watchlist, st, crypto=False):
         avg_vol = sum(volumes[-11:-1]) / 10 if len(volumes) >= 11 else 1
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
         signal, e9, e21, rsi = get_signal(closes, volumes)
-        # Calculate ema_gap for ALL signals — shows EMA cross proximity in dashboard
-        ema_gap = round(((e9 - e21) / e21) * 100, 2) if e9 and e21 and e21 != 0 else None
-        # Score all candidates so dashboard can rank and colour them properly
-        sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars)
+        sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars) if signal == "BUY" else 0
         results.append({
             "symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": e9, "sma21": e21,
             "rsi": rsi, "vol_ratio": vol_ratio, "score": sig_score,
-            "closes": closes, "ema_gap": ema_gap,
+            "closes": closes,
         })
 
     results.sort(key=lambda x: (-x.get("score", 0), {"BUY":0,"HOLD":1,"SELL":2}.get(x["signal"], 1)))
@@ -383,7 +384,7 @@ def run_cycle_smallcap(watchlist, st):
         return
 
     st.running    = True
-    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.last_cycle = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
     log.info(f"[SMALLCAP] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Pool: {len(watchlist)} stocks")
 
@@ -429,11 +430,9 @@ def run_cycle_smallcap(watchlist, st):
         avg_vol   = sum(volumes[-10:]) / min(10, len(volumes))
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
         signal, e9, e21, rsi = get_signal_smallcap(closes, volumes)
-        ema_gap = round(((e9 - e21) / e21) * 100, 2) if e9 and e21 and e21 != 0 else None
-        sc = score_signal(sym, price, change, rsi, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
-            "vol_ratio": vol_ratio, "smallcap": True, "ema_gap": ema_gap, "score": sc})
+            "vol_ratio": vol_ratio, "smallcap": True})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -496,7 +495,7 @@ def run_intraday_cycle(watchlist, st):
         return
 
     st.running    = True
-    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.last_cycle = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
     log.info(f"[INTRADAY] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f}")
 
@@ -523,12 +522,9 @@ def run_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
-        ema_gap = round(((ef - es) / es) * 100, 2) if ef and es and es != 0 else None
-        sc = score_signal(sym, price, change, rsi_val, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True,
-            "ema_gap": ema_gap, "score": sc})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -605,7 +601,7 @@ def run_crypto_intraday_cycle(watchlist, st):
         return
 
     st.running    = True
-    st.last_cycle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.last_cycle = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
     log.info(f"[CRYPTO_ID] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f}")
 
@@ -633,12 +629,9 @@ def run_crypto_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
-        ema_gap = round(((ef - es) / es) * 100, 2) if ef and es and es != 0 else None
-        sc = score_signal(sym, price, change, rsi_val, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True,
-            "ema_gap": ema_gap, "score": sc})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -736,7 +729,11 @@ def main():
             stop_pct = cfg.CRYPTO_STOP_PCT if "/" in str(sym) else STOP_LOSS_PCT
             stop     = entry * (1 - stop_pct / 100)
             tp       = entry * (1 + TAKE_PROFIT_PCT / 100)
-            is_crypto    = pos.get("asset_class") == "crypto"
+            is_crypto    = pos.get("asset_class") == "crypto" or "/" in str(sym) or str(sym).endswith("USD") and sym not in ["BUSD"]
+            # Additional check — if symbol is in crypto watchlist it's crypto
+            from core.config import CRYPTO_WATCHLIST
+            if sym in CRYPTO_WATCHLIST or sym.replace("/","") + "USD" in [c.replace("/","") for c in CRYPTO_WATCHLIST]:
+                is_crypto = True
             target_state = crypto_state if is_crypto else state
             if sym not in target_state.positions:
                 target_state.positions[sym] = {
