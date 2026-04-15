@@ -31,7 +31,7 @@ import core.config as cfg
 
 # ── IBKR connection settings ──────────────────────────────────
 IBKR_HOST      = "127.0.0.1"
-IBKR_PORT      = 4001 if IS_LIVE else 4002
+IBKR_PORT      = 4001 if IS_LIVE else 4004
 IBKR_CLIENT_ID = 1
 
 # Global IB instance

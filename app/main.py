@@ -731,7 +731,7 @@ def main():
             tp       = entry * (1 + TAKE_PROFIT_PCT / 100)
             is_crypto    = pos.get("asset_class") == "crypto" or "/" in str(sym) or str(sym).endswith("USD") and sym not in ["BUSD"]
             # Additional check — if symbol is in crypto watchlist it's crypto
-            from core.config import CRYPTO_WATCHLIST
+
             if sym in CRYPTO_WATCHLIST or sym.replace("/","") + "USD" in [c.replace("/","") for c in CRYPTO_WATCHLIST]:
                 is_crypto = True
             target_state = crypto_state if is_crypto else state
