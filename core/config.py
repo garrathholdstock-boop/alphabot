@@ -444,7 +444,7 @@ FTSE_WATCHLIST = [
     # Financials
     "HSBA","LLOY","BARC","STAN","LGEN",
     # Energy
-    "SHEL","BP","TTE","SSE","NG",
+    "SHEL","BP.","SHEL","SSE","NG.",
     # Mining
     "GLEN","AAL","RIO","ANTO","BHP",
     # Healthcare/Pharma
@@ -452,11 +452,11 @@ FTSE_WATCHLIST = [
     # Consumer
     "ULVR","DGE","RKT","IMB","BATS",
     # Technology/Telecom
-    "VOD","BT.A","SAGE","AUTO","MNDI",
+    "VOD","BT.A","SGE","AUTO","MNDI",
     # Industrials
-    "RR","BA","WEIR","IMI","SMDS",
+    "RR.","BA.","WEIR","IMI","SMWH",
     # Retail/Travel
-    "TSCO","OCDO","IAG","EZJ","TUI",
+    "TSCO","OCDO","IAG","EZJ","EXPN",
 ]
 
 # ── Market configs per exchange ───────────────────────────────
