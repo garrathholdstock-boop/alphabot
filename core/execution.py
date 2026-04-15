@@ -90,9 +90,22 @@ def record_api_failure(source="ibkr"):
 
 
 # ── IBKR market data ──────────────────────────────────────────
-def _make_contract(symbol):
-    """Create an IBKR Stock contract for a US equity symbol."""
-    return Stock(symbol, "SMART", "USD")
+def _make_contract(symbol, exchange="SMART", currency="USD"):
+    """Create an IBKR Stock contract. Defaults to US (SMART/USD)."""
+    return Stock(symbol, exchange, currency)
+
+# Symbol → (exchange, currency) lookup for international markets
+_INTL_MARKET = {}
+try:
+    from core.config import ASX_WATCHLIST, FTSE_WATCHLIST
+    for s in ASX_WATCHLIST: _INTL_MARKET[s] = ("ASX", "AUD")
+    for s in FTSE_WATCHLIST: _INTL_MARKET[s] = ("LSE", "GBP")
+except Exception: pass
+
+def _contract_for(symbol):
+    """Return correct IBKR contract for any symbol."""
+    exch, curr = _INTL_MARKET.get(symbol, ("SMART", "USD"))
+    return _make_contract(symbol, exch, curr)
 
 def fetch_bars(symbol, crypto=False):
     """Fetch daily bars for a symbol. Crypto uses Binance, stocks use IBKR."""
@@ -108,7 +121,7 @@ def fetch_bars(symbol, crypto=False):
         record_api_failure("ibkr")
         return None
     try:
-        contract = _make_contract(symbol)
+        contract = _contract_for(symbol)
         bars_ib = ib.reqHistoricalData(
             contract,
             endDateTime="",
@@ -154,7 +167,7 @@ def fetch_latest_price(symbol, crypto=False):
     if not ib:
         return None
     try:
-        contract = _make_contract(symbol)
+        contract = _contract_for(symbol)
         ticker = ib.reqMktData(contract, "", True, False)
         ib.sleep(0.5)
         price = ticker.last or ticker.close or ticker.bid or ticker.ask
@@ -181,7 +194,7 @@ def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
     if not ib:
         return None
     try:
-        contract = _make_contract(symbol)
+        contract = _contract_for(symbol)
         bar_size = _timeframe_to_ibkr(timeframe)
         duration = _limit_to_duration(limit, timeframe)
         bars_ib = ib.reqHistoricalData(
@@ -318,7 +331,7 @@ def place_stop_order_alpaca(symbol, qty, stop_price):
     if not ib:
         return None
     try:
-        contract  = _make_contract(symbol)
+        contract  = _contract_for(symbol)
         order     = StopOrder("SELL", qty, stop_price)
         trade     = ib.placeOrder(contract, order)
         ib.sleep(0.5)
@@ -570,7 +583,7 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
         return None, estimated_price or 0
 
     try:
-        contract  = _make_contract(symbol)
+        contract  = _contract_for(symbol)
         ib_side   = "BUY" if side == "buy" else "SELL"
 
         if IS_LIVE and estimated_price:

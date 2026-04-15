@@ -418,3 +418,63 @@ _binance_lot_cache = {}
 # ── Thread lock ───────────────────────────────────────────────
 import threading as _threading
 _state_lock = _threading.Lock()
+
+# ── ASX Watchlist (ASX exchange, AUD) ─────────────────────────
+ASX_WATCHLIST = [
+    # Financials
+    "CBA","NAB","WBC","ANZ","MQG",
+    # Miners/Resources
+    "BHP","RIO","FMG","MIN","S32",
+    # Healthcare
+    "CSL","RMD","COH","SHL","PME",
+    # Technology
+    "WTC","XRO","TLX","ALU","MP1",
+    # Consumer/Retail
+    "WOW","COL","JBH","ARB","REH",
+    # Energy
+    "WDS","STO","BPT","KAR","WHC",
+    # REITs/Infrastructure
+    "GMG","SCG","GPT","MGR","CHC",
+    # Industrials
+    "TCL","QAN","AZJ","ORI","AMC",
+]
+
+# ── FTSE Watchlist (LSE exchange, GBP) ────────────────────────
+FTSE_WATCHLIST = [
+    # Financials
+    "HSBA","LLOY","BARC","STAN","LGEN",
+    # Energy
+    "SHEL","BP","TTE","SSE","NG",
+    # Mining
+    "GLEN","AAL","RIO","ANTO","BHP",
+    # Healthcare/Pharma
+    "AZN","GSK","HIK","EXPN","SGRO",
+    # Consumer
+    "ULVR","DGE","RKT","IMB","BATS",
+    # Technology/Telecom
+    "VOD","BT.A","SAGE","AUTO","MNDI",
+    # Industrials
+    "RR","BA","WEIR","IMI","SMDS",
+    # Retail/Travel
+    "TSCO","OCDO","IAG","EZJ","TUI",
+]
+
+# ── Market configs per exchange ───────────────────────────────
+MARKET_CONFIG = {
+    "US":   {"exchange": "SMART", "currency": "USD", "fx_pair": None},
+    "ASX":  {"exchange": "ASX",   "currency": "AUD", "fx_pair": "AUD.USD"},
+    "LSE":  {"exchange": "LSE",   "currency": "GBP", "fx_pair": "GBP.USD"},
+}
+
+# ── ASX/FTSE regime state dicts ───────────────────────────────
+asx_regime = {
+    "mode": "BULL", "spy": None, "ma20": None,
+    "vix": None, "updated": None,
+}
+ftse_regime = {
+    "mode": "BULL", "spy": None, "ma20": None,
+    "vix": None, "updated": None,
+}
+
+asx_state  = {}
+ftse_state = {}

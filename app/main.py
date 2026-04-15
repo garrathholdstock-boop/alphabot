@@ -29,11 +29,12 @@ from core.config import (
     INTRADAY_EMA_SLOW, INTRADAY_RSI_LIMIT, INTRADAY_VOL_RATIO,
     SMALLCAP_MIN_PRICE, SMALLCAP_MAX_PRICE,
     NEWS_API_KEY,
-    state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state,
+    state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, asx_state, ftse_state,
+    asx_state, ftse_state,
     global_risk, perf, kill_switch, circuit_breaker,
-    market_regime, crypto_regime, news_state, near_miss_tracker,
+    market_regime, crypto_regime, asx_regime, ftse_regime, news_state, near_miss_tracker,
     exchange_stops, account_info, smallcap_pool,
-    CRYPTO_WATCHLIST, US_WATCHLIST,
+    CRYPTO_WATCHLIST, US_WATCHLIST, ASX_WATCHLIST, FTSE_WATCHLIST,
     _state_lock,
     MAX_DAILY_LOSS_PCT, MAX_DAILY_SPEND_PCT, MAX_EXPOSURE_PCT,
     DAILY_PROFIT_TARGET_PCT, MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT,
@@ -687,6 +688,109 @@ def run_crypto_intraday_cycle(watchlist, st):
 
 
 # ── Main orchestration loop ───────────────────────────────────
+
+# ── International market hours (UTC) ─────────────────────────
+def is_asx_open():
+    """ASX: Mon-Fri 00:00-06:00 UTC (10am-4pm AEST, adjusts for DST)."""
+    now = datetime.utcnow()
+    if now.weekday() >= 5: return False
+    return 0 <= now.hour < 6
+
+def is_ftse_open():
+    """LSE: Mon-Fri 08:00-16:30 UTC."""
+    now = datetime.utcnow()
+    if now.weekday() >= 5: return False
+    return (now.hour == 8 and now.minute >= 0) or (9 <= now.hour < 16) or (now.hour == 16 and now.minute < 30)
+
+def update_asx_regime():
+    """Use CBA as ASX market proxy (largest ASX stock by cap)."""
+    try:
+        bars = fetch_bars("CBA", crypto=False)
+        if not bars or len(bars) < 20: return
+        prices = [b["c"] for b in bars[-20:]]
+        ma20 = sum(prices) / 20
+        price = prices[-1]
+        prev = asx_regime.get("mode", "BULL")
+        if price > ma20:
+            asx_regime["mode"] = "BULL"
+        else:
+            asx_regime["mode"] = "BEAR"
+        asx_regime.update({"spy": price, "ma20": ma20, "updated": datetime.utcnow()})
+        if asx_regime["mode"] != prev:
+            log.info(f"[ASX REGIME] Changed → {asx_regime['mode']}")
+        log.info(f"[ASX REGIME] {asx_regime['mode']} | CBA: ${price:.2f} MA20: ${ma20:.2f}")
+    except Exception as e:
+        log.warning(f"[ASX REGIME] update failed: {e}")
+
+def update_ftse_regime():
+    """Use HSBA as FTSE market proxy (largest LSE stock by cap)."""
+    try:
+        bars = fetch_bars("HSBA", crypto=False)
+        if not bars or len(bars) < 20: return
+        prices = [b["c"] for b in bars[-20:]]
+        ma20 = sum(prices) / 20
+        price = prices[-1]
+        prev = ftse_regime.get("mode", "BULL")
+        if price > ma20:
+            ftse_regime["mode"] = "BULL"
+        else:
+            ftse_regime["mode"] = "BEAR"
+        ftse_regime.update({"spy": price, "ma20": ma20, "updated": datetime.utcnow()})
+        if ftse_regime["mode"] != prev:
+            log.info(f"[FTSE REGIME] Changed → {ftse_regime['mode']}")
+        log.info(f"[FTSE REGIME] {ftse_regime['mode']} | HSBA: ${price:.2f} MA20: ${ma20:.2f}")
+    except Exception as e:
+        log.warning(f"[FTSE REGIME] update failed: {e}")
+
+def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
+    """Run a scan cycle for an international market (ASX or FTSE)."""
+    if not market_open_fn(): return
+    if regime["mode"] == "BEAR": return
+    results = []
+    for sym in watchlist:
+        try:
+            bars = fetch_bars(sym, crypto=False)
+            if not bars or len(bars) < 22: continue
+            closes  = [b["c"] for b in bars]
+            volumes = [b.get("v", 0) for b in bars]
+            price   = closes[-1]
+            prev    = closes[-2] if len(closes) > 1 else price
+            change  = ((price - prev) / prev) * 100
+            avg_vol = sum(volumes[-11:-1]) / 10 if len(volumes) >= 11 else 1
+            vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+            signal, e9, e21, rsi = get_signal(closes, volumes)
+            sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars) if signal == "BUY" else 0
+            results.append({"symbol": sym, "price": price, "signal": signal, "score": sig_score, "rsi": rsi})
+        except Exception as e:
+            log.debug(f"[{label}] {sym} scan error: {e}")
+    results.sort(key=lambda x: -x.get("score", 0))
+    buys = [r for r in results if r["signal"] == "BUY" and r["score"] >= MIN_SIGNAL_SCORE]
+    log.info(f"[{label}] {len(buys)} qualified BUY / {len(results)} scanned")
+    for s in buys[:3]:
+        sym = s["symbol"]
+        if sym in st: continue
+        qty = max(1, int(MAX_TRADE_VALUE / s["price"]))
+        try:
+            place_order._last_score = s["score"]
+            order, fill = place_order(sym, "buy", qty, crypto=False, estimated_price=s["price"])
+            if order:
+                st[sym] = {"qty": qty, "entry_price": fill, "entry_time": datetime.utcnow()}
+                log.info(f"[{label}] BUY {sym} qty={qty} @ ${fill:.2f} score={s['score']}")
+        except Exception as e:
+            log.warning(f"[{label}] place_order {sym}: {e}")
+    for sym in list(st.keys()):
+        pos = st[sym]
+        try:
+            price = fetch_latest_price(sym, crypto=False)
+            if not price: continue
+            entry = pos["entry_price"]
+            if price <= entry * 0.97 or price >= entry * 1.05:
+                place_order(sym, "sell", pos["qty"], crypto=False, estimated_price=price)
+                del st[sym]
+                log.info(f"[{label}] SELL {sym} @ ${price:.2f} P&L: ${(price-entry)*pos['qty']:+.2f}")
+        except Exception as e:
+            log.warning(f"[{label}] exit check {sym}: {e}")
+
 def main():
     global account_info
     cfg.account_info = {}
@@ -893,6 +997,8 @@ def main():
                 update_market_regime()
                 check_circuit_breaker()
             update_crypto_regime()
+            update_asx_regime()
+            update_ftse_regime()
 
             # Weekly Binance watchlist refresh (Monday 9am ET)
             et_now = datetime.now(ZoneInfo("America/New_York"))
@@ -911,6 +1017,8 @@ def main():
             # ── Run all bot cycles ──
             run_cycle(US_WATCHLIST, state, crypto=False)
             run_cycle(CRYPTO_WATCHLIST, crypto_state, crypto=True)
+            run_intl_cycle(ASX_WATCHLIST, asx_state, asx_regime, is_asx_open, "ASX")
+            run_intl_cycle(FTSE_WATCHLIST, ftse_state, ftse_regime, is_ftse_open, "FTSE")
             if smallcap_pool["symbols"]:
                 run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
             run_intraday_cycle(US_WATCHLIST, intraday_state)
