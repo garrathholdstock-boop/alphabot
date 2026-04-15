@@ -1,6 +1,7 @@
 """
 core/execution.py — AlphaBot Order Execution & API Wrappers
-All Alpaca and Binance API calls, order placement, slippage model, and fill price logic.
+Stocks: IB Gateway via ib_insync (port 4002 paper / 4001 live)
+Crypto: Binance API (unchanged)
 """
 
 import time
@@ -9,10 +10,15 @@ import hashlib
 import hmac
 import urllib.parse
 import requests
-from datetime import datetime
+import asyncio
+import nest_asyncio
+from datetime import datetime, timedelta
+from ib_insync import IB, Stock, MarketOrder, StopOrder, LimitOrder, util
+
+nest_asyncio.apply()
 
 from core.config import (
-    log, ALPACA_BASE, DATA_BASE, HEADERS, IS_LIVE,
+    log, IS_LIVE,
     BINANCE_BASE, BINANCE_HEADERS, _BIN_KEY, _BIN_SECRET,
     BINANCE_DELAY, BINANCE_INTERVAL_MAP, USE_BINANCE,
     SLIPPAGE_STOCK, SLIPPAGE_CRYPTO, STOP_LOSS_PCT, TAKE_PROFIT_PCT,
@@ -23,6 +29,46 @@ from core.config import (
 )
 import core.config as cfg
 
+# ── IBKR connection settings ──────────────────────────────────
+IBKR_HOST      = "127.0.0.1"
+IBKR_PORT      = 4001 if IS_LIVE else 4002
+IBKR_CLIENT_ID = 1
+
+# Global IB instance
+_ib = None
+
+def get_ib():
+    """Get or create IB connection. Reconnects if disconnected."""
+    global _ib
+    try:
+        if _ib and _ib.isConnected():
+            return _ib
+        if _ib:
+            try:
+                _ib.disconnect()
+            except:
+                pass
+        _ib = IB()
+        _ib.connect(IBKR_HOST, IBKR_PORT, clientId=IBKR_CLIENT_ID, timeout=10)
+        log.info(f"[IBKR] Connected to IB Gateway at {IBKR_HOST}:{IBKR_PORT}")
+        return _ib
+    except Exception as e:
+        log.error(f"[IBKR] Connection failed: {e}")
+        _ib = None
+        return None
+
+def run_ib(coro):
+    """Run an ib_insync coroutine synchronously."""
+    ib = get_ib()
+    if not ib:
+        return None
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(coro)
+    except Exception as e:
+        log.error(f"[IBKR] run_ib error: {e}")
+        return None
+
 
 # ── API health ────────────────────────────────────────────────
 def record_api_success():
@@ -30,10 +76,10 @@ def record_api_success():
     api_health["data_fails"]   = 0
     api_health["last_success"] = datetime.now().isoformat()
 
-def record_api_failure(source="alpaca"):
+def record_api_failure(source="ibkr"):
     key = f"{source}_fails"
     api_health[key] = api_health.get(key, 0) + 1
-    total_fails = api_health["alpaca_fails"] + api_health["data_fails"]
+    total_fails = api_health.get("alpaca_fails", 0) + api_health.get("data_fails", 0)
     if total_fails >= api_health["max_fails"] and not kill_switch["active"]:
         kill_switch["active"]       = True
         kill_switch["reason"]       = f"API kill: {total_fails} consecutive failures ({source})"
@@ -43,48 +89,266 @@ def record_api_failure(source="alpaca"):
         log.error(f"[API KILL] {total_fails} consecutive API failures — all bots stopped")
 
 
-# ── Alpaca API ────────────────────────────────────────────────
-def alpaca_get(path, base=None):
+# ── IBKR market data ──────────────────────────────────────────
+def _make_contract(symbol):
+    """Create an IBKR Stock contract for a US equity symbol."""
+    return Stock(symbol, "SMART", "USD")
+
+def fetch_bars(symbol, crypto=False):
+    """Fetch daily bars for a symbol. Crypto uses Binance, stocks use IBKR."""
+    if crypto and USE_BINANCE:
+        if time.time() < (cfg._binance_ban_until + 300):
+            return None
+        bars = binance_fetch_bars(symbol, interval="1d", limit=35)
+        return bars if bars and len(bars) >= 15 else None
+
+    # Stocks via IBKR
+    ib = get_ib()
+    if not ib:
+        record_api_failure("ibkr")
+        return None
     try:
-        r = requests.get((base or ALPACA_BASE) + path, headers=HEADERS, timeout=10)
-        r.raise_for_status()
+        contract = _make_contract(symbol)
+        bars_ib = ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr="60 D",
+            barSizeSetting="1 day",
+            whatToShow="TRADES",
+            useRTH=True,
+            formatDate=1,
+            keepUpToDate=False,
+        )
+        if not bars_ib or len(bars_ib) < 15:
+            return None
         record_api_success()
-        return r.json()
+        return [{"t": b.date, "o": b.open, "h": b.high, "l": b.low,
+                 "c": b.close, "v": b.volume} for b in bars_ib]
     except Exception as e:
-        log.warning(f"GET {path}: {e}")
-        record_api_failure("alpaca")
+        log.warning(f"[IBKR] fetch_bars {symbol}: {e}")
+        record_api_failure("ibkr")
         return None
 
-def alpaca_post(path, body):
+def fetch_bars_batch(symbols, limit=30):
+    """Fetch daily bars for multiple symbols via IBKR. Returns dict of symbol->bars."""
+    if not symbols:
+        return {}
+    results = {}
+    for symbol in symbols:
+        bars = fetch_bars(symbol)
+        if bars:
+            results[symbol] = bars
+        time.sleep(0.1)  # be gentle with IBKR
+    log.info(f"[IBKR BATCH] Fetched bars for {len(results)}/{len(symbols)} symbols")
+    return results
+
+def fetch_latest_price(symbol, crypto=False):
+    """Fetch latest price. Crypto uses Binance, stocks use IBKR."""
+    if crypto and USE_BINANCE:
+        if time.time() < (cfg._binance_ban_until + 120):
+            return None
+        return binance_fetch_price(symbol)
+
+    # Stocks via IBKR
+    ib = get_ib()
+    if not ib:
+        return None
     try:
-        r = requests.post(ALPACA_BASE + path, json=body, headers=HEADERS, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        contract = _make_contract(symbol)
+        ticker = ib.reqMktData(contract, "", True, False)
+        ib.sleep(0.5)
+        price = ticker.last or ticker.close or ticker.bid or ticker.ask
+        ib.cancelMktData(contract)
+        if price and price > 0:
+            record_api_success()
+            return float(price)
+        return None
     except Exception as e:
-        log.warning(f"POST {path}: {e}")
+        log.warning(f"[IBKR] fetch_latest_price {symbol}: {e}")
         return None
 
+def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
+    """Fetch intraday bars. Crypto uses Binance, stocks use IBKR."""
+    if crypto and USE_BINANCE:
+        if time.time() < (cfg._binance_ban_until + 300):
+            return None
+        binance_tf = BINANCE_INTERVAL_MAP.get(timeframe, "15m")
+        bars = binance_fetch_bars(symbol, interval=binance_tf, limit=limit)
+        return bars if bars and len(bars) >= 10 else None
+
+    # Stocks via IBKR
+    ib = get_ib()
+    if not ib:
+        return None
+    try:
+        contract = _make_contract(symbol)
+        bar_size = _timeframe_to_ibkr(timeframe)
+        duration = _limit_to_duration(limit, timeframe)
+        bars_ib = ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr=duration,
+            barSizeSetting=bar_size,
+            whatToShow="TRADES",
+            useRTH=True,
+            formatDate=1,
+            keepUpToDate=False,
+        )
+        if not bars_ib or len(bars_ib) < 10:
+            return None
+        record_api_success()
+        return [{"t": b.date, "o": b.open, "h": b.high, "l": b.low,
+                 "c": b.close, "v": b.volume} for b in bars_ib]
+    except Exception as e:
+        log.warning(f"[IBKR] fetch_intraday_bars {symbol}: {e}")
+        return None
+
+def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
+    """Fetch intraday bars for multiple symbols via IBKR."""
+    if not symbols:
+        return {}
+    results = {}
+    for symbol in symbols:
+        bars = fetch_intraday_bars(symbol, timeframe=timeframe, limit=limit)
+        if bars:
+            results[symbol] = bars
+        time.sleep(0.1)
+    return results
+
+def _timeframe_to_ibkr(timeframe):
+    """Convert AlphaBot timeframe string to IBKR bar size."""
+    mapping = {
+        "1Min":  "1 min",
+        "5Min":  "5 mins",
+        "15Min": "15 mins",
+        "30Min": "30 mins",
+        "1Hour": "1 hour",
+        "2Hour": "2 hours",
+        "4Hour": "4 hours",
+        "1Day":  "1 day",
+    }
+    return mapping.get(timeframe, "1 hour")
+
+def _limit_to_duration(limit, timeframe):
+    """Estimate IBKR duration string from limit and timeframe."""
+    mins_map = {
+        "1Min": 1, "5Min": 5, "15Min": 15, "30Min": 30,
+        "1Hour": 60, "2Hour": 120, "4Hour": 240, "1Day": 1440,
+    }
+    mins = mins_map.get(timeframe, 60)
+    total_mins = mins * limit
+    if total_mins <= 480:
+        return f"{max(1, total_mins // 60 + 1)} D"
+    elif total_mins <= 2400:
+        return f"{max(1, total_mins // 480 + 1)} D"
+    else:
+        return "5 D"
+
+
+# ── IBKR account info ─────────────────────────────────────────
+def ibkr_get_account():
+    """Get account summary from IBKR. Returns dict similar to Alpaca account."""
+    ib = get_ib()
+    if not ib:
+        return {}
+    try:
+        summary = ib.accountSummary()
+        result = {}
+        for item in summary:
+            if item.tag == "NetLiquidation":
+                result["portfolio_value"] = float(item.value)
+            elif item.tag == "TotalCashValue":
+                result["cash"] = float(item.value)
+            elif item.tag == "GrossPositionValue":
+                result["long_market_value"] = float(item.value)
+        result["last_equity"] = result.get("portfolio_value", 0)
+        record_api_success()
+        return result
+    except Exception as e:
+        log.warning(f"[IBKR] get_account: {e}")
+        record_api_failure("ibkr")
+        return {}
+
+def ibkr_get_positions():
+    """Get open positions from IBKR. Returns list similar to Alpaca positions."""
+    ib = get_ib()
+    if not ib:
+        return []
+    try:
+        positions = ib.positions()
+        result = []
+        for pos in positions:
+            if pos.contract.secType == "STK":
+                result.append({
+                    "symbol":          pos.contract.symbol,
+                    "qty":             str(pos.position),
+                    "avg_entry_price": str(pos.avgCost),
+                    "asset_class":     "us_equity",
+                })
+        return result
+    except Exception as e:
+        log.warning(f"[IBKR] get_positions: {e}")
+        return []
+
+def ibkr_get_open_orders():
+    """Get open orders from IBKR."""
+    ib = get_ib()
+    if not ib:
+        return []
+    try:
+        trades = ib.openTrades()
+        result = []
+        for trade in trades:
+            result.append({
+                "symbol":   trade.contract.symbol,
+                "type":     trade.order.orderType.lower(),
+                "id":       trade.order.orderId,
+                "order_id": trade.order.orderId,
+            })
+        return result
+    except Exception as e:
+        log.warning(f"[IBKR] get_open_orders: {e}")
+        return []
+
+
+# ── IBKR order placement ──────────────────────────────────────
 def place_stop_order_alpaca(symbol, qty, stop_price):
-    """Place a real stop-loss order on Alpaca exchange."""
-    result = alpaca_post("/v2/orders", {
-        "symbol":        symbol,
-        "qty":           str(qty),
-        "side":          "sell",
-        "type":          "stop",
-        "stop_price":    str(round(stop_price, 2)),
-        "time_in_force": "gtc",
-    })
-    if result:
-        log.info(f"[STOP ORDER] Placed exchange stop for {symbol} @ ${stop_price:.2f} id:{result.get('id','')[:8]}")
-    return result
+    """Place a stop-loss order via IBKR (replaces Alpaca stop order)."""
+    ib = get_ib()
+    if not ib:
+        return None
+    try:
+        contract  = _make_contract(symbol)
+        order     = StopOrder("SELL", qty, stop_price)
+        trade     = ib.placeOrder(contract, order)
+        ib.sleep(0.5)
+        order_id  = trade.order.orderId
+        log.info(f"[IBKR STOP] Placed stop for {symbol} @ ${stop_price:.2f} id:{order_id}")
+        return {"id": order_id, "symbol": symbol, "status": "accepted"}
+    except Exception as e:
+        log.warning(f"[IBKR] place_stop_order {symbol}: {e}")
+        return None
 
 def cancel_stop_order_alpaca(order_id):
+    """Cancel an order via IBKR (replaces Alpaca cancel)."""
+    ib = get_ib()
+    if not ib:
+        return False
     try:
-        r = requests.delete(f"{ALPACA_BASE}/v2/orders/{order_id}", headers=HEADERS, timeout=10)
-        return r.ok
-    except: return False
+        open_trades = ib.openTrades()
+        for trade in open_trades:
+            if trade.order.orderId == order_id:
+                ib.cancelOrder(trade.order)
+                ib.sleep(0.3)
+                log.info(f"[IBKR] Cancelled order {order_id}")
+                return True
+        return False
+    except Exception as e:
+        log.warning(f"[IBKR] cancel_order {order_id}: {e}")
+        return False
 
 def update_exchange_stop(symbol, qty, new_stop_price):
+    """Update trailing stop via IBKR."""
     old_id = exchange_stops.get(symbol)
     if old_id:
         cancel_stop_order_alpaca(old_id)
@@ -94,7 +358,7 @@ def update_exchange_stop(symbol, qty, new_stop_price):
         log.info(f"[TRAIL] Updated exchange stop {symbol} → ${new_stop_price:.2f}")
 
 
-# ── Binance API ───────────────────────────────────────────────
+# ── Binance API (unchanged) ───────────────────────────────────
 def _binance_sign(params):
     query = urllib.parse.urlencode(params)
     sig   = hmac.new(_BIN_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
@@ -245,145 +509,6 @@ def binance_get_top_coins(limit=100):
     return top if top else CRYPTO_WATCHLIST_BINANCE
 
 
-# ── Market data fetchers ──────────────────────────────────────
-def fetch_bars_batch(symbols, limit=30):
-    if not symbols: return {}
-    end   = datetime.utcnow()
-    from datetime import timedelta
-    start = end - timedelta(days=60)
-    s_str = start.strftime("%Y-%m-%d")
-    e_str = end.strftime("%Y-%m-%d")
-    results = {}
-    chunk_size = 100
-    for i in range(0, len(symbols), chunk_size):
-        chunk = symbols[i:i + chunk_size]
-        syms_param = ",".join(chunk)
-        try:
-            url = (f"{DATA_BASE}/v2/stocks/bars"
-                   f"?symbols={requests.utils.quote(syms_param, safe=',')}"
-                   f"&timeframe=1Day&start={s_str}&end={e_str}"
-                   f"&limit={limit}&feed=iex&adjustment=raw")
-            r = requests.get(url, headers=HEADERS, timeout=30)
-            if not r.ok:
-                log.warning(f"[BATCH] Bars fetch failed: {r.status_code}")
-                record_api_failure("data")
-                continue
-            record_api_success()
-            data = r.json().get("bars", {})
-            for sym, bars in data.items():
-                if bars and len(bars) >= 15:
-                    results[sym] = bars
-        except Exception as e:
-            log.warning(f"[BATCH] Error: {e}")
-    log.info(f"[BATCH] Fetched bars for {len(results)}/{len(symbols)} symbols")
-    return results
-
-def fetch_bars(symbol, crypto=False):
-    if crypto and USE_BINANCE:
-        if time.time() < (cfg._binance_ban_until + 300):
-            return None
-        bars = binance_fetch_bars(symbol, interval="1d", limit=35)
-        return bars if bars and len(bars) >= 15 else None
-    from datetime import timedelta
-    end   = datetime.utcnow()
-    start = end - timedelta(days=60)
-    s, e  = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
-    try:
-        if crypto:
-            enc = requests.utils.quote(symbol, safe="")
-            r = requests.get(f"{DATA_BASE}/v1beta3/crypto/us/bars?symbols={enc}&timeframe=1Day&start={s}&end={e}&limit=30", headers=HEADERS, timeout=10)
-            if not r.ok: return None
-            bars = r.json().get("bars", {}).get(symbol, [])
-        else:
-            r = requests.get(f"{DATA_BASE}/v2/stocks/{symbol}/bars?timeframe=1Day&start={s}&end={e}&limit=30&feed=iex&adjustment=raw", headers=HEADERS, timeout=10)
-            if not r.ok: return None
-            bars = r.json().get("bars", [])
-        return bars if bars and len(bars) >= 15 else None
-    except: return None
-
-def fetch_latest_price(symbol, crypto=False):
-    if crypto and USE_BINANCE:
-        if time.time() < (cfg._binance_ban_until + 120):
-            return None
-        return binance_fetch_price(symbol)
-    try:
-        if crypto:
-            enc = requests.utils.quote(symbol, safe="")
-            r = requests.get(f"{DATA_BASE}/v1beta3/crypto/us/latest/bars?symbols={enc}", headers=HEADERS, timeout=10)
-            if not r.ok: return None
-            return r.json().get("bars", {}).get(symbol, {}).get("c")
-        else:
-            r = requests.get(f"{DATA_BASE}/v2/stocks/{symbol}/snapshot?feed=iex", headers=HEADERS, timeout=10)
-            if not r.ok: return None
-            d = r.json()
-            return d.get("latestTrade", {}).get("p") or d.get("latestQuote", {}).get("ap")
-    except: return None
-
-def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
-    if not symbols: return {}
-    if USE_BINANCE and time.time() < (cfg._binance_ban_until + 300):
-        return {}
-    results = {}
-    chunk_size = 100
-    for i in range(0, len(symbols), chunk_size):
-        chunk = symbols[i:i + chunk_size]
-        syms_param = ",".join(chunk)
-        try:
-            url = (f"{DATA_BASE}/v2/stocks/bars"
-                   f"?symbols={requests.utils.quote(syms_param, safe=',')}"
-                   f"&timeframe={timeframe}&limit={limit}&feed=iex&adjustment=raw")
-            r = requests.get(url, headers=HEADERS, timeout=30)
-            if not r.ok:
-                log.warning(f"[INTRADAY BATCH] Failed: {r.status_code}")
-                continue
-            data = r.json().get("bars", {})
-            for sym, bars in data.items():
-                if bars and len(bars) >= 10:
-                    results[sym] = bars
-        except Exception as e:
-            log.warning(f"[INTRADAY BATCH] Error: {e}")
-    return results
-
-def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
-    if crypto and USE_BINANCE:
-        if time.time() < (cfg._binance_ban_until + 300):
-            return None
-        binance_tf = BINANCE_INTERVAL_MAP.get(timeframe, "15m")
-        bars = binance_fetch_bars(symbol, interval=binance_tf, limit=limit)
-        return bars if bars and len(bars) >= 10 else None
-    try:
-        if crypto:
-            enc = requests.utils.quote(symbol, safe="")
-            url = f"{DATA_BASE}/v1beta3/crypto/us/bars?symbols={enc}&timeframe={timeframe}&limit={limit}"
-            r = requests.get(url, headers=HEADERS, timeout=10)
-            if not r.ok: return None
-            bars = r.json().get("bars", {}).get(symbol, [])
-        else:
-            url = f"{DATA_BASE}/v2/stocks/{symbol}/bars?timeframe={timeframe}&limit={limit}&feed=iex&adjustment=raw"
-            r = requests.get(url, headers=HEADERS, timeout=10)
-            if not r.ok: return None
-            bars = r.json().get("bars", [])
-        return bars if bars and len(bars) >= 10 else None
-    except Exception as e:
-        log.debug(f"intraday bars {symbol}: {e}")
-        return None
-
-def check_data_freshness(bars, max_age_hours=2):
-    if not bars: return False, "no data"
-    try:
-        last_bar = bars[-1]
-        bar_time_str = last_bar.get("t", "")
-        if not bar_time_str: return True, "unknown"
-        bar_time = datetime.fromisoformat(bar_time_str.replace("Z", "+00:00"))
-        age = datetime.now(bar_time.tzinfo) - bar_time
-        age_hours = age.total_seconds() / 3600
-        age_str = f"{age_hours:.1f}h old"
-        if age_hours > max_age_hours: return False, age_str
-        return True, age_str
-    except:
-        return True, "unknown"
-
-
 # ── Slippage & fill price ─────────────────────────────────────
 def apply_slippage(price, side, crypto=False):
     slippage = SLIPPAGE_CRYPTO if crypto else SLIPPAGE_STOCK
@@ -397,14 +522,7 @@ def get_actual_fill_price(order_result, side, estimated_price, crypto=False):
         return apply_slippage(estimated_price or 0, side, crypto)
     if not IS_LIVE:
         return apply_slippage(estimated_price, side, crypto)
-    filled = order_result.get("filled_avg_price")
-    if filled:
-        try:
-            fp = float(filled)
-            if fp > 0:
-                log.info(f"[FILL] Real fill: ${fp:.4f} vs signal: ${estimated_price:.4f}")
-                return fp
-        except: pass
+    # Check for Binance fill
     fills = order_result.get("fills", [])
     if fills:
         total_qty   = sum(float(f["qty"]) for f in fills)
@@ -413,25 +531,26 @@ def get_actual_fill_price(order_result, side, estimated_price, crypto=False):
             fp = total_value / total_qty
             log.info(f"[FILL] Binance fill: ${fp:.4f} vs signal: ${estimated_price:.4f}")
             return fp
+    # Check for IBKR fill price
+    ibkr_fill = order_result.get("_ibkr_fill_price")
+    if ibkr_fill and float(ibkr_fill) > 0:
+        return float(ibkr_fill)
     return apply_slippage(estimated_price, side, crypto)
 
 def is_order_filled(order_result):
     if not order_result: return False
     status = order_result.get("status", "")
-    if status in ("filled", "partially_filled", "FILLED", "PARTIALLY_FILLED"): return True
+    if status in ("filled", "partially_filled", "FILLED", "PARTIALLY_FILLED", "accepted"): return True
     if order_result.get("id") or order_result.get("orderId"): return True
     return False
 
 def query_order_status(order_id, crypto=False):
-    try:
-        if crypto and USE_BINANCE: return None
-        return alpaca_get(f"/v2/orders/{order_id}")
-    except: return None
+    return None  # IBKR orders tracked via openTrades
 
 
 # ── Main order placement ──────────────────────────────────────
 def place_order(symbol, side, qty, crypto=False, estimated_price=None):
-    """Place order via Binance (crypto) or Alpaca (stocks/paper).
+    """Place order via Binance (crypto) or IBKR (stocks).
     Returns (order_result, actual_fill_price)."""
 
     # ── Crypto via Binance ──
@@ -444,79 +563,114 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
         fill_price = get_actual_fill_price(result, side, price or 0, crypto=True)
         return result, fill_price
 
-    # ── Stocks via Alpaca ──
-    if IS_LIVE and estimated_price and not crypto:
-        spread_pct = 0.0
-        try:
-            snap = alpaca_get(f"/v2/stocks/{symbol}/snapshot?feed=iex", base=DATA_BASE)
-            if snap:
-                bid = float(snap.get("latestQuote", {}).get("bp", 0) or 0)
-                ask = float(snap.get("latestQuote", {}).get("ap", 0) or 0)
-                if bid > 0 and ask > 0:
-                    spread_pct = ((ask - bid) / bid) * 100
-                    if spread_pct > 1.0:
-                        log.warning(f"[SPREAD] {symbol} spread too wide ({spread_pct:.2f}%) — skipping")
-                        return None, estimated_price
-                    log.info(f"[SPREAD] {symbol} bid:${bid:.2f} ask:${ask:.2f} spread:{spread_pct:.3f}% — OK")
-        except Exception as e:
-            log.debug(f"[SPREAD] Could not check spread for {symbol}: {e}")
+    # ── Stocks via IBKR ──
+    ib = get_ib()
+    if not ib:
+        log.error(f"[IBKR] Cannot place order — not connected")
+        return None, estimated_price or 0
 
-        vix_now      = cfg.global_risk.get("vix_level") or 20
-        signal_score = getattr(place_order, "_last_score", 5)
+    try:
+        contract  = _make_contract(symbol)
+        ib_side   = "BUY" if side == "buy" else "SELL"
 
-        if signal_score >= 9:   base_tol = 0.010
-        elif signal_score >= 7: base_tol = 0.006
-        else:                   base_tol = 0.003
+        if IS_LIVE and estimated_price:
+            # Live: use limit order with tolerance
+            vix_now      = cfg.global_risk.get("vix_level") or 20
+            signal_score = getattr(place_order, "_last_score", 5)
 
-        if vix_now >= 30:   vix_adj = 0.004
-        elif vix_now >= 20: vix_adj = 0.002
-        else:               vix_adj = 0.0
+            if signal_score >= 9:   base_tol = 0.010
+            elif signal_score >= 7: base_tol = 0.006
+            else:                   base_tol = 0.003
 
-        tolerance = max(base_tol + vix_adj, spread_pct / 100 + 0.002)
+            if vix_now >= 30:   vix_adj = 0.004
+            elif vix_now >= 20: vix_adj = 0.002
+            else:               vix_adj = 0.0
 
-        if side == "buy":
-            limit_price = round(estimated_price * (1 + tolerance), 2)
+            tolerance = base_tol + vix_adj
+
+            if side == "buy":
+                limit_price = round(estimated_price * (1 + tolerance), 2)
+            else:
+                limit_price = round(estimated_price * (1 - tolerance), 2)
+
+            order = LimitOrder(ib_side, qty, limit_price)
+            log.info(f"[IBKR LIMIT] {ib_side} {symbol} x{qty} limit:${limit_price:.2f} signal:${estimated_price:.2f}")
         else:
-            limit_price = round(estimated_price * (1 - tolerance), 2)
+            # Paper: market order
+            order = MarketOrder(ib_side, qty)
+            log.info(f"[IBKR MARKET] {ib_side} {symbol} x{qty} @ ~${estimated_price:.2f if estimated_price else 0:.2f}")
 
-        result = alpaca_post("/v2/orders", {
-            "symbol": symbol, "qty": str(qty), "side": side,
-            "type": "limit", "limit_price": str(limit_price),
-            "time_in_force": "day",
-        })
-        if result:
-            log.info(f"[LIMIT ORDER] {side.upper()} {symbol} limit:${limit_price:.2f} signal:${estimated_price:.2f} tolerance:{tolerance*100:.2f}%")
-        else:
-            log.warning(f"[LIMIT] Failed for {symbol} — falling back to market order")
-            result = alpaca_post("/v2/orders", {
-                "symbol": symbol, "qty": str(qty), "side": side,
-                "type": "market", "time_in_force": "day",
-            })
-    else:
-        result = alpaca_post("/v2/orders", {
-            "symbol": symbol, "qty": str(qty), "side": side,
-            "type": "market", "time_in_force": "gtc" if crypto else "day",
-        })
+        trade = ib.placeOrder(contract, order)
 
-    if IS_LIVE and result and result.get("id"):
-        order_id  = result["id"]
-        real_fill = None
-        for attempt in range(5):
-            time.sleep(1)
-            filled_order = alpaca_get(f"/v2/orders/{order_id}")
-            if filled_order:
-                status    = filled_order.get("status", "")
-                avg_price = filled_order.get("filled_avg_price")
-                if avg_price and float(avg_price) > 0:
-                    real_fill = float(avg_price)
-                    slip_pct  = ((real_fill - (estimated_price or real_fill)) / (estimated_price or real_fill) * 100)
-                    log.info(f"[FILL] Alpaca {side.upper()} {symbol}: signal=${estimated_price:.4f} fill=${real_fill:.4f} slippage={slip_pct:+.3f}% status={status}")
+        # Wait for fill (up to 10s)
+        fill_price = None
+        for _ in range(20):
+            ib.sleep(0.5)
+            if trade.orderStatus.status in ("Filled", "Submitted", "PreSubmitted"):
+                avg = trade.orderStatus.avgFillPrice
+                if avg and avg > 0:
+                    fill_price = avg
                     break
-                if status in ("filled", "partially_filled"):
-                    break
-        if real_fill:
-            return result, real_fill
+            if trade.orderStatus.status == "Filled":
+                break
 
-    fill_price = get_actual_fill_price(result, side, estimated_price or 0, crypto=False)
-    if result: log.info(f"ORDER {side.upper()} {qty} {symbol} fill~${fill_price:.4f}")
-    return result, fill_price
+        if fill_price is None:
+            fill_price = apply_slippage(estimated_price or 0, side, crypto=False)
+
+        slip_pct = ((fill_price - (estimated_price or fill_price)) / (estimated_price or fill_price) * 100) if estimated_price else 0
+        log.info(f"[IBKR FILL] {ib_side} {symbol} fill:${fill_price:.4f} signal:${estimated_price:.4f if estimated_price else 0:.4f} slip:{slip_pct:+.3f}%")
+
+        result = {
+            "id":                trade.order.orderId,
+            "symbol":            symbol,
+            "status":            trade.orderStatus.status,
+            "_ibkr_fill_price":  fill_price,
+        }
+        record_api_success()
+        return result, fill_price
+
+    except Exception as e:
+        log.error(f"[IBKR] place_order {symbol} {side}: {e}")
+        record_api_failure("ibkr")
+        return None, estimated_price or 0
+
+
+# ── Compatibility stubs (used in main.py) ─────────────────────
+def alpaca_get(path, base=None):
+    """
+    Compatibility stub — routes account/position/order queries to IBKR.
+    Keeps main.py working without changes.
+    """
+    if "/v2/account" in path:
+        return ibkr_get_account()
+    if "/v2/positions" in path:
+        return ibkr_get_positions()
+    if "/v2/orders" in path:
+        return ibkr_get_open_orders()
+    if "/v2/assets" in path:
+        # Small cap pool fetch — return empty, fallback to Alpaca watchlist
+        return []
+    log.debug(f"[COMPAT] alpaca_get called with unmapped path: {path}")
+    return None
+
+def alpaca_post(path, body):
+    """Compatibility stub — not used with IBKR but kept to avoid import errors."""
+    log.debug(f"[COMPAT] alpaca_post called: {path} — use place_order() instead")
+    return None
+
+
+# ── Data freshness check ──────────────────────────────────────
+def check_data_freshness(bars, max_age_hours=2):
+    if not bars: return False, "no data"
+    try:
+        last_bar = bars[-1]
+        bar_time_str = last_bar.get("t", "")
+        if not bar_time_str: return True, "unknown"
+        bar_time = datetime.fromisoformat(str(bar_time_str).replace("Z", "+00:00"))
+        age = datetime.now(bar_time.tzinfo) - bar_time
+        age_hours = age.total_seconds() / 3600
+        age_str = f"{age_hours:.1f}h old"
+        if age_hours > max_age_hours: return False, age_str
+        return True, age_str
+    except:
+        return True, "unknown"
