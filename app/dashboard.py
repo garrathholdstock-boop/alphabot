@@ -876,9 +876,7 @@ def build_dashboard():
             return '<div class="empty">No scan data yet</div>'
         scored = []
         for c in candidates:
-            sc = score_signal(c["symbol"], c["price"], c["change"],
-                              c.get("rsi"), c.get("vol_ratio"),
-                              c.get("closes", [c["price"]] * 22))
+            sc = c.get("score") if c.get("intraday") else score_signal(c["symbol"], c["price"], c["change"], c.get("rsi"), c.get("vol_ratio"), c.get("closes", [c["price"]] * 22))
             scored.append((sc, c))
         bear_syms    = set(BEAR_TICKERS)
         bear_items   = sorted([(sc, c) for sc, c in scored if c["symbol"] in bear_syms], key=lambda x: -x[0])
