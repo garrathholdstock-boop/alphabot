@@ -275,7 +275,7 @@ def run_cycle(watchlist, st, crypto=False):
                 else:
                     break
 
-            if worst_sym and score_gap >= 1.5 and worst_pct > 0.1:
+            if worst_sym and score_gap >= 1.5:
                 log.info(f"[{st.label}] 🔄 ROTATE: sell {worst_sym} (score {worst_curr_score:.1f}, +{worst_pct:.2f}%) → buy {s['symbol']} (score {sig_score:.1f}, gap +{score_gap:.1f})")
                 ord_rot, rot_price = place_order(worst_sym, "sell", worst_pos["qty"], crypto=crypto, estimated_price=worst_price)
                 if ord_rot:
