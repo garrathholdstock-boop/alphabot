@@ -559,6 +559,18 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None, order_typ
         contract = _contract_for(symbol)
         ib_side  = "BUY" if side.lower() == "buy" else "SELL"
 
+        # ── Short-sell prevention guard ──
+        if ib_side == "SELL":
+            held = 0
+            for pos in ib.positions():
+                if pos.contract.symbol == symbol:
+                    held = pos.position
+                    break
+            if held <= 0:
+                log.warning(f"[IBKR] SHORT-SELL BLOCKED: {symbol} — no long position (held={held})")
+                return None, estimated_price or 0
+            qty = min(qty, held)
+
         if order_type and "STP" in order_type.upper() and stop_price:
             order = StopOrder(ib_side, qty, stop_price)
             trade = ib.placeOrder(contract, order)
