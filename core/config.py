@@ -1,7 +1,7 @@
 """
 core/config.py — AlphaBot Configuration
 All constants, environment variables, watchlists, and shared global state.
-Broker: IBKR (Interactive Brokers) via IB Gateway — no Alpaca.
+Edit this file to change API keys, risk limits, and watchlists.
 """
 
 import os
@@ -23,18 +23,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("AlphaBot")
 
-# ── IBKR connection ───────────────────────────────────────────
-IBKR_HOST      = os.environ.get("IBKR_HOST", "127.0.0.1")
-IBKR_PORT_LIVE = int(os.environ.get("IBKR_PORT_LIVE", "4001"))
-IBKR_PORT_PAPER = int(os.environ.get("IBKR_PORT_PAPER", "4004"))
-IBKR_CLIENT_ID = int(os.environ.get("IBKR_CLIENT_ID", "1"))
-
-IS_LIVE        = os.environ.get("IS_LIVE", "false").lower() == "true"
-IBKR_PORT      = IBKR_PORT_LIVE if IS_LIVE else IBKR_PORT_PAPER
-
-# ── Dashboard auth ────────────────────────────────────────────
+# ── API Keys & Auth ───────────────────────────────────────────
+IS_LIVE        = os.environ.get("IS_LIVE",       "false").lower() == "true"
 GMAIL_USER     = os.environ.get("GMAIL_USER",    "garrathholdstock@gmail.com")
-GMAIL_PASS     = os.environ.get("GMAIL_PASS",    "")
+GMAIL_PASS     = os.environ.get("GMAIL_PASS",    "YOUR_GMAIL_APP_PASSWORD")
 EMAIL_TO       = "garrathholdstock@gmail.com"
 PORT           = int(os.environ.get("PORT", 8080))
 DASH_USER      = os.environ.get("DASH_USER", "alpha")
@@ -99,6 +91,7 @@ def _save_ban_to_disk(expiry):
 _load_ban_from_disk()
 
 # ── Account Size & Risk Limits ────────────────────────────────
+# Set STARTING_BALANCE in environment — everything scales automatically
 STARTING_BALANCE        = float(os.getenv("STARTING_BALANCE", "1000.0"))
 
 MAX_DAILY_LOSS_PCT      = 0.5
@@ -111,7 +104,7 @@ INTRADAY_TRADE_PCT      = 3.0
 CRYPTO_INTRADAY_PCT     = 2.0
 SMALLCAP_TRADE_PCT      = 2.5
 
-# Computed from STARTING_BALANCE
+# Computed from STARTING_BALANCE — do not edit directly
 MAX_DAILY_LOSS         = STARTING_BALANCE * MAX_DAILY_LOSS_PCT / 100
 MAX_DAILY_SPEND        = STARTING_BALANCE * MAX_DAILY_SPEND_PCT / 100
 MAX_PORTFOLIO_EXPOSURE = STARTING_BALANCE * MAX_EXPOSURE_PCT / 100
@@ -133,17 +126,18 @@ CRYPTO_STOP_PCT     = 4.0
 CRYPTO_TRAIL_PCT    = 3.0
 
 # ── Position & Trade Limits ───────────────────────────────────
-MAX_POSITIONS             = int(os.getenv("MAX_POSITIONS", "3"))
+MAX_POSITIONS       = int(os.getenv("MAX_POSITIONS", "3"))
 MAX_TOTAL_POSITIONS       = int(os.getenv("MAX_TOTAL_POSITIONS", "15"))
-MAX_TRADES_PER_DAY        = int(os.getenv("MAX_TRADES_PER_DAY", "50"))
-CYCLE_SECONDS             = 60
-INTRADAY_CYCLE_SECONDS    = 10
+MAX_TRADES_PER_DAY  = int(os.getenv("MAX_TRADES_PER_DAY", "50"))
+CYCLE_SECONDS          = 60
+INTRADAY_CYCLE_SECONDS = 10
 
 # ── Risk-based sizing ─────────────────────────────────────────
 RISK_PER_TRADE_PCT  = 1.0
 
 # ── Signal threshold ──────────────────────────────────────────
-# 5 = paper trading (collect data), raise to 7+ before going live
+# 5 = paper trading (see action, collect data)
+# Raise to 7+ before going live
 MIN_SIGNAL_SCORE    = int(os.getenv("MIN_SIGNAL_SCORE", "5"))
 
 # ── News boost ────────────────────────────────────────────────
@@ -161,7 +155,7 @@ VIX_FEAR_THRESHOLD  = 25.0
 
 # ── Market regime ─────────────────────────────────────────────
 SPY_MA_PERIOD       = 20
-BEAR_TICKERS        = ["SQQQ","UVXY","GLD","SLV","SPXS","SH","PSQ","SDOW","TLT","VXX"]
+BEAR_TICKERS        = []  # ETFs removed — no KID available for IE account
 SPY_FAST_DROP_PCT   = 3.0
 SPY_CIRCUIT_BREAKER = 5.0
 MACRO_KEYWORDS      = [
@@ -228,40 +222,47 @@ US_WATCHLIST = [
     "MRNA","BNTX","NVAX","HIMS","TDOC","SDGR","RXRX","BEAM",
     "SHOP","ETSY","ABNB","UBER","LYFT","DASH","RBLX","SNAP","PINS","YELP",
     "XOM","CVX","OXY","SLB","HAL","MPC","VLO","PSX","DVN","FANG",
-    "SPY","QQQ","IWM","ARKK","SOXL","TQQQ","SQQQ","GLD","SLV","UVXY",
-    "GME","AMC","SPCE","WKHS","OPEN","DKNG","CLOV","LCID",
+    "GME","AMC","SPCE","WKHS","OPEN","DKNG","CLOV",
+]
+
+CRYPTO_WATCHLIST_ALPACA = [
+    "BTC/USD","ETH/USD","SOL/USD","AVAX/USD","DOGE/USD","SHIB/USD",
+    "LTC/USD","BCH/USD","LINK/USD","DOT/USD","UNI/USD","AAVE/USD",
+    "XTZ/USD","BAT/USD","CRV/USD","GRT/USD","MKR/USD","LINK/USD",
+    "ALGO/USD","XLM/USD","SUSHI/USD","YFI/USD","ETH/BTC",
 ]
 
 CRYPTO_WATCHLIST_BINANCE = [
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT",
     "AVAXUSDT","DOGEUSDT","DOTUSDT","LINKUSDT","LTCUSDT",
     "BCHUSDT","XLMUSDT","ATOMUSDT","ETCUSDT","NEARUSDT","ALGOUSDT",
-    "WIFUSDT","AAVEUSDT","UNIUSDT","MKRUSDT","CRVUSDT","GRTUSDT","SUSHIUSDT",
+    "WIFUSDT",
+    "AAVEUSDT","UNIUSDT","MKRUSDT","CRVUSDT","GRTUSDT","SUSHIUSDT",
     "FETUSDT","AGIXUSDT","OCEANUSDT","WLDUSDT","ARKMUSDT",
     "ARBUSDT","OPUSDT","STRKUSDT","INJUSDT","APTUSDT","SUIUSDT",
     "AXSUSDT","SANDUSDT","MANAUSDT","GALAUSDT","IMXUSDT",
     "FILUSDT","ICPUSDT","RUNEUSDT","TIAUSDT","KASUSDT",
 ]
 
-CRYPTO_WATCHLIST = CRYPTO_WATCHLIST_BINANCE if USE_BINANCE else []
+CRYPTO_WATCHLIST = CRYPTO_WATCHLIST_BINANCE if USE_BINANCE else CRYPTO_WATCHLIST_ALPACA
 
 # ── Sector correlation map ────────────────────────────────────
 SECTOR_MAP = {
     "NVDA":"SEMI","AMD":"SEMI","INTC":"SEMI","QCOM":"SEMI","AVGO":"SEMI",
-    "MU":"SEMI","AMAT":"SEMI","LRCX":"SEMI","KLAC":"SEMI","TXN":"SEMI","MRVL":"SEMI","SOXL":"SEMI",
+    "MU":"SEMI","AMAT":"SEMI","LRCX":"SEMI","KLAC":"SEMI","TXN":"SEMI","MRVL":"SEMI",
     "AAPL":"BIGTECH","MSFT":"BIGTECH","GOOGL":"BIGTECH","AMZN":"BIGTECH",
     "META":"BIGTECH","NFLX":"BIGTECH","ORCL":"BIGTECH","ADBE":"BIGTECH",
     "TSLA":"EV","RIVN":"EV","LCID":"EV","NIO":"EV","XPEV":"EV","LI":"EV",
-    "BLNK":"EV","CHPT":"EV","WKHS":"EV",
+    "BLNK":"EV","CHPT":"EV","WKHS":"EV","NKLA":"EV",
     "COIN":"CRYPTO_STOCK","MARA":"CRYPTO_STOCK","RIOT":"CRYPTO_STOCK","HOOD":"CRYPTO_STOCK",
-    "PYPL":"FINTECH","SOFI":"FINTECH","AFRM":"FINTECH","UPST":"FINTECH","NU":"FINTECH",
+    "SQ":"FINTECH","PYPL":"FINTECH","SOFI":"FINTECH","AFRM":"FINTECH","UPST":"FINTECH","NU":"FINTECH",
     "PLTR":"AI","AI":"AI","PATH":"AI","SNOW":"AI","DDOG":"AI",
     "NET":"AI","CRWD":"AI","ZS":"AI","OKTA":"AI","MDB":"AI",
     "XOM":"ENERGY","CVX":"ENERGY","OXY":"ENERGY","SLB":"ENERGY","HAL":"ENERGY",
     "MPC":"ENERGY","VLO":"ENERGY","PSX":"ENERGY","DVN":"ENERGY","FANG":"ENERGY",
     "MRNA":"BIOTECH","BNTX":"BIOTECH","NVAX":"BIOTECH","HIMS":"BIOTECH",
-    "TDOC":"BIOTECH","SDGR":"BIOTECH","RXRX":"BIOTECH","BEAM":"BIOTECH",
-    "BTCUSDT":"BTC","ETHUSDT":"ETH",
+    "TDOC":"BIOTECH","ACCD":"BIOTECH","SDGR":"BIOTECH","RXRX":"BIOTECH","BEAM":"BIOTECH",
+    "BTC/USD":"BTC","ETH/USD":"ETH","BTCUSDT":"BTC","ETHUSDT":"ETH",
 }
 MAX_SECTOR_POSITIONS = 1
 
@@ -297,8 +298,6 @@ crypto_state          = BotState("CRYPTO")
 smallcap_state        = BotState("SMALLCAP")
 intraday_state        = BotState("INTRADAY")
 crypto_intraday_state = BotState("CRYPTO_ID")
-asx_state             = BotState("ASX")   # was plain dict — now BotState
-ftse_state            = BotState("FTSE")  # was plain dict — now BotState
 account_info          = {}
 
 # ── Global risk state ─────────────────────────────────────────
@@ -381,7 +380,7 @@ _binance_balance_cache = {"value": 0.0, "ts": 0}
 # ── API health tracking ───────────────────────────────────────
 api_health = {
     "ibkr_fails": 0,
-    "data_fails":  0,
+    "data_fails":   0,
     "last_success": None,
     "max_fails":    5,
 }
@@ -410,53 +409,61 @@ _state_lock = _threading.Lock()
 
 # ── ASX Watchlist (ASX exchange, AUD) ─────────────────────────
 ASX_WATCHLIST = [
+    # Financials
     "CBA","NAB","WBC","ANZ","MQG",
+    # Miners/Resources
     "BHP","RIO","FMG","MIN","S32",
+    # Healthcare
     "CSL","RMD","COH","SHL","PME",
+    # Technology
     "WTC","XRO","TLX","ALU","MP1",
+    # Consumer/Retail
     "WOW","COL","JBH","ARB","REH",
+    # Energy
     "WDS","STO","BPT","KAR","WHC",
+    # REITs/Infrastructure
     "GMG","SCG","GPT","MGR","CHC",
+    # Industrials
     "TCL","QAN","AZJ","ORI","AMC",
 ]
 
 # ── FTSE Watchlist (LSE exchange, GBP) ────────────────────────
 FTSE_WATCHLIST = [
     # Financials
-    "HSBA","LLOY","BARC","AV.","LGEN","PRU","STJ","HLMA",
-    "SBRE","ABDN","OSB","NWG","MNG","JUP","ITRK",
+    "HSBA", "LLOY", "BARC", "AV.", "LGEN", "PRU", "STJ", "HLMA",
+    "SBRE", "ABDN", "OSB", "NWG", "MNG", "JUP", "ITRK",
     # Energy
-    "SHEL","BP.","SSE","SGE","EXPN",
+    "SHEL", "BP.", "SSE", "SGE", "EXPN",
     # Mining & Materials
-    "RIO","BHP","AAL","GLEN","FRES","MNDI","SMDS",
+    "RIO", "BHP", "AAL", "GLEN", "FRES", "MNDI", "SMDS",
     # Consumer Staples
-    "ULVR","DGE","BATS","IMB","OCDO","ABF",
+    "ULVR", "DGE", "BATS", "IMB", "OCDO", "ABF",
     # Healthcare
-    "AZN","GSK","HLN","HIK","NXT",
+    "AZN", "GSK", "HLN", "HIK", "NXT",
     # Industrials
-    "BA.","RR.","IMI","WEIR","MERL","RHM",
-    "DCC","BDEV","PSN","MTO","SPX",
+    "BA.", "RR.", "IMI", "WEIR", "MERL", "RHM",
+    "DCC", "BDEV", "PSN", "MTO", "SPX", "EXPN",
     # Consumer Discretionary
-    "AUTO","MKS","TSCO","SBRY","WPP","IHG","WTB",
-    "JD.","BRBY","CPG","KGF","HMSO","SSON",
+    "AUTO", "MKS", "TSCO", "SBRY", "WPP", "IHG", "WTB",
+    "JD.", "BRBY", "CPG", "KGF", "HMSO", "SSON",
     # Technology & Telecom
-    "VOD","BT.A","SMIN","DPLM",
+    "VOD", "BT.A", "SMIN", "DPLM",
     # Real Estate
-    "LAND","SGRO","BLND","BBOX","PHP","SUPR",
+    "LAND", "SGRO", "BLND", "BBOX", "PHP", "SUPR",
     # Utilities
-    "UU.","SVT","NG.","CNA",
+    "UU.", "SVT", "NG.", "CNA",
     # Media
-    "REL","PSON","ITV",
+    "REL", "PSON", "ITV",
     # Food & Beverage
-    "CCH","MGNS","TATE",
+    "CCH", "MGNS", "TATE",
     # Insurance
-    "DLG","JUST","ADM",
+    "DLG", "JUST", "ADM",
     # Transport
-    "IAG","EZJ","TUI",
+    "IAG", "EZJ", "TUI",
     # Diversified
-    "CRH","SMT","ATST","FCIT",
+    "CRH", "SMT", "ATST", "FCIT",
     # Retail
-    "PETS","BKG","TW.","BWY",
+    "PETS", "BKG", "TW.", "BWY",
 ]
 
 # ── Market configs per exchange ───────────────────────────────
@@ -475,3 +482,6 @@ ftse_regime = {
     "mode": "BULL", "spy": None, "ma20": None,
     "vix": None, "updated": None,
 }
+
+asx_state  = BotState("ASX")
+ftse_state = BotState("FTSE")
