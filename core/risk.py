@@ -2,15 +2,15 @@
 core/risk.py — AlphaBot Risk Management
 Kill switches, circuit breakers, stop loss checks, loss streak logic,
 position reconciliation, and portfolio exposure controls.
+Broker: IBKR only — no Alpaca.
 """
 
 import time
 import logging
-import requests
 from datetime import datetime, timedelta
 
 from core.config import (
-    log, IS_LIVE, HEADERS, DATA_BASE, USE_BINANCE,
+    log, IS_LIVE, USE_BINANCE,
     STOP_LOSS_PCT, TRAILING_STOP_PCT, TRAIL_TRIGGER_PCT, TAKE_PROFIT_PCT,
     MAX_HOLD_DAYS, GAP_DOWN_PCT, CRYPTO_STOP_PCT, CRYPTO_TRAIL_PCT,
     MAX_DAILY_LOSS, DAILY_PROFIT_TARGET, MAX_PORTFOLIO_EXPOSURE,
@@ -21,6 +21,7 @@ from core.config import (
     BTC_MA_PERIOD, BTC_CRASH_PCT, MACRO_KEYWORDS,
     MAX_SECTOR_POSITIONS, SECTOR_MAP, MAX_TOTAL_POSITIONS,
     state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state,
+    asx_state, ftse_state,
     global_risk, perf, kill_switch, circuit_breaker,
     market_regime, crypto_regime, news_state, exchange_stops,
 )
@@ -34,17 +35,20 @@ def total_exposure(st):
 def all_positions_count():
     return (len(state.positions) + len(crypto_state.positions) +
             len(smallcap_state.positions) + len(intraday_state.positions) +
-            len(crypto_intraday_state.positions))
+            len(crypto_intraday_state.positions) +
+            len(asx_state.positions) + len(ftse_state.positions))
 
 def all_symbols_held():
     held = set()
-    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+    for st in [state, crypto_state, smallcap_state, intraday_state,
+               crypto_intraday_state, asx_state, ftse_state]:
         held.update(st.positions.keys())
     return held
 
 def sectors_held():
     held = {}
-    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+    for st in [state, crypto_state, smallcap_state, intraday_state,
+               crypto_intraday_state, asx_state, ftse_state]:
         for sym in st.positions:
             sector = SECTOR_MAP.get(sym)
             if sector:
@@ -92,7 +96,8 @@ def record_trade_result(pnl, symbol):
             kill_switch["active"]       = True
             kill_switch["reason"]       = f"Dynamic kill: {len(recent_losses)} losses (${recent_loss_total:.2f}) in {RAPID_LOSS_MINUTES}min"
             kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
-            for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+            for st in [state, crypto_state, smallcap_state, intraday_state,
+                       crypto_intraday_state, asx_state, ftse_state]:
                 st.shutoff = True
             log.warning(f"[DYNAMIC KILL] {kill_switch['reason']}")
 
@@ -170,8 +175,7 @@ def check_stop_losses(st, crypto=False):
         st.shutoff = True
         return
 
-    from core.execution import fetch_latest_price, place_order, cancel_stop_order_alpaca
-    from core.config import STOP_LOSS_PCT, TRAILING_STOP_PCT, TRAIL_TRIGGER_PCT, TAKE_PROFIT_PCT, MAX_HOLD_DAYS, GAP_DOWN_PCT
+    from core.execution import fetch_latest_price, place_order, cancel_stop_order_ibkr
 
     try:
         from zoneinfo import ZoneInfo
@@ -196,12 +200,10 @@ def check_stop_losses(st, crypto=False):
         high   = pos.get("highest_price", entry)
         days   = pos.get("days_held", 0)
 
-        # Update highest price
         if live > high:
             pos["highest_price"] = live
             high = live
 
-        # Trailing stop logic
         profit_pct = (high - entry) / entry * 100
         if profit_pct >= trail_trig:
             new_trail = high * (1 - trail_pct / 100)
@@ -212,7 +214,6 @@ def check_stop_losses(st, crypto=False):
                     update_exchange_stop(sym, pos["qty"], round(new_trail, 2))
                 log.info(f"[{st.label}] Trail updated {sym} → stop ${new_trail:.4f}")
 
-        # Gap down at open
         if market_just_opened and not crypto:
             prev_close = entry
             gap_down   = ((live - prev_close) / prev_close) * 100
@@ -230,8 +231,6 @@ def check_stop_losses(st, crypto=False):
         elif days >= MAX_HOLD_DAYS:
             reason = f"Max-Hold ({days}d)"
         else:
-            # Opportunity cost exit — don't hold dead capital when better trades wait
-            # If held >24hrs, P&L flat (<0.5%), and 2+ high-score candidates waiting
             hold_hrs = (now - datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600 if pos.get("entry_ts") else 0
             if hold_hrs >= 24 and abs(pct) < 0.5:
                 from core.config import MIN_SIGNAL_SCORE
@@ -246,19 +245,18 @@ def check_stop_losses(st, crypto=False):
             _close_position(st, sym, pos, live, reason, now, crypto)
 
 def _close_position(st, sym, pos, live, reason, now, crypto):
-    from core.execution import place_order, cancel_stop_order_alpaca
+    from core.execution import place_order, cancel_stop_order_ibkr
     pnl      = (live - pos["entry_price"]) * pos["qty"]
     entry_ts = pos.get("entry_ts")
     hold_hours = round((now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
     log.info(f"[{st.label}] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
 
     if not crypto and sym in exchange_stops:
-        cancel_stop_order_alpaca(exchange_stops.pop(sym))
+        cancel_stop_order_ibkr(exchange_stops.pop(sym))
 
     place_order(sym, "sell", pos["qty"], crypto=crypto, estimated_price=live)
     del st.positions[sym]
     st.daily_pnl += pnl
-    entry_ts_str = pos.get("entry_ts")
     st.trades.insert(0, {
         "symbol": sym, "side": "SELL", "qty": pos["qty"],
         "price": live, "pnl": pnl, "reason": reason,
@@ -280,31 +278,18 @@ def is_market_open():
     return et.weekday() < 5 and 570 <= mins < 960
 
 def update_market_regime():
-    from core.execution import fetch_bars, alpaca_get
-    spy_bars = fetch_bars("SPY")
-    vix_bars = None
-    try:
-        from datetime import timezone
-        end   = datetime.now(timezone.utc)
-        start = end - timedelta(days=5)
-        url   = f"/v2/stocks/VIX/bars?timeframe=1Day&start={start.strftime('%Y-%m-%dT%H:%M:%SZ')}&end={end.strftime('%Y-%m-%dT%H:%M:%SZ')}&feed=iex"
-        resp  = alpaca_get(url)
-        if resp and resp.get("bars"):
-            raw = resp["bars"]
-            vix_bars = [{"c": b["c"], "h": b["h"], "l": b["l"], "o": b["o"]} for b in raw]
-        else:
-            raise ValueError("No VIX bars")
-    except:
-        vix_bars = fetch_bars("VIXY")
+    from core.execution import fetch_bars
+    spy_bars  = fetch_bars("SPY")
+    vixy_bars = fetch_bars("VIXY")
 
     spy_price = spy_ma20 = vix_val = None
     if spy_bars and len(spy_bars) >= SPY_MA_PERIOD:
         closes    = [b["c"] for b in spy_bars]
         spy_price = closes[-1]
         spy_ma20  = sum(closes[-SPY_MA_PERIOD:]) / SPY_MA_PERIOD
-    if vix_bars:
-        raw_vixy = vix_bars[-1]["c"]
-        vix_val  = raw_vixy * 0.57  # VIXY * 0.57 approximates real VIX level
+    if vixy_bars:
+        raw_vixy = vixy_bars[-1]["c"]
+        vix_val  = raw_vixy * 0.57
         log.info(f"[REGIME] VIX via VIXY proxy: {vix_val:.2f} (VIXY=${raw_vixy:.2f})")
 
     bear_signals = 0
@@ -365,6 +350,7 @@ def update_crypto_regime():
     return new_mode
 
 def check_circuit_breaker():
+    """Check for intraday SPY circuit breaker using IBKR data."""
     try:
         from zoneinfo import ZoneInfo
     except ImportError:
@@ -375,19 +361,18 @@ def check_circuit_breaker():
         circuit_breaker.update({"active": False, "reason": None, "triggered_at": None, "macro_paused": False})
         log.info("[CIRCUIT] Reset for new trading day")
 
-    try:
-        r = requests.get(f"{DATA_BASE}/v2/stocks/SPY/snapshot?feed=iex", headers=HEADERS, timeout=8)
-        if not r.ok: return
-        spy_snap = r.json()
-    except: return
+    # Use latest SPY price from IBKR
+    from core.execution import fetch_latest_price
+    spy_now = fetch_latest_price("SPY")
+    if not spy_now:
+        return
 
-    spy_now  = spy_snap.get("latestTrade", {}).get("p")
     spy_open = circuit_breaker.get("spy_open")
-    if spy_now and not spy_open:
+    if not spy_open:
         circuit_breaker["spy_open"] = spy_now
         spy_open = spy_now
 
-    if spy_now and spy_open and spy_open > 0:
+    if spy_open and spy_open > 0:
         intraday_drop = ((spy_now - spy_open) / spy_open) * 100
         if intraday_drop <= -SPY_CIRCUIT_BREAKER and not circuit_breaker["active"]:
             circuit_breaker.update({
@@ -398,7 +383,6 @@ def check_circuit_breaker():
             log.warning(f"[CIRCUIT] TRIGGERED: SPY down {intraday_drop:.1f}% today")
 
 def check_macro_news():
-    from core.execution import fetch_news_for_symbol
     if not cfg.NEWS_API_KEY: return
     try:
         import requests as req
