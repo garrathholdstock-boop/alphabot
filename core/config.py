@@ -8,7 +8,8 @@ import time
 import logging
 import hashlib as _hashlib
 from datetime import datetime
-from dotenv import load_dotenv load_dotenv()
+from dotenv import load_dotenv
+load_dotenv()
 
 try:
     from zoneinfo import ZoneInfo
@@ -97,7 +98,7 @@ def _save_ban_to_disk(expiry):
 _load_ban_from_disk()
 
 # ── Account Size & Risk Limits ────────────────────────────────
-STARTING_BALANCE        = float(os.getenv("STARTING_BALANCE", "1000.0"))
+STARTING_BALANCE        = float(os.getenv("STARTING_BALANCE", "986000.0"))
 
 MAX_DAILY_LOSS_PCT      = 0.5
 MAX_DAILY_SPEND_PCT     = 50.0
