@@ -1,6 +1,8 @@
 """
-AlphaBot Debug Agent v4 - Clean rewrite
-Full agentic loop with working command safety
+AlphaBot Debug Agent v5
+- Context compression every 10 steps (runs forever)
+- Stuck detector (same command 3x = force new approach)
+- Clean command execution
 """
 
 from fastapi import FastAPI, Form
@@ -14,6 +16,7 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 DB_PATH = "/home/alphabot/app/alphabot.db"
 APP_PATH = "/home/alphabot/app"
 SCREEN_NAME = "alphabot"
+MAX_STEPS_BEFORE_COMPRESS = 10
 
 SYSTEM_PROMPT = """You are an expert autonomous debugging agent for AlphaBot trading bot.
 
@@ -27,38 +30,42 @@ CONFIG: MIN_SIGNAL_SCORE=5, IS_LIVE=false, paper trading via Alpaca+IBKR+Binance
 
 KNOWN COSMETIC ERRORS (ignore): Error 10089, Binance 401, BrokenPipeError
 
-SEARCH STRATEGY - CRITICAL:
-- To find text in a file: grep -n candidates /home/alphabot/app/app/main.py
-- NO quotes around search term, just: grep -n WORD /path/file
-- To read lines: sed -n 200,250p /home/alphabot/app/app/main.py
-- NO quotes around line range, just: sed -n 200,250p /path/file
-- cat works for small files only
+CRITICAL COMMAND SYNTAX - FOLLOW EXACTLY:
+- Search in file: grep -n candidates /home/alphabot/app/app/main.py
+  (NO quotes around search term)
+- Read lines: sed -n 200,250p /home/alphabot/app/app/main.py
+  (NO quotes around line range)
+- Read full file: cat /home/alphabot/app/core/config.py
+- Check env: grep BINANCE /home/alphabot/app/.env
 
-RESPONSE FORMAT (always use exactly):
+RESPONSE FORMAT (always exactly this):
 
 STATUS: [INVESTIGATING | FOUND_ISSUE | FIX_PROPOSED | VERIFIED | COMPLETE]
 
 ANALYSIS:
-[2-4 sentences. Be specific with line numbers and values.]
+[2-4 sentences. Cite specific line numbers and values from output.]
 
 NEXT_COMMAND:
 ```
-command here - NO smart quotes, use simple syntax
+command here
 ```
 
 REASON:
-[Why this command, 1 sentence]
+[1 sentence explaining what you expect to find]
 
 RULES:
 - One command per response
-- Use simple command syntax - no pipes with quotes, no escaped chars
+- NO quotes around grep search terms or sed line ranges
+- If stuck (same command failing), try a completely different approach
 - If COMPLETE, leave NEXT_COMMAND empty
-- grep search terms need NO quotes: grep -n candidates file.py
-- sed line ranges need NO quotes: sed -n 100,200p file.py
+- Max efficiency: grep to find line numbers, sed to read that section
 """
 
+COMPRESS_PROMPT = """Summarise this debugging session so far into a compact paragraph.
+Include: what problem we're solving, what we've tried, what we found, what the current theory is.
+Be specific with file names and line numbers. Keep under 300 words."""
+
 def clean(s):
-    """Strip smart quotes from a string"""
     return s.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'").strip()
 
 def is_safe(cmd):
@@ -103,15 +110,44 @@ def get_context():
         db = {"error": str(e)}
     return log, screen, db
 
-def call_claude(messages):
+def call_claude(messages, system=None):
     if not CLAUDE_API_KEY:
         return "ERROR: CLAUDE_API_KEY not set."
     try:
         client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-        r = client.messages.create(model="claude-sonnet-4-20250514", max_tokens=1000, system=SYSTEM_PROMPT, messages=messages)
+        r = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            system=system or SYSTEM_PROMPT,
+            messages=messages
+        )
         return r.content[0].text
     except Exception as e:
         return f"Claude API error: {e}"
+
+def compress_history(steps, question):
+    """Summarise history into a single message to keep context small"""
+    history_text = "\n\n".join([
+        f"{'CLAUDE' if s['role']=='assistant' else 'VPS'}: {s['content'] if isinstance(s['content'], str) else str(s['content'])}"
+        for s in steps
+    ])
+    summary = call_claude(
+        [{"role": "user", "content": f"PROBLEM: {question}\n\nSESSION SO FAR:\n{history_text}"}],
+        system=COMPRESS_PROMPT
+    )
+    return [{"role": "user", "content": f"[COMPRESSED HISTORY - {len(steps)} steps so far]\n{summary}\n\nContinue debugging. Problem: {question}"}]
+
+def detect_stuck(steps, current_cmd, threshold=3):
+    """Check if same command has been tried too many times"""
+    if not current_cmd:
+        return False
+    recent_cmds = []
+    for s in reversed(steps[-10:]):
+        if s["role"] == "user" and "COMMAND:" in s.get("content", ""):
+            match = re.search(r'COMMAND: (.+?)\n', s["content"])
+            if match:
+                recent_cmds.append(clean(match.group(1)))
+    return recent_cmds.count(clean(current_cmd)) >= threshold
 
 def parse_response(text):
     status = re.search(r'STATUS:\s*(\w+)', text)
@@ -123,6 +159,17 @@ def parse_response(text):
     reason = re.search(r'REASON:\s*(.*?)$', text, re.DOTALL)
     reason = reason.group(1).strip() if reason else ""
     return status, analysis, command, reason
+
+def encode_steps(steps):
+    return base64.b64encode(json.dumps(steps).encode()).decode()
+
+def decode_steps(h):
+    if not h:
+        return []
+    try:
+        return json.loads(base64.b64decode(h.encode()).decode())
+    except:
+        return []
 
 def get_db_display():
     try:
@@ -140,12 +187,16 @@ def get_db_display():
     except:
         return [], [], "?"
 
-def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run="", error="", question="", history=None, complete=False, file_content="", file_name=""):
+def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run="",
+           error="", question="", history="", complete=False, file_content="", file_name="",
+           compressed=False, step_count=0):
+
     screen_status = run_cmd("/usr/bin/screen -ls")
     bot_ok = "alphabot" in screen_status
     sc = "#00ff88" if bot_ok else "#ef4444"
     st = "RUNNING" if bot_ok else "DOWN"
     trades, nms, today = get_db_display()
+    steps = decode_steps(history)
 
     trades_html = ""
     for t in trades:
@@ -153,35 +204,46 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         c = "#00ff88" if pnl >= 0 else "#ef4444"
         trades_html += f"<tr><td>{t.get('symbol','')}</td><td>{t.get('side','')}</td><td>${float(t.get('price',0)):.2f}</td><td style='color:{c}'>${pnl:.2f}</td><td style='color:#475569;font-size:10px'>{t.get('reason','')}</td></tr>"
 
-    nm_html = ""
-    for n in nms:
-        nm_html += f"<tr><td>{n.get('symbol','')}</td><td>{n.get('score','')}</td><td>{n.get('reason','')}</td></tr>"
-
-    steps = json.loads(base64.b64decode(history.encode()).decode()) if history else []
-
     status_colors = {"INVESTIGATING": "#f59e0b", "FOUND_ISSUE": "#ef4444", "FIX_PROPOSED": "#7c3aed", "VERIFIED": "#00ff88", "COMPLETE": "#00ff88"}
     sc2 = status_colors.get(status, "#64748b")
 
+    stuck = detect_stuck(steps, command) if command else False
+
     agent_html = ""
     if complete:
-        agent_html = f"""<div style="background:#0a1a0f;border:2px solid #00ff88;border-radius:10px;padding:16px;margin-bottom:12px;text-align:center;">
-          <div style="font-size:20px;color:#00ff88;font-weight:700;margin-bottom:6px;">COMPLETE</div>
-          <div style="font-size:13px;color:#94a3b8;">{html.escape(analysis)}</div></div>"""
+        agent_html = f"""<div style="background:#0a1a0f;border:2px solid #00ff88;border-radius:10px;padding:20px;margin-bottom:12px;text-align:center;">
+          <div style="font-size:24px;color:#00ff88;font-weight:700;margin-bottom:8px;">COMPLETE</div>
+          <div style="font-size:13px;color:#94a3b8;">{html.escape(analysis)}</div>
+        </div>"""
     elif analysis:
+        step_badge = f'<div style="font-size:9px;color:#64748b;margin-left:8px;">Step {step_count}</div>'
+        compressed_badge = '<div style="font-size:9px;background:#1e1e2e;color:#64748b;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPRESSED</div>' if compressed else ''
         agent_html = f"""<div style="background:#0a1a0f;border:1px solid #00ff88;border-radius:10px;padding:16px;margin-bottom:12px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#00ff88;text-transform:uppercase;">Claude Analysis</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px;">
+            <div style="display:flex;align-items:center;">
+              <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#00ff88;text-transform:uppercase;">Claude Analysis</div>
+              {step_badge}{compressed_badge}
+            </div>
             <div style="background:{sc2};color:#000;font-size:9px;font-weight:700;padding:3px 8px;border-radius:10px;">{status}</div>
           </div>
           <div style="font-size:13px;line-height:1.7;color:#e2e8f0;margin-bottom:10px;">{html.escape(analysis)}</div>
           {f'<div style="font-size:11px;color:#64748b;font-style:italic;">{html.escape(reason)}</div>' if reason else ''}
         </div>"""
+
         if command:
             safe = is_safe(command)
-            btn_color = "#00ff88" if safe else "#ef4444"
-            btn_text = "APPROVE &amp; RUN" if safe else "NOT ALLOWED (unsafe)"
+            if stuck:
+                btn_color = "#f59e0b"
+                btn_text = "APPROVE &amp; RUN (WARNING: tried before - Claude will be forced to change approach)"
+            elif safe:
+                btn_color = "#00ff88"
+                btn_text = "APPROVE &amp; RUN"
+            else:
+                btn_color = "#ef4444"
+                btn_text = "NOT ALLOWED (unsafe)"
             disabled = "" if safe else "disabled"
-            hist_b64 = base64.b64encode(json.dumps(steps).encode()).decode()
+            stuck_input = '<input type="hidden" name="stuck" value="1">' if stuck else ''
+
             agent_html += f"""<div style="background:#0d0d1a;border:2px solid #7c3aed;border-radius:10px;padding:16px;margin-bottom:12px;">
               <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#7c3aed;text-transform:uppercase;margin-bottom:12px;">Next Action</div>
               <div style="background:#0a0a0f;border:1px solid #1e1e2e;border-radius:8px;padding:12px;margin-bottom:12px;">
@@ -194,7 +256,9 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
               <form method="POST" action="/approve">
                 <input type="hidden" name="command" value="{html.escape(command)}">
                 <input type="hidden" name="question" value="{html.escape(question)}">
-                <input type="hidden" name="history" value="{hist_b64}">
+                <input type="hidden" name="history" value="{html.escape(history)}">
+                <input type="hidden" name="step_count" value="{step_count}">
+                {stuck_input}
                 <button type="submit" {disabled} style="display:block;width:100%;background:{btn_color};border:none;border-radius:8px;color:#000;font-family:'Syne',sans-serif;font-weight:800;font-size:15px;padding:12px;cursor:pointer;">{btn_text}</button>
               </form>
             </div>"""
@@ -237,7 +301,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         ("Positions", "Check positions and P&L from the DB."),
         ("Near misses", "Near-miss analysis - should we adjust MIN_SIGNAL_SCORE?"),
         ("Next steps", "What should I do next to move AlphaBot closer to live?"),
-        ("Fix Binance", "The Binance 401 error is blocking crypto trades. Diagnose and fix it step by step."),
+        ("Fix Binance", "The Binance 401 error is blocking crypto trades. Check the .env file and diagnose why orders fail."),
     ]:
         quick += f"""<form method="POST" action="/ask" style="display:inline-block;margin:3px;">
           <input type="hidden" name="question" value="{q}">
@@ -246,12 +310,11 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 
     safe_files = ["app/main.py", "app/dashboard.py", "core/config.py", "core/execution.py", "core/risk.py", "data/analytics.py", "data/database.py", "start.sh", ".env"]
     file_btns = ""
-    hist_b64_cur = base64.b64encode(json.dumps(steps).encode()).decode()
     for f in safe_files:
         file_btns += f"""<form method="POST" action="/file" style="display:inline-block;margin:3px;">
           <input type="hidden" name="filename" value="{f}">
           <input type="hidden" name="question" value="{html.escape(question)}">
-          <input type="hidden" name="history" value="{hist_b64_cur}">
+          <input type="hidden" name="history" value="{html.escape(history)}">
           <button type="submit" style="background:#0a0a14;border:1px solid #1e1e2e;color:#64748b;font-family:'JetBrains Mono',monospace;font-size:10px;padding:6px 10px;border-radius:5px;cursor:pointer;">{f}</button>
         </form>"""
 
@@ -260,7 +323,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AlphaBot Agent</title>
+<title>AlphaBot Agent v5</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
@@ -268,6 +331,7 @@ body {{ background:#0a0a0f; color:#e2e8f0; font-family:'JetBrains Mono',monospac
 header {{ display:flex; align-items:center; gap:12px; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #1e1e2e; }}
 .logo {{ font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#00ff88; }}
 .logo span {{ color:#64748b; }}
+.v {{ font-size:10px; color:#7c3aed; font-weight:700; background:#1e1e2e; padding:2px 6px; border-radius:4px; margin-left:4px; }}
 .badge {{ margin-left:auto; background:#111118; border:1px solid {sc}; color:{sc}; font-size:10px; font-weight:700; padding:4px 10px; border-radius:20px; }}
 .card {{ background:#111118; border:1px solid #1e1e2e; border-radius:10px; padding:14px; margin-bottom:12px; }}
 .card-title {{ font-size:10px; font-weight:700; letter-spacing:1px; color:#64748b; text-transform:uppercase; margin-bottom:10px; }}
@@ -297,7 +361,7 @@ function copyText(id) {{
 }}
 </script>
 <header>
-  <div class="logo">Alpha<span>Bot</span> AGENT</div>
+  <div class="logo">Alpha<span>Bot</span> AGENT<span class="v">v5</span></div>
   <div class="badge">&#9679; {st}</div>
 </header>
 {err_html}{agent_html}{cmd_html}{file_html}{hist_html}
@@ -346,34 +410,49 @@ async def ask(question: str = Form("")):
     response = call_claude(messages)
     status, analysis, command, reason = parse_response(response)
     steps = messages + [{"role": "assistant", "content": response}]
-    h = base64.b64encode(json.dumps(steps).encode()).decode()
-    return render(analysis=analysis, command=command, reason=reason, status=status, question=question, history=h, complete=(status == "COMPLETE"))
+    h = encode_steps(steps)
+    return render(analysis=analysis, command=command, reason=reason, status=status,
+                  question=question, history=h, complete=(status == "COMPLETE"), step_count=1)
 
 @app.post("/approve", response_class=HTMLResponse)
-async def approve(command: str = Form(""), question: str = Form(""), history: str = Form("")):
+async def approve(command: str = Form(""), question: str = Form(""),
+                  history: str = Form(""), step_count: int = Form(0),
+                  stuck: str = Form("")):
     command = clean(command)
+    steps = decode_steps(history)
+
     if not is_safe(command):
-        try:
-            steps = json.loads(base64.b64decode(history.encode()).decode())
-        except:
-            steps = []
-        h = base64.b64encode(json.dumps(steps).encode()).decode()
-        return render(error=f"Command blocked as unsafe: {command}", question=question, history=h)
+        return render(error=f"Command blocked: {command}", question=question,
+                      history=history, step_count=step_count)
+
     output = run_cmd(command)
-    try:
-        steps = json.loads(base64.b64decode(history.encode()).decode())
-    except:
-        steps = []
-    steps.append({"role": "user", "content": f"COMMAND: {command}\nOUTPUT:\n{output}"})
+    step_count += 1
+
+    # If stuck, add a forced direction message
+    if stuck:
+        steps.append({"role": "user", "content": f"COMMAND: {command}\nOUTPUT:\n{output}\n\n[AGENT NOTE: This command has been tried multiple times. You MUST try a completely different approach now.]"})
+    else:
+        steps.append({"role": "user", "content": f"COMMAND: {command}\nOUTPUT:\n{output}"})
+
+    # Compress context every N steps to allow infinite loops
+    compressed = False
+    if step_count % MAX_STEPS_BEFORE_COMPRESS == 0:
+        steps = compress_history(steps, question)
+        compressed = True
+
     response = call_claude(steps)
     status, analysis, next_cmd, reason = parse_response(response)
     steps.append({"role": "assistant", "content": response})
-    h = base64.b64encode(json.dumps(steps).encode()).decode()
-    return render(analysis=analysis, command=next_cmd, reason=reason, status=status, cmd_output=output, cmd_run=command, question=question, history=h, complete=(status == "COMPLETE"))
+    h = encode_steps(steps)
+
+    return render(analysis=analysis, command=next_cmd, reason=reason, status=status,
+                  cmd_output=output, cmd_run=command, question=question, history=h,
+                  complete=(status == "COMPLETE"), step_count=step_count, compressed=compressed)
 
 @app.post("/file", response_class=HTMLResponse)
 async def view_file(filename: str = Form(""), question: str = Form(""), history: str = Form("")):
-    safe_files = ["app/main.py", "app/dashboard.py", "core/config.py", "core/execution.py", "core/risk.py", "data/analytics.py", "data/database.py", "start.sh", ".env"]
+    safe_files = ["app/main.py", "app/dashboard.py", "core/config.py", "core/execution.py",
+                  "core/risk.py", "data/analytics.py", "data/database.py", "start.sh", ".env"]
     if filename not in safe_files:
         return render(error=f"File not allowed: {filename}", question=question, history=history)
     path = os.path.join(APP_PATH, filename)
