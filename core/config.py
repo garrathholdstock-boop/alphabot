@@ -1,7 +1,6 @@
 """
 core/config.py — AlphaBot Configuration
 All constants, environment variables, watchlists, and shared global state.
-Edit this file to change API keys, risk limits, and watchlists.
 """
 
 import os
@@ -39,18 +38,24 @@ DASH_TOKEN     = _hashlib.md5(f"{DASH_USER}:{DASH_PASS}:alphabot".encode()).hexd
 NEWS_API_KEY   = os.environ.get("NEWS_API_KEY", "")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
+# ── IBKR Connection ───────────────────────────────────────────
+# IB Gateway Docker runs socat on port 4004 → paper port 4002 internally
+# Port 4001 = live trading
+IBKR_HOST      = "127.0.0.1"
+IBKR_PORT      = 4001 if IS_LIVE else 4004
+IBKR_CLIENT_ID = 1
+
 # ── Binance ───────────────────────────────────────────────────
 BINANCE_KEY            = os.environ.get("BINANCE_KEY",    "")
 BINANCE_SECRET         = os.environ.get("BINANCE_SECRET", "")
-BINANCE_TESTNET_KEY    = os.environ.get("BINANCE_TESTNET_KEY",    "")
-BINANCE_TESTNET_SECRET = os.environ.get("BINANCE_TESTNET_SECRET", "")
 BINANCE_USE_TESTNET    = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
 
-if BINANCE_USE_TESTNET and BINANCE_TESTNET_KEY:
+if BINANCE_USE_TESTNET and BINANCE_KEY:
     BINANCE_BASE = "https://testnet.binance.vision"
-    _BIN_KEY     = BINANCE_TESTNET_KEY
-    _BIN_SECRET  = BINANCE_TESTNET_SECRET
+    _BIN_KEY     = BINANCE_KEY
+    _BIN_SECRET  = BINANCE_SECRET
     USE_BINANCE  = True
+    log.info("[BINANCE] Using TESTNET")
 elif BINANCE_KEY:
     BINANCE_BASE = "https://api.binance.com"
     _BIN_KEY     = BINANCE_KEY
@@ -91,7 +96,6 @@ def _save_ban_to_disk(expiry):
 _load_ban_from_disk()
 
 # ── Account Size & Risk Limits ────────────────────────────────
-# Set STARTING_BALANCE in environment — everything scales automatically
 STARTING_BALANCE        = float(os.getenv("STARTING_BALANCE", "1000.0"))
 
 MAX_DAILY_LOSS_PCT      = 0.5
@@ -104,7 +108,6 @@ INTRADAY_TRADE_PCT      = 3.0
 CRYPTO_INTRADAY_PCT     = 2.0
 SMALLCAP_TRADE_PCT      = 2.5
 
-# Computed from STARTING_BALANCE — do not edit directly
 MAX_DAILY_LOSS         = STARTING_BALANCE * MAX_DAILY_LOSS_PCT / 100
 MAX_DAILY_SPEND        = STARTING_BALANCE * MAX_DAILY_SPEND_PCT / 100
 MAX_PORTFOLIO_EXPOSURE = STARTING_BALANCE * MAX_EXPOSURE_PCT / 100
@@ -126,18 +129,17 @@ CRYPTO_STOP_PCT     = 4.0
 CRYPTO_TRAIL_PCT    = 3.0
 
 # ── Position & Trade Limits ───────────────────────────────────
-MAX_POSITIONS       = int(os.getenv("MAX_POSITIONS", "3"))
+MAX_POSITIONS             = int(os.getenv("MAX_POSITIONS", "3"))
 MAX_TOTAL_POSITIONS       = int(os.getenv("MAX_TOTAL_POSITIONS", "15"))
-MAX_TRADES_PER_DAY  = int(os.getenv("MAX_TRADES_PER_DAY", "50"))
-CYCLE_SECONDS          = 60
-INTRADAY_CYCLE_SECONDS = 10
+MAX_TRADES_PER_DAY        = int(os.getenv("MAX_TRADES_PER_DAY", "50"))
+CYCLE_SECONDS             = 60
+INTRADAY_CYCLE_SECONDS    = 10
 
 # ── Risk-based sizing ─────────────────────────────────────────
 RISK_PER_TRADE_PCT  = 1.0
 
 # ── Signal threshold ──────────────────────────────────────────
-# 5 = paper trading (see action, collect data)
-# Raise to 7+ before going live
+# 5 = paper trading; raise to 7+ before going live
 MIN_SIGNAL_SCORE    = int(os.getenv("MIN_SIGNAL_SCORE", "5"))
 
 # ── News boost ────────────────────────────────────────────────
@@ -155,7 +157,7 @@ VIX_FEAR_THRESHOLD  = 25.0
 
 # ── Market regime ─────────────────────────────────────────────
 SPY_MA_PERIOD       = 20
-BEAR_TICKERS        = []  # ETFs removed — no KID available for IE account
+BEAR_TICKERS        = []
 SPY_FAST_DROP_PCT   = 3.0
 SPY_CIRCUIT_BREAKER = 5.0
 MACRO_KEYWORDS      = [
@@ -253,15 +255,15 @@ SECTOR_MAP = {
     "AAPL":"BIGTECH","MSFT":"BIGTECH","GOOGL":"BIGTECH","AMZN":"BIGTECH",
     "META":"BIGTECH","NFLX":"BIGTECH","ORCL":"BIGTECH","ADBE":"BIGTECH",
     "TSLA":"EV","RIVN":"EV","LCID":"EV","NIO":"EV","XPEV":"EV","LI":"EV",
-    "BLNK":"EV","CHPT":"EV","WKHS":"EV","NKLA":"EV",
+    "BLNK":"EV","CHPT":"EV","WKHS":"EV",
     "COIN":"CRYPTO_STOCK","MARA":"CRYPTO_STOCK","RIOT":"CRYPTO_STOCK","HOOD":"CRYPTO_STOCK",
-    "SQ":"FINTECH","PYPL":"FINTECH","SOFI":"FINTECH","AFRM":"FINTECH","UPST":"FINTECH","NU":"FINTECH",
+    "PYPL":"FINTECH","SOFI":"FINTECH","AFRM":"FINTECH","UPST":"FINTECH","NU":"FINTECH",
     "PLTR":"AI","AI":"AI","PATH":"AI","SNOW":"AI","DDOG":"AI",
     "NET":"AI","CRWD":"AI","ZS":"AI","OKTA":"AI","MDB":"AI",
     "XOM":"ENERGY","CVX":"ENERGY","OXY":"ENERGY","SLB":"ENERGY","HAL":"ENERGY",
     "MPC":"ENERGY","VLO":"ENERGY","PSX":"ENERGY","DVN":"ENERGY","FANG":"ENERGY",
     "MRNA":"BIOTECH","BNTX":"BIOTECH","NVAX":"BIOTECH","HIMS":"BIOTECH",
-    "TDOC":"BIOTECH","ACCD":"BIOTECH","SDGR":"BIOTECH","RXRX":"BIOTECH","BEAM":"BIOTECH",
+    "TDOC":"BIOTECH","SDGR":"BIOTECH","RXRX":"BIOTECH","BEAM":"BIOTECH",
     "BTC/USD":"BTC","ETH/USD":"ETH","BTCUSDT":"BTC","ETHUSDT":"ETH",
 }
 MAX_SECTOR_POSITIONS = 1
@@ -298,6 +300,8 @@ crypto_state          = BotState("CRYPTO")
 smallcap_state        = BotState("SMALLCAP")
 intraday_state        = BotState("INTRADAY")
 crypto_intraday_state = BotState("CRYPTO_ID")
+asx_state             = BotState("ASX")
+ftse_state            = BotState("FTSE")
 account_info          = {}
 
 # ── Global risk state ─────────────────────────────────────────
@@ -372,7 +376,7 @@ smallcap_pool = {
 }
 
 # ── Exchange stop order tracking ──────────────────────────────
-exchange_stops = {}  # { symbol: order_id }
+exchange_stops = {}
 
 # ── Binance balance cache ─────────────────────────────────────
 _binance_balance_cache = {"value": 0.0, "ts": 0}
@@ -409,61 +413,35 @@ _state_lock = _threading.Lock()
 
 # ── ASX Watchlist (ASX exchange, AUD) ─────────────────────────
 ASX_WATCHLIST = [
-    # Financials
     "CBA","NAB","WBC","ANZ","MQG",
-    # Miners/Resources
     "BHP","RIO","FMG","MIN","S32",
-    # Healthcare
     "CSL","RMD","COH","SHL","PME",
-    # Technology
     "WTC","XRO","TLX","ALU","MP1",
-    # Consumer/Retail
     "WOW","COL","JBH","ARB","REH",
-    # Energy
     "WDS","STO","BPT","KAR","WHC",
-    # REITs/Infrastructure
     "GMG","SCG","GPT","MGR","CHC",
-    # Industrials
     "TCL","QAN","AZJ","ORI","AMC",
 ]
 
 # ── FTSE Watchlist (LSE exchange, GBP) ────────────────────────
 FTSE_WATCHLIST = [
-    # Financials
-    "HSBA", "LLOY", "BARC", "AV.", "LGEN", "PRU", "STJ", "HLMA",
-    "SBRE", "ABDN", "OSB", "NWG", "MNG", "JUP", "ITRK",
-    # Energy
-    "SHEL", "BP.", "SSE", "SGE", "EXPN",
-    # Mining & Materials
-    "RIO", "BHP", "AAL", "GLEN", "FRES", "MNDI", "SMDS",
-    # Consumer Staples
-    "ULVR", "DGE", "BATS", "IMB", "OCDO", "ABF",
-    # Healthcare
-    "AZN", "GSK", "HLN", "HIK", "NXT",
-    # Industrials
-    "BA.", "RR.", "IMI", "WEIR", "MERL", "RHM",
-    "DCC", "BDEV", "PSN", "MTO", "SPX", "EXPN",
-    # Consumer Discretionary
-    "AUTO", "MKS", "TSCO", "SBRY", "WPP", "IHG", "WTB",
-    "JD.", "BRBY", "CPG", "KGF", "HMSO", "SSON",
-    # Technology & Telecom
-    "VOD", "BT.A", "SMIN", "DPLM",
-    # Real Estate
-    "LAND", "SGRO", "BLND", "BBOX", "PHP", "SUPR",
-    # Utilities
-    "UU.", "SVT", "NG.", "CNA",
-    # Media
-    "REL", "PSON", "ITV",
-    # Food & Beverage
-    "CCH", "MGNS", "TATE",
-    # Insurance
-    "DLG", "JUST", "ADM",
-    # Transport
-    "IAG", "EZJ", "TUI",
-    # Diversified
-    "CRH", "SMT", "ATST", "FCIT",
-    # Retail
-    "PETS", "BKG", "TW.", "BWY",
+    "HSBA","LLOY","BARC","AV.","LGEN","PRU","STJ","HLMA",
+    "SBRE","ABDN","OSB","NWG","MNG","JUP","ITRK",
+    "SHEL","BP.","SSE","SGE","EXPN",
+    "RIO","BHP","AAL","GLEN","FRES","MNDI",
+    "ULVR","DGE","BATS","IMB","OCDO","ABF",
+    "AZN","GSK","HLN","HIK","NXT",
+    "BA.","RR.","IMI","WEIR","DCC","PSN","MTO",
+    "AUTO","MKS","TSCO","SBRY","WPP","IHG","WTB",
+    "JD.","BRBY","KGF","HMSO",
+    "VOD","BT.A","SMIN","DPLM",
+    "LAND","SGRO","BLND","BBOX","PHP","SUPR",
+    "UU.","SVT","NG.","CNA",
+    "REL","PSON","ITV",
+    "CCH","TATE",
+    "IAG","EZJ",
+    "CRH","SMT","FCIT",
+    "PETS","BKG","TW.","BWY",
 ]
 
 # ── Market configs per exchange ───────────────────────────────
@@ -482,6 +460,3 @@ ftse_regime = {
     "mode": "BULL", "spy": None, "ma20": None,
     "vix": None, "updated": None,
 }
-
-asx_state  = BotState("ASX")
-ftse_state = BotState("FTSE")
