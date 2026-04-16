@@ -1075,13 +1075,11 @@ def build_dashboard():
         asx_regime_icon=asx_regime_icon, asx_cba_str=asx_cba_str,
         asx_ma_str=asx_ma_str, asx_hours=asx_hours, asx_hours_color=asx_hours_color,
         asx_pos_count=asx_pos_count, asx_dot=asx_dot, asx_status=asx_status,
-        asx_scan_html=asx_scan_html,
         ftse_regime_mode=ftse_mode, ftse_regime_color=ftse_regime_color,
         ftse_regime_bg=ftse_regime_bg, ftse_regime_border=ftse_regime_border,
         ftse_regime_icon=ftse_regime_icon, ftse_hsba_str=ftse_hsba_str,
         ftse_ma_str=ftse_ma_str, ftse_hours=ftse_hours, ftse_hours_color=ftse_hours_color,
         ftse_pos_count=ftse_pos_count, ftse_dot=ftse_dot, ftse_status=ftse_status,
-        ftse_scan_html=ftse_scan_html,
         circuit_banner=circuit_banner, kill_banner=kill_banner,
     )
 
