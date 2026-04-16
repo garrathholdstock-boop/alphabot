@@ -969,7 +969,7 @@ def build_dashboard():
         )
 
     stocks_scan_html = build_scan_table(state.candidates, "blue")
-    crypto_scan_html = build_scan_table(crypto_state.candidates, "green")
+    crypto_scan_html = build_scan_table(crypto_intraday_state.candidates, "green")
     asx_scan_html    = build_scan_table(asx_state.candidates, "amber")
     ftse_scan_html   = build_scan_table(ftse_state.candidates, "purple")
 
