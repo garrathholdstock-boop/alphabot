@@ -578,9 +578,10 @@ def run_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
+        sc = score_signal(sym, price, change, rsi_val, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True, "score": sc, "closes": closes})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
@@ -680,9 +681,10 @@ def run_crypto_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
+        sc = score_signal(sym, price, change, rsi_val, vol_ratio, closes)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True, "score": sc, "closes": closes})
 
     results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
