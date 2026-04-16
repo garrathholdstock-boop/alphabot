@@ -1,18 +1,18 @@
 """
 AlphaBot Debug Agent v6
+- POST-redirect-GET pattern: no browser caching issues
 - Persistent CONTEXT.md injected into every fresh session
-- Agent updates context after every COMPLETE
 - Context compression every 10 steps
 - Stuck detector
-- Clean command execution
 """
 
-from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse
-import os, subprocess, sqlite3, json, anthropic, base64, html, re
+from fastapi import FastAPI, Form, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+import os, subprocess, sqlite3, json, anthropic, base64, html, re, uuid
 from datetime import datetime
 
 app = FastAPI()
+SESSIONS = {}
 
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 DB_PATH = "/home/alphabot/app/alphabot.db"
@@ -23,51 +23,56 @@ MAX_STEPS_BEFORE_COMPRESS = 10
 
 SYSTEM_PROMPT = """You are an expert autonomous debugging agent for AlphaBot trading bot.
 
-You will receive a CONTEXT section at the start of each session with architecture details,
-known errors, and previous fixes. READ IT CAREFULLY before starting - it tells you what
-to ignore and what has already been fixed.
+You will receive a CONTEXT section at the start of each session. READ IT CAREFULLY - it tells
+you the architecture, what errors to ignore, and what has already been fixed.
 
-CRITICAL COMMAND SYNTAX:
-- Search in file: grep -n candidates /home/alphabot/app/app/main.py
-  (NO quotes around search term)
+ARCHITECTURE SUMMARY:
+- Bot runs in screen session "alphabot"
+- Dashboard is on PORT 8080 (separate daemon thread, NOT visible in main bot logs)
+- Debug agent is on port 8000
+- All files under /home/alphabot/app/
+
+CRITICAL COMMAND SYNTAX - USE EXACTLY:
+- Search file: grep -n candidates /home/alphabot/app/app/main.py
+  NO quotes around search term
 - Read lines: sed -n 200,250p /home/alphabot/app/app/main.py
-  (NO quotes around line range, just numbers)
+  NO quotes around line range
 - Read file: cat /home/alphabot/app/core/config.py
 - Check env: grep BINANCE /home/alphabot/app/.env
 
-RESPONSE FORMAT (always exactly this structure):
+RESPONSE FORMAT (always exactly):
 
 STATUS: [INVESTIGATING | FOUND_ISSUE | FIX_PROPOSED | VERIFIED | COMPLETE]
 
 ANALYSIS:
-[2-4 sentences. Cite specific line numbers and values.]
+[2-4 sentences with specific line numbers and values]
 
 NEXT_COMMAND:
 ```
-command here
+command here - no quotes around search terms
 ```
 
 REASON:
 [1 sentence]
 
 CONTEXT_UPDATE:
-[Only fill this in when STATUS is COMPLETE. Write 1-2 sentences summarising what you fixed,
-to be appended to the persistent context file. Otherwise leave blank.]
+[Only when COMPLETE: 1-2 sentences summarising the fix for the context file. Otherwise blank.]
 
 RULES:
 - One command per response
-- NO quotes around grep search terms or sed line ranges
-- Read the CONTEXT section to avoid re-investigating already fixed issues
-- If COMPLETE, fill in CONTEXT_UPDATE so the fix is remembered for next time
-- If stuck same command failing, try completely different approach
+- NO smart quotes in commands
+- Read CONTEXT to avoid re-investigating fixed issues
+- If COMPLETE, fill CONTEXT_UPDATE
+- If stuck, try completely different approach
 """
 
-COMPRESS_PROMPT = """Summarise this debugging session so far into a compact paragraph.
-Include: problem being solved, approaches tried, findings, current theory.
-Be specific with file names and line numbers. Keep under 300 words."""
+COMPRESS_PROMPT = """Summarise this debugging session into a compact paragraph under 300 words.
+Include: problem, approaches tried, findings, current theory. Be specific with file names and line numbers."""
+
 
 def clean(s):
     return s.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'").strip()
+
 
 def is_safe(cmd):
     cmd = clean(cmd)
@@ -75,12 +80,10 @@ def is_safe(cmd):
     if any(b in cmd for b in blocked):
         return False
     allowed = ['grep', 'cat ', 'head', 'tail', 'sed', 'wc ', 'ls ', 'find ', 'python3', 'ps ', 'df ', 'free ', 'screen', 'git ', 'sqlite3', 'echo ', 'env']
-    for a in allowed:
-        if cmd.startswith(a):
-            return True
-    return False
+    return any(cmd.startswith(a) for a in allowed)
 
-def run_cmd(cmd, timeout=15):
+
+def run_cmd(cmd, timeout=10):
     cmd = clean(cmd)
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
@@ -89,6 +92,7 @@ def run_cmd(cmd, timeout=15):
     except Exception as e:
         return f"Error: {e}"
 
+
 def load_context():
     try:
         with open(CONTEXT_PATH, 'r') as f:
@@ -96,29 +100,32 @@ def load_context():
     except:
         return "No context file found."
 
+
 def update_context(fix_summary):
-    """Append a fix summary to the context file"""
     try:
         with open(CONTEXT_PATH, 'r') as f:
             content = f.read()
         now = datetime.now().strftime("%d-%b-%Y %H:%M")
-        # Add to fixes list
-        fix_line = f"\n{len(re.findall(r'^[0-9]+\.', content, re.MULTILINE)) + 1}. [{now}] {fix_summary}"
-        content = content.replace("## Fixes Made By Agent (most recent first)", f"## Fixes Made By Agent (most recent first)\n{fix_line.strip()}")
-        # Update timestamp
+        new_line = f"\n- [{now}] {fix_summary}"
+        content = content.replace(
+            "## Fixes Made By Agent (most recent first)",
+            f"## Fixes Made By Agent (most recent first){new_line}"
+        )
         content = re.sub(r'## Last Updated\n.*', f'## Last Updated\n{now}', content)
         with open(CONTEXT_PATH, 'w') as f:
             f.write(content)
-    except Exception as e:
+    except:
         pass
 
-def get_context():
+
+def get_bot_context():
     try:
-        subprocess.run(["/usr/bin/screen", "-S", SCREEN_NAME, "-X", "hardcopy", "/tmp/ab.txt"], timeout=5, capture_output=True)
+        subprocess.run(["/usr/bin/screen", "-S", SCREEN_NAME, "-X", "hardcopy", "/tmp/ab.txt"],
+                       timeout=2, capture_output=True)
         with open("/tmp/ab.txt", "r", errors="replace") as f:
             log = "".join(f.readlines()[-60:])
     except:
-        log = "No screen log"
+        log = "No screen log available"
     screen = run_cmd("/usr/bin/screen -ls")
     db = {}
     try:
@@ -127,12 +134,14 @@ def get_context():
         cur = conn.cursor()
         cur.execute("SELECT * FROM trades ORDER BY created_at DESC LIMIT 3")
         db["trades"] = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT COUNT(*) as cnt FROM trades WHERE created_at LIKE ?", (f"{datetime.now().strftime('%Y-%m-%d')}%",))
+        cur.execute("SELECT COUNT(*) as cnt FROM trades WHERE created_at LIKE ?",
+                    (f"{datetime.now().strftime('%Y-%m-%d')}%",))
         db["today"] = cur.fetchone()["cnt"]
         conn.close()
     except Exception as e:
         db = {"error": str(e)}
     return log, screen, db
+
 
 def call_claude(messages, system=None):
     if not CLAUDE_API_KEY:
@@ -149,19 +158,21 @@ def call_claude(messages, system=None):
     except Exception as e:
         return f"Claude API error: {e}"
 
+
 def compress_history(steps, question):
-    history_text = "\n\n".join([
-        f"{'CLAUDE' if s['role']=='assistant' else 'VPS'}: {s['content'] if isinstance(s['content'], str) else str(s['content'])}"
+    text = "\n\n".join([
+        f"{'CLAUDE' if s['role'] == 'assistant' else 'VPS'}: {s['content'] if isinstance(s['content'], str) else str(s['content'])}"
         for s in steps
     ])
     summary = call_claude(
-        [{"role": "user", "content": f"PROBLEM: {question}\n\nSESSION SO FAR:\n{history_text}"}],
+        [{"role": "user", "content": f"PROBLEM: {question}\n\nSESSION:\n{text}"}],
         system=COMPRESS_PROMPT
     )
-    return [{"role": "user", "content": f"[COMPRESSED - {len(steps)} steps so far]\n{summary}\n\nContinue debugging: {question}"}]
+    return [{"role": "user", "content": f"[COMPRESSED - {len(steps)} steps]\n{summary}\n\nContinue: {question}"}]
 
-def detect_stuck(steps, current_cmd, threshold=3):
-    if not current_cmd:
+
+def detect_stuck(steps, cmd, threshold=3):
+    if not cmd:
         return False
     recent = []
     for s in reversed(steps[-10:]):
@@ -169,7 +180,8 @@ def detect_stuck(steps, current_cmd, threshold=3):
             m = re.search(r'COMMAND: (.+?)\n', s["content"])
             if m:
                 recent.append(clean(m.group(1)))
-    return recent.count(clean(current_cmd)) >= threshold
+    return recent.count(clean(cmd)) >= threshold
+
 
 def parse_response(text):
     status = re.search(r'STATUS:\s*(\w+)', text)
@@ -180,20 +192,23 @@ def parse_response(text):
     command = clean(command.group(1)) if command else ""
     reason = re.search(r'REASON:\s*(.*?)(?=CONTEXT_UPDATE:|$)', text, re.DOTALL)
     reason = reason.group(1).strip() if reason else ""
-    ctx_update = re.search(r'CONTEXT_UPDATE:\s*(.*?)$', text, re.DOTALL)
-    ctx_update = ctx_update.group(1).strip() if ctx_update else ""
-    return status, analysis, command, reason, ctx_update
+    ctx = re.search(r'CONTEXT_UPDATE:\s*(.*?)$', text, re.DOTALL)
+    ctx = ctx.group(1).strip() if ctx else ""
+    return status, analysis, command, reason, ctx
 
-def encode_steps(steps):
+
+def enc(steps):
     return base64.b64encode(json.dumps(steps).encode()).decode()
 
-def decode_steps(h):
+
+def dec(h):
     if not h:
         return []
     try:
         return json.loads(base64.b64decode(h.encode()).decode())
     except:
         return []
+
 
 def get_db_display():
     try:
@@ -202,25 +217,31 @@ def get_db_display():
         cur = conn.cursor()
         cur.execute("SELECT * FROM trades ORDER BY created_at DESC LIMIT 5")
         trades = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT * FROM near_misses ORDER BY created_at DESC LIMIT 5")
-        nms = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT COUNT(*) as cnt FROM trades WHERE created_at LIKE ?", (f"{datetime.now().strftime('%Y-%m-%d')}%",))
+        cur.execute("SELECT COUNT(*) as cnt FROM trades WHERE created_at LIKE ?",
+                    (f"{datetime.now().strftime('%Y-%m-%d')}%",))
         today = cur.fetchone()["cnt"]
         conn.close()
-        return trades, nms, today
+        return trades, today
     except:
-        return [], [], "?"
+        return [], "?"
+
+
+def store_and_redirect(data):
+    sid = str(uuid.uuid4())[:8]
+    SESSIONS[sid] = data
+    return RedirectResponse(f"/r/{sid}", status_code=303)
+
 
 def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run="",
-           error="", question="", history="", complete=False, file_content="", file_name="",
-           compressed=False, step_count=0, ctx_updated=False):
+           error="", question="", history="", complete=False, compressed=False,
+           step_count=0, ctx_updated=False, **kwargs):
 
     screen_status = run_cmd("/usr/bin/screen -ls")
     bot_ok = "alphabot" in screen_status
     sc = "#00ff88" if bot_ok else "#ef4444"
     st = "RUNNING" if bot_ok else "DOWN"
-    trades, nms, today = get_db_display()
-    steps = decode_steps(history)
+    trades, today = get_db_display()
+    steps = dec(history)
 
     trades_html = ""
     for t in trades:
@@ -228,8 +249,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         c = "#00ff88" if pnl >= 0 else "#ef4444"
         trades_html += f"<tr><td>{t.get('symbol','')}</td><td>{t.get('side','')}</td><td>${float(t.get('price',0)):.2f}</td><td style='color:{c}'>${pnl:.2f}</td><td style='color:#475569;font-size:10px'>{t.get('reason','')}</td></tr>"
 
-    status_colors = {"INVESTIGATING": "#f59e0b", "FOUND_ISSUE": "#ef4444", "FIX_PROPOSED": "#7c3aed", "VERIFIED": "#00ff88", "COMPLETE": "#00ff88"}
-    sc2 = status_colors.get(status, "#64748b")
+    sc2 = {"INVESTIGATING": "#f59e0b", "FOUND_ISSUE": "#ef4444", "FIX_PROPOSED": "#7c3aed",
+            "VERIFIED": "#00ff88", "COMPLETE": "#00ff88"}.get(status, "#64748b")
     stuck = detect_stuck(steps, command) if command else False
 
     agent_html = ""
@@ -237,45 +258,35 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         ctx_badge = '<div style="background:#7c3aed;color:#fff;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;margin-top:8px;display:inline-block;">CONTEXT UPDATED</div>' if ctx_updated else ''
         agent_html = f"""<div style="background:#0a1a0f;border:2px solid #00ff88;border-radius:10px;padding:20px;margin-bottom:12px;text-align:center;">
           <div style="font-size:24px;color:#00ff88;font-weight:700;margin-bottom:8px;">COMPLETE</div>
-          <div style="font-size:13px;color:#94a3b8;">{html.escape(analysis)}</div>
-          {ctx_badge}
-        </div>"""
+          <div style="font-size:13px;color:#94a3b8;">{html.escape(analysis)}</div>{ctx_badge}</div>"""
     elif analysis:
-        badges = f'<div style="font-size:9px;color:#64748b;margin-left:8px;">Step {step_count}</div>'
+        badges = f'<span style="font-size:9px;color:#64748b;margin-left:8px;">Step {step_count}</span>'
         if compressed:
-            badges += '<div style="font-size:9px;background:#1e1e2e;color:#64748b;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPRESSED</div>'
+            badges += '<span style="font-size:9px;background:#1e1e2e;color:#64748b;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPRESSED</span>'
         agent_html = f"""<div style="background:#0a1a0f;border:1px solid #00ff88;border-radius:10px;padding:16px;margin-bottom:12px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
             <div style="display:flex;align-items:center;">
-              <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#00ff88;text-transform:uppercase;">Claude Analysis</div>
-              {badges}
+              <span style="font-size:10px;font-weight:700;letter-spacing:1px;color:#00ff88;text-transform:uppercase;">Claude Analysis</span>{badges}
             </div>
             <div style="background:{sc2};color:#000;font-size:9px;font-weight:700;padding:3px 8px;border-radius:10px;">{status}</div>
           </div>
           <div style="font-size:13px;line-height:1.7;color:#e2e8f0;margin-bottom:10px;">{html.escape(analysis)}</div>
           {f'<div style="font-size:11px;color:#64748b;font-style:italic;">{html.escape(reason)}</div>' if reason else ''}
         </div>"""
-
         if command:
-            safe = is_safe(command)
             if stuck:
-                btn_color = "#f59e0b"
-                btn_text = "APPROVE &amp; RUN (STUCK - Claude will change approach)"
-            elif safe:
-                btn_color = "#00ff88"
-                btn_text = "APPROVE &amp; RUN"
+                btn_color, btn_text = "#f59e0b", "APPROVE &amp; RUN (STUCK - will force new approach)"
+            elif is_safe(command):
+                btn_color, btn_text = "#00ff88", "APPROVE &amp; RUN"
             else:
-                btn_color = "#ef4444"
-                btn_text = "NOT ALLOWED (unsafe)"
-            disabled = "" if safe else "disabled"
-            stuck_input = '<input type="hidden" name="stuck" value="1">' if stuck else ''
-
+                btn_color, btn_text = "#ef4444", "NOT ALLOWED (unsafe)"
+            disabled = "" if is_safe(command) else "disabled"
             agent_html += f"""<div style="background:#0d0d1a;border:2px solid #7c3aed;border-radius:10px;padding:16px;margin-bottom:12px;">
               <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#7c3aed;text-transform:uppercase;margin-bottom:12px;">Next Action</div>
               <div style="background:#0a0a0f;border:1px solid #1e1e2e;border-radius:8px;padding:12px;margin-bottom:12px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
                   <span style="font-size:10px;color:#64748b;font-weight:700;">COMMAND</span>
-                  <button onclick="copyText('cmdbox')" style="background:#1e1e2e;border:none;color:#94a3b8;font-size:10px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:'JetBrains Mono',monospace;">COPY</button>
+                  <button onclick="copyText('cmdbox')" style="background:#1e1e2e;border:none;color:#94a3b8;font-size:10px;padding:4px 10px;border-radius:4px;cursor:pointer;">COPY</button>
                 </div>
                 <pre id="cmdbox" style="color:#00ff88;margin:0;font-size:12px;white-space:pre-wrap;">{html.escape(command)}</pre>
               </div>
@@ -284,8 +295,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
                 <input type="hidden" name="question" value="{html.escape(question)}">
                 <input type="hidden" name="history" value="{html.escape(history)}">
                 <input type="hidden" name="step_count" value="{step_count}">
-                {stuck_input}
-                <button type="submit" {disabled} style="display:block;width:100%;background:{btn_color};border:none;border-radius:8px;color:#000;font-family:'Syne',sans-serif;font-weight:800;font-size:15px;padding:12px;cursor:pointer;">{btn_text}</button>
+                {'<input type="hidden" name="stuck" value="1">' if stuck else ''}
+                <button type="submit" {disabled} style="display:block;width:100%;background:{btn_color};border:none;border-radius:8px;color:#000;font-family:Syne,sans-serif;font-weight:800;font-size:15px;padding:12px;cursor:pointer;">{btn_text}</button>
               </form>
             </div>"""
 
@@ -294,13 +305,6 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         cmd_html = f"""<div style="background:#0a0a14;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
           <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Output: {html.escape(cmd_run)}</div>
           <pre style="color:#94a3b8;font-size:11px;max-height:250px;overflow-y:auto;white-space:pre-wrap;">{html.escape(cmd_output)}</pre>
-        </div>"""
-
-    file_html = ""
-    if file_content:
-        file_html = f"""<div style="background:#0a0a14;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
-          <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">File: {html.escape(file_name)}</div>
-          <pre style="color:#94a3b8;font-size:10px;max-height:300px;overflow-y:auto;">{html.escape(file_content[:6000])}</pre>
         </div>"""
 
     err_html = f'<div style="background:#2d0a0a;border:1px solid #ef4444;border-radius:8px;padding:12px;margin-bottom:12px;color:#ef4444;font-size:13px;">{html.escape(error)}</div>' if error else ""
@@ -328,31 +332,23 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         ("Near misses", "Analyse near misses - should we adjust MIN_SIGNAL_SCORE?"),
         ("Next steps", "What should I do next to move AlphaBot closer to live trading?"),
         ("Fix Binance", "The Binance 401 error is blocking crypto trades. Check .env for BINANCE keys and diagnose why authentication fails."),
-        ("Fix dashboard", "The dashboard on port 8080 is not loading. Diagnose why - check if the dashboard thread started correctly."),
+        ("Fix dashboard", "The dashboard on port 8080 is not loading. Check if the dashboard thread started and what port is configured."),
     ]:
         quick += f"""<form method="POST" action="/ask" style="display:inline-block;margin:3px;">
-          <input type="hidden" name="question" value="{q}">
+          <input type="hidden" name="question" value="{html.escape(q)}">
           <button type="submit" style="background:#111118;border:1px solid #1e1e2e;color:#94a3b8;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;">{label}</button>
         </form>"""
 
-    safe_files = ["app/main.py", "app/dashboard.py", "core/config.py", "core/execution.py", "core/risk.py", "data/analytics.py", "data/database.py", "start.sh", ".env"]
-    file_btns = ""
-    for f in safe_files:
-        file_btns += f"""<form method="POST" action="/file" style="display:inline-block;margin:3px;">
+    safe_files = ["app/main.py", "app/dashboard.py", "core/config.py", "core/execution.py",
+                  "core/risk.py", "data/analytics.py", "data/database.py", "start.sh", ".env"]
+    file_btns = "".join([f"""<form method="POST" action="/file" style="display:inline-block;margin:3px;">
           <input type="hidden" name="filename" value="{f}">
           <input type="hidden" name="question" value="{html.escape(question)}">
           <input type="hidden" name="history" value="{html.escape(history)}">
           <button type="submit" style="background:#0a0a14;border:1px solid #1e1e2e;color:#64748b;font-family:'JetBrains Mono',monospace;font-size:10px;padding:6px 10px;border-radius:5px;cursor:pointer;">{f}</button>
-        </form>"""
+        </form>""" for f in safe_files])
 
-    # Context viewer
     ctx_content = load_context()
-    ctx_html = f"""<div class="card">
-      <details>
-        <summary style="cursor:pointer;font-size:10px;font-weight:700;letter-spacing:1px;color:#7c3aed;text-transform:uppercase;">Agent Context File</summary>
-        <pre style="margin-top:8px;font-size:10px;color:#475569;white-space:pre-wrap;max-height:300px;overflow-y:auto;">{html.escape(ctx_content)}</pre>
-      </details>
-    </div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -363,7 +359,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
-body {{ background:#0a0a0f; color:#e2e8f0; font-family:'JetBrains Mono',monospace; min-height:100vh; padding:16px; }}
+body {{ background:#0a0a0f; color:#e2e8f0; font-family:'JetBrains Mono',monospace; padding:16px; }}
 header {{ display:flex; align-items:center; gap:12px; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #1e1e2e; }}
 .logo {{ font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#00ff88; }}
 .logo span {{ color:#64748b; }}
@@ -375,12 +371,9 @@ textarea {{ width:100%; background:#0a0a0f; border:1px solid #1e1e2e; border-rad
 textarea:focus {{ outline:none; border-color:#00ff88; }}
 .ask-btn {{ display:block; width:100%; background:#00ff88; border:none; border-radius:8px; color:#000; font-family:'Syne',sans-serif; font-weight:800; font-size:15px; padding:12px; cursor:pointer; margin-top:8px; }}
 table {{ width:100%; border-collapse:collapse; font-size:11px; }}
-th {{ color:#64748b; text-align:left; padding:4px 6px; border-bottom:1px solid #1e1e2e; font-weight:700; }}
+th {{ color:#64748b; text-align:left; padding:4px 6px; border-bottom:1px solid #1e1e2e; }}
 td {{ padding:5px 6px; border-bottom:1px solid #0f0f18; }}
-.stat {{ display:inline-block; background:#0a0a0f; border:1px solid #1e1e2e; border-radius:6px; padding:8px 12px; margin:4px; text-align:center; min-width:80px; }}
-.stat-val {{ font-size:20px; font-weight:700; color:#00ff88; }}
-.stat-lbl {{ font-size:10px; color:#64748b; margin-top:2px; }}
-details summary {{ cursor:pointer; color:#64748b; font-size:11px; letter-spacing:1px; text-transform:uppercase; font-weight:700; padding:4px 0; }}
+details summary {{ cursor:pointer; color:#64748b; font-size:11px; text-transform:uppercase; font-weight:700; padding:4px 0; }}
 .toast {{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#00ff88; color:#000; font-weight:700; font-size:13px; padding:10px 20px; border-radius:8px; display:none; z-index:999; }}
 </style>
 </head>
@@ -388,11 +381,11 @@ details summary {{ cursor:pointer; color:#64748b; font-size:11px; letter-spacing
 <div class="toast" id="toast">Copied!</div>
 <script>
 function copyText(id) {{
-  const t = document.getElementById(id);
-  if (t) navigator.clipboard.writeText(t.innerText).then(() => {{
-    const toast = document.getElementById('toast');
+  var t = document.getElementById(id);
+  if (t) navigator.clipboard.writeText(t.innerText).then(function() {{
+    var toast = document.getElementById('toast');
     toast.style.display = 'block';
-    setTimeout(() => toast.style.display = 'none', 1500);
+    setTimeout(function() {{ toast.style.display = 'none'; }}, 1500);
   }});
 }}
 </script>
@@ -400,25 +393,34 @@ function copyText(id) {{
   <div class="logo">Alpha<span>Bot</span> AGENT<span class="v">v6</span></div>
   <div class="badge">&#9679; {st}</div>
 </header>
-{err_html}{agent_html}{cmd_html}{file_html}{hist_html}
+{err_html}{agent_html}{cmd_html}{hist_html}
 <div style="margin-bottom:12px;">{quick}</div>
 <form method="POST" action="/ask">
   <div class="card">
     <div class="card-title">Describe the problem</div>
-    <textarea name="question" placeholder="e.g. Fix the Binance 401 error">{html.escape(question)}</textarea>
+    <textarea name="question" placeholder="e.g. Fix the Binance 401 error"></textarea>
     <button type="submit" class="ask-btn">START AGENT</button>
   </div>
 </form>
 <div class="card">
   <div class="card-title">File Viewer</div>
-  <div>{file_btns}</div>
+  {file_btns}
 </div>
-{ctx_html}
+<div class="card">
+  <details>
+    <summary style="color:#7c3aed;">Agent Context File</summary>
+    <pre style="margin-top:8px;font-size:10px;color:#475569;white-space:pre-wrap;max-height:300px;overflow-y:auto;">{html.escape(ctx_content)}</pre>
+  </details>
+</div>
 <div class="card">
   <div class="card-title">Stats</div>
-  <div>
-    <div class="stat"><div class="stat-val">{today}</div><div class="stat-lbl">Trades Today</div></div>
-    <div class="stat"><div class="stat-val" style="color:{sc};">{st}</div><div class="stat-lbl">Bot</div></div>
+  <div style="display:inline-block;background:#0a0a0f;border:1px solid #1e1e2e;border-radius:6px;padding:8px 12px;margin:4px;text-align:center;">
+    <div style="font-size:20px;font-weight:700;color:#00ff88;">{today}</div>
+    <div style="font-size:10px;color:#64748b;margin-top:2px;">Trades Today</div>
+  </div>
+  <div style="display:inline-block;background:#0a0a0f;border:1px solid #1e1e2e;border-radius:6px;padding:8px 12px;margin:4px;text-align:center;">
+    <div style="font-size:20px;font-weight:700;color:{sc};">{st}</div>
+    <div style="font-size:10px;color:#64748b;margin-top:2px;">Bot</div>
   </div>
 </div>
 <div class="card">
@@ -434,79 +436,81 @@ function copyText(id) {{
 </body>
 </html>"""
 
+
 @app.get("/", response_class=HTMLResponse)
-async def home():
+async def home(response: Response):
+    response.headers["Cache-Control"] = "no-store"
     return render()
 
-@app.post("/ask", response_class=HTMLResponse)
+
+@app.get("/r/{sid}", response_class=HTMLResponse)
+async def result(sid: str, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    data = SESSIONS.get(sid, {})
+    return render(**data)
+
+
+@app.post("/ask")
 async def ask(question: str = Form("")):
     if not question.strip():
-        return render(error="Please enter a question.")
-    log, screen, db = get_context()
+        return RedirectResponse("/", status_code=303)
+    log, screen, db = get_bot_context()
     context = load_context()
-    messages = [{
-        "role": "user",
-        "content": f"CONTEXT (read this first):\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM TO SOLVE: {question}"
-    }]
+    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM: {question}"}]
     response = call_claude(messages)
     status, analysis, command, reason, ctx_update = parse_response(response)
     steps = messages + [{"role": "assistant", "content": response}]
-    h = encode_steps(steps)
     complete = status == "COMPLETE"
     if complete and ctx_update:
         update_context(ctx_update)
-    return render(analysis=analysis, command=command, reason=reason, status=status,
-                  question=question, history=h, complete=complete, step_count=1,
-                  ctx_updated=bool(ctx_update and complete))
+    return store_and_redirect(dict(analysis=analysis, command=command, reason=reason,
+                                   status=status, question=question, history=enc(steps),
+                                   complete=complete, step_count=1,
+                                   ctx_updated=bool(ctx_update and complete)))
 
-@app.post("/approve", response_class=HTMLResponse)
+
+@app.post("/approve")
 async def approve(command: str = Form(""), question: str = Form(""),
                   history: str = Form(""), step_count: int = Form(0),
                   stuck: str = Form("")):
     command = clean(command)
-    steps = decode_steps(history)
-
+    steps = dec(history)
     if not is_safe(command):
-        return render(error=f"Command blocked: {command}", question=question,
-                      history=history, step_count=step_count)
-
+        return store_and_redirect(dict(error=f"Command blocked: {command}",
+                                       question=question, history=history, step_count=step_count))
     output = run_cmd(command)
     step_count += 1
-
-    if stuck:
-        steps.append({"role": "user", "content": f"COMMAND: {command}\nOUTPUT:\n{output}\n\n[NOTE: This approach has been tried multiple times. You MUST try a completely different approach now.]"})
-    else:
-        steps.append({"role": "user", "content": f"COMMAND: {command}\nOUTPUT:\n{output}"})
-
+    note = "\n\n[NOTE: Same command tried multiple times. Try a completely different approach.]" if stuck else ""
+    steps.append({"role": "user", "content": f"COMMAND: {command}\nOUTPUT:\n{output}{note}"})
     compressed = False
     if step_count % MAX_STEPS_BEFORE_COMPRESS == 0:
         steps = compress_history(steps, question)
         compressed = True
-
     response = call_claude(steps)
     status, analysis, next_cmd, reason, ctx_update = parse_response(response)
     steps.append({"role": "assistant", "content": response})
-    h = encode_steps(steps)
-
     complete = status == "COMPLETE"
     if complete and ctx_update:
         update_context(ctx_update)
+    return store_and_redirect(dict(analysis=analysis, command=next_cmd, reason=reason,
+                                   status=status, cmd_output=output, cmd_run=command,
+                                   question=question, history=enc(steps), complete=complete,
+                                   step_count=step_count, compressed=compressed,
+                                   ctx_updated=bool(ctx_update and complete)))
 
-    return render(analysis=analysis, command=next_cmd, reason=reason, status=status,
-                  cmd_output=output, cmd_run=command, question=question, history=h,
-                  complete=complete, step_count=step_count, compressed=compressed,
-                  ctx_updated=bool(ctx_update and complete))
 
-@app.post("/file", response_class=HTMLResponse)
+@app.post("/file")
 async def view_file(filename: str = Form(""), question: str = Form(""), history: str = Form("")):
     safe_files = ["app/main.py", "app/dashboard.py", "core/config.py", "core/execution.py",
                   "core/risk.py", "data/analytics.py", "data/database.py", "start.sh", ".env"]
     if filename not in safe_files:
-        return render(error=f"File not allowed: {filename}", question=question, history=history)
+        return store_and_redirect(dict(error=f"File not allowed: {filename}",
+                                       question=question, history=history))
     path = os.path.join(APP_PATH, filename)
     try:
         with open(path, "r", errors="replace") as f:
             content = f.read()
     except Exception as e:
         content = f"Error: {e}"
-    return render(file_content=content, file_name=filename, question=question, history=history)
+    return store_and_redirect(dict(file_content=content, file_name=filename,
+                                   question=question, history=history))
