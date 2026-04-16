@@ -1,7 +1,8 @@
 """
 core/execution.py — AlphaBot Order Execution & API Wrappers
-Stocks: IB Gateway via ib_insync (port 4002 paper / 4001 live)
-Crypto: Binance API (unchanged)
+Stocks: IB Gateway via ib_insync (port 4004 paper / 4001 live)
+Crypto: Binance API
+Broker: IBKR only — no Alpaca.
 """
 
 import time
@@ -25,14 +26,15 @@ from core.config import (
     _binance_lot_cache, _binance_balance_cache,
     api_health, kill_switch, exchange_stops,
     state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state,
+    asx_state, ftse_state,
     _save_ban_to_disk,
 )
 import core.config as cfg
 
 # ── IBKR connection settings ──────────────────────────────────
-IBKR_HOST      = "127.0.0.1"
-IBKR_PORT      = 4001 if IS_LIVE else 4004
-IBKR_CLIENT_ID = 1
+IBKR_HOST      = cfg.IBKR_HOST
+IBKR_PORT      = cfg.IBKR_PORT
+IBKR_CLIENT_ID = cfg.IBKR_CLIENT_ID
 
 # Global IB instance
 _ib = None
@@ -72,26 +74,27 @@ def run_ib(coro):
 
 # ── API health ────────────────────────────────────────────────
 def record_api_success():
-    api_health["alpaca_fails"] = 0
-    api_health["data_fails"]   = 0
+    api_health["ibkr_fails"] = 0
+    api_health["data_fails"]  = 0
     api_health["last_success"] = datetime.now().isoformat()
 
 def record_api_failure(source="ibkr"):
     key = f"{source}_fails"
     api_health[key] = api_health.get(key, 0) + 1
-    total_fails = api_health.get("alpaca_fails", 0) + api_health.get("data_fails", 0)
+    total_fails = api_health.get("ibkr_fails", 0) + api_health.get("data_fails", 0)
     if total_fails >= api_health["max_fails"] and not kill_switch["active"]:
         kill_switch["active"]       = True
         kill_switch["reason"]       = f"API kill: {total_fails} consecutive failures ({source})"
         kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
-        for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+        for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state,
+                   asx_state, ftse_state]:
             st.shutoff = True
         log.error(f"[API KILL] {total_fails} consecutive API failures — all bots stopped")
 
 
 # ── IBKR market data ──────────────────────────────────────────
 def _make_contract(symbol, exchange="SMART", currency="USD"):
-    """Create an IBKR Stock contract. Defaults to US (SMART/USD)."""
+    """Create an IBKR Stock contract."""
     return Stock(symbol, exchange, currency)
 
 # Symbol → (exchange, currency) lookup for international markets
@@ -100,7 +103,8 @@ try:
     from core.config import ASX_WATCHLIST, FTSE_WATCHLIST
     for s in ASX_WATCHLIST: _INTL_MARKET[s] = ("ASX", "AUD")
     for s in FTSE_WATCHLIST: _INTL_MARKET[s] = ("LSE", "GBP")
-except Exception: pass
+except Exception:
+    pass
 
 def _contract_for(symbol):
     """Return correct IBKR contract for any symbol."""
@@ -115,7 +119,6 @@ def fetch_bars(symbol, crypto=False):
         bars = binance_fetch_bars(symbol, interval="1d", limit=35)
         return bars if bars and len(bars) >= 15 else None
 
-    # Stocks via IBKR
     ib = get_ib()
     if not ib:
         record_api_failure("ibkr")
@@ -143,7 +146,7 @@ def fetch_bars(symbol, crypto=False):
         return None
 
 def fetch_bars_batch(symbols, limit=30):
-    """Fetch daily bars for multiple symbols via IBKR. Returns dict of symbol->bars."""
+    """Fetch daily bars for multiple symbols via IBKR."""
     if not symbols:
         return {}
     results = {}
@@ -151,7 +154,7 @@ def fetch_bars_batch(symbols, limit=30):
         bars = fetch_bars(symbol)
         if bars:
             results[symbol] = bars
-        time.sleep(0.1)  # be gentle with IBKR
+        time.sleep(0.1)
     log.info(f"[IBKR BATCH] Fetched bars for {len(results)}/{len(symbols)} symbols")
     return results
 
@@ -162,7 +165,6 @@ def fetch_latest_price(symbol, crypto=False):
             return None
         return binance_fetch_price(symbol)
 
-    # Stocks via IBKR
     ib = get_ib()
     if not ib:
         return None
@@ -189,7 +191,6 @@ def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
         bars = binance_fetch_bars(symbol, interval=binance_tf, limit=limit)
         return bars if bars and len(bars) >= 10 else None
 
-    # Stocks via IBKR
     ib = get_ib()
     if not ib:
         return None
@@ -229,38 +230,28 @@ def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
     return results
 
 def _timeframe_to_ibkr(timeframe):
-    """Convert AlphaBot timeframe string to IBKR bar size."""
     mapping = {
-        "1Min":  "1 min",
-        "5Min":  "5 mins",
-        "15Min": "15 mins",
-        "30Min": "30 mins",
-        "1Hour": "1 hour",
-        "2Hour": "2 hours",
-        "4Hour": "4 hours",
-        "1Day":  "1 day",
+        "1Min":  "1 min",  "5Min":  "5 mins", "15Min": "15 mins",
+        "30Min": "30 mins", "1Hour": "1 hour", "2Hour": "2 hours",
+        "4Hour": "4 hours", "1Day":  "1 day",
     }
     return mapping.get(timeframe, "1 hour")
 
 def _limit_to_duration(limit, timeframe):
-    """Estimate IBKR duration string from limit and timeframe."""
     mins_map = {
         "1Min": 1, "5Min": 5, "15Min": 15, "30Min": 30,
         "1Hour": 60, "2Hour": 120, "4Hour": 240, "1Day": 1440,
     }
     mins = mins_map.get(timeframe, 60)
     total_mins = mins * limit
-    if total_mins <= 480:
-        return f"{max(1, total_mins // 60 + 1)} D"
-    elif total_mins <= 2400:
-        return f"{max(1, total_mins // 480 + 1)} D"
-    else:
-        return "5 D"
+    if total_mins <= 480:    return f"{max(1, total_mins // 60 + 1)} D"
+    elif total_mins <= 2400: return f"{max(1, total_mins // 480 + 1)} D"
+    else:                    return "5 D"
 
 
 # ── IBKR account info ─────────────────────────────────────────
 def ibkr_get_account():
-    """Get account summary from IBKR. Returns dict similar to Alpaca account."""
+    """Get account summary from IBKR."""
     ib = get_ib()
     if not ib:
         return {}
@@ -283,7 +274,7 @@ def ibkr_get_account():
         return {}
 
 def ibkr_get_positions():
-    """Get open positions from IBKR. Returns list similar to Alpaca positions."""
+    """Get open positions from IBKR."""
     ib = get_ib()
     if not ib:
         return []
@@ -313,10 +304,11 @@ def ibkr_get_open_orders():
         result = []
         for trade in trades:
             result.append({
-                "symbol":   trade.contract.symbol,
-                "type":     trade.order.orderType.lower(),
-                "id":       trade.order.orderId,
-                "order_id": trade.order.orderId,
+                "symbol":     trade.contract.symbol,
+                "type":       trade.order.orderType.lower(),
+                "order_type": trade.order.orderType.upper(),
+                "id":         trade.order.orderId,
+                "order_id":   trade.order.orderId,
             })
         return result
     except Exception as e:
@@ -324,26 +316,26 @@ def ibkr_get_open_orders():
         return []
 
 
-# ── IBKR order placement ──────────────────────────────────────
-def place_stop_order_alpaca(symbol, qty, stop_price):
-    """Place a stop-loss order via IBKR (replaces Alpaca stop order)."""
+# ── IBKR stop order management ────────────────────────────────
+def place_stop_order_ibkr(symbol, qty, stop_price):
+    """Place a stop-loss order via IBKR."""
     ib = get_ib()
     if not ib:
         return None
     try:
-        contract  = _contract_for(symbol)
-        order     = StopOrder("SELL", qty, stop_price)
-        trade     = ib.placeOrder(contract, order)
+        contract = _contract_for(symbol)
+        order    = StopOrder("SELL", qty, stop_price)
+        trade    = ib.placeOrder(contract, order)
         ib.sleep(0.5)
-        order_id  = trade.order.orderId
+        order_id = trade.order.orderId
         log.info(f"[IBKR STOP] Placed stop for {symbol} @ ${stop_price:.2f} id:{order_id}")
         return {"id": order_id, "symbol": symbol, "status": "accepted"}
     except Exception as e:
         log.warning(f"[IBKR] place_stop_order {symbol}: {e}")
         return None
 
-def cancel_stop_order_alpaca(order_id):
-    """Cancel an order via IBKR (replaces Alpaca cancel)."""
+def cancel_stop_order_ibkr(order_id):
+    """Cancel an order via IBKR."""
     ib = get_ib()
     if not ib:
         return False
@@ -364,14 +356,14 @@ def update_exchange_stop(symbol, qty, new_stop_price):
     """Update trailing stop via IBKR."""
     old_id = exchange_stops.get(symbol)
     if old_id:
-        cancel_stop_order_alpaca(old_id)
-    new_order = place_stop_order_alpaca(symbol, qty, round(new_stop_price, 2))
+        cancel_stop_order_ibkr(old_id)
+    new_order = place_stop_order_ibkr(symbol, qty, round(new_stop_price, 2))
     if new_order and new_order.get("id"):
         exchange_stops[symbol] = new_order["id"]
         log.info(f"[TRAIL] Updated exchange stop {symbol} → ${new_stop_price:.2f}")
 
 
-# ── Binance API (unchanged) ───────────────────────────────────
+# ── Binance API ───────────────────────────────────────────────
 def _binance_sign(params):
     query = urllib.parse.urlencode(params)
     sig   = hmac.new(_BIN_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
@@ -387,8 +379,6 @@ def binance_get(path, params=None, signed=False):
         remaining = int(cfg._binance_ban_until - now_ts)
         if remaining > 0 and remaining % 60 < 2:
             log.warning(f"[BINANCE] Ban active — {remaining}s remaining")
-        elif remaining <= 0:
-            log.info(f"[BINANCE] Ban expired — waiting 120s safety buffer")
         return None
 
     elapsed = time.time() - cfg._last_binance_call
@@ -410,8 +400,11 @@ def binance_get(path, params=None, signed=False):
                 cfg._binance_ban_until = time.time() + retry_after
                 _save_ban_to_disk(cfg._binance_ban_until)
                 log.warning(f"[BINANCE] Rate limited — banned for {retry_after}s")
-                from app.notifications import tg
-                tg(f"⚠️ <b>Binance Ban</b>\nDuration: {retry_after}s", category="binance_ban")
+                try:
+                    from app.notifications import tg
+                    tg(f"⚠️ <b>Binance Ban</b>\nDuration: {retry_after}s", category="binance_ban")
+                except:
+                    pass
                 return None
             log.debug(f"[BINANCE] {path}: {r.status_code}")
             return None
@@ -457,7 +450,8 @@ def binance_get_lot_size(symbol):
                 step_qty = float(filt["stepSize"])
                 _binance_lot_cache[symbol] = (min_qty, step_qty)
                 return min_qty, step_qty
-    except: pass
+    except:
+        pass
     return 0.0001, 0.0001
 
 def round_step(qty, step):
@@ -535,7 +529,6 @@ def get_actual_fill_price(order_result, side, estimated_price, crypto=False):
         return apply_slippage(estimated_price or 0, side, crypto)
     if not IS_LIVE:
         return apply_slippage(estimated_price, side, crypto)
-    # Check for Binance fill
     fills = order_result.get("fills", [])
     if fills:
         total_qty   = sum(float(f["qty"]) for f in fills)
@@ -544,7 +537,6 @@ def get_actual_fill_price(order_result, side, estimated_price, crypto=False):
             fp = total_value / total_qty
             log.info(f"[FILL] Binance fill: ${fp:.4f} vs signal: ${estimated_price:.4f}")
             return fp
-    # Check for IBKR fill price
     ibkr_fill = order_result.get("_ibkr_fill_price")
     if ibkr_fill and float(ibkr_fill) > 0:
         return float(ibkr_fill)
@@ -557,12 +549,9 @@ def is_order_filled(order_result):
     if order_result.get("id") or order_result.get("orderId"): return True
     return False
 
-def query_order_status(order_id, crypto=False):
-    return None  # IBKR orders tracked via openTrades
-
 
 # ── Main order placement ──────────────────────────────────────
-def place_order(symbol, side, qty, crypto=False, estimated_price=None):
+def place_order(symbol, side, qty, crypto=False, estimated_price=None, order_type=None, stop_price=None):
     """Place order via Binance (crypto) or IBKR (stocks).
     Returns (order_result, actual_fill_price)."""
 
@@ -583,39 +572,39 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
         return None, estimated_price or 0
 
     try:
-        contract  = _contract_for(symbol)
-        ib_side   = "BUY" if side == "buy" else "SELL"
+        contract = _contract_for(symbol)
+        ib_side  = "BUY" if side.lower() == "buy" else "SELL"
+
+        # Handle stop order type
+        if order_type and "STP" in order_type.upper() and stop_price:
+            order = StopOrder(ib_side, qty, stop_price)
+            trade = ib.placeOrder(contract, order)
+            ib.sleep(0.5)
+            result = {"id": trade.order.orderId, "symbol": symbol, "status": "accepted"}
+            return result, stop_price
 
         if IS_LIVE and estimated_price:
-            # Live: use limit order with tolerance
             vix_now      = cfg.global_risk.get("vix_level") or 20
             signal_score = getattr(place_order, "_last_score", 5)
-
             if signal_score >= 9:   base_tol = 0.010
             elif signal_score >= 7: base_tol = 0.006
             else:                   base_tol = 0.003
-
             if vix_now >= 30:   vix_adj = 0.004
             elif vix_now >= 20: vix_adj = 0.002
             else:               vix_adj = 0.0
-
-            tolerance = base_tol + vix_adj
-
-            if side == "buy":
+            tolerance   = base_tol + vix_adj
+            if side.lower() == "buy":
                 limit_price = round(estimated_price * (1 + tolerance), 2)
             else:
                 limit_price = round(estimated_price * (1 - tolerance), 2)
-
             order = LimitOrder(ib_side, qty, limit_price)
             log.info(f"[IBKR LIMIT] {ib_side} {symbol} x{qty} limit:${limit_price:.2f} signal:${estimated_price:.2f}")
         else:
-            # Paper: market order
             order = MarketOrder(ib_side, qty)
-            log.info(f"[IBKR MARKET] {ib_side} {symbol} x{qty} @ ~${estimated_price:.2f if estimated_price else 0:.2f}")
+            log.info(f"[IBKR MARKET] {ib_side} {symbol} x{qty} @ ~${(estimated_price or 0):.2f}")
 
         trade = ib.placeOrder(contract, order)
 
-        # Wait for fill (up to 10s)
         fill_price = None
         for _ in range(20):
             ib.sleep(0.5)
@@ -631,13 +620,13 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
             fill_price = apply_slippage(estimated_price or 0, side, crypto=False)
 
         slip_pct = ((fill_price - (estimated_price or fill_price)) / (estimated_price or fill_price) * 100) if estimated_price else 0
-        log.info(f"[IBKR FILL] {ib_side} {symbol} fill:${fill_price:.4f} signal:${estimated_price:.4f if estimated_price else 0:.4f} slip:{slip_pct:+.3f}%")
+        log.info(f"[IBKR FILL] {ib_side} {symbol} fill:${fill_price:.4f} signal:${(estimated_price or 0):.4f} slip:{slip_pct:+.3f}%")
 
         result = {
-            "id":                trade.order.orderId,
-            "symbol":            symbol,
-            "status":            trade.orderStatus.status,
-            "_ibkr_fill_price":  fill_price,
+            "id":               trade.order.orderId,
+            "symbol":           symbol,
+            "status":           trade.orderStatus.status,
+            "_ibkr_fill_price": fill_price,
         }
         record_api_success()
         return result, fill_price
@@ -648,41 +637,17 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None):
         return None, estimated_price or 0
 
 
-# ── Compatibility stubs (used in main.py) ─────────────────────
-def alpaca_get(path, base=None):
-    """
-    Compatibility stub — routes account/position/order queries to IBKR.
-    Keeps main.py working without changes.
-    """
-    if "/v2/account" in path:
-        return ibkr_get_account()
-    if "/v2/positions" in path:
-        return ibkr_get_positions()
-    if "/v2/orders" in path:
-        return ibkr_get_open_orders()
-    if "/v2/assets" in path:
-        # Small cap pool fetch — return empty, fallback to Alpaca watchlist
-        return []
-    log.debug(f"[COMPAT] alpaca_get called with unmapped path: {path}")
-    return None
-
-def alpaca_post(path, body):
-    """Compatibility stub — not used with IBKR but kept to avoid import errors."""
-    log.debug(f"[COMPAT] alpaca_post called: {path} — use place_order() instead")
-    return None
-
-
 # ── Data freshness check ──────────────────────────────────────
 def check_data_freshness(bars, max_age_hours=2):
     if not bars: return False, "no data"
     try:
-        last_bar = bars[-1]
+        last_bar     = bars[-1]
         bar_time_str = last_bar.get("t", "")
         if not bar_time_str: return True, "unknown"
-        bar_time = datetime.fromisoformat(str(bar_time_str).replace("Z", "+00:00"))
-        age = datetime.now(bar_time.tzinfo) - bar_time
+        bar_time  = datetime.fromisoformat(str(bar_time_str).replace("Z", "+00:00"))
+        age       = datetime.now(bar_time.tzinfo) - bar_time
         age_hours = age.total_seconds() / 3600
-        age_str = f"{age_hours:.1f}h old"
+        age_str   = f"{age_hours:.1f}h old"
         if age_hours > max_age_hours: return False, age_str
         return True, age_str
     except:
