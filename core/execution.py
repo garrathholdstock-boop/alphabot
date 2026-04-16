@@ -1,7 +1,7 @@
 """
 core/execution.py — AlphaBot Order Execution & API Wrappers
-Stocks: IB Gateway via ib_insync (port 4004 paper / 4001 live)
-Crypto: Binance API
+Stocks: IB Gateway via ib_insync (Docker socat → port 4004 paper / 4001 live)
+Crypto: Binance API (testnet or live)
 Broker: IBKR only — no Alpaca.
 """
 
@@ -20,6 +20,7 @@ nest_asyncio.apply()
 
 from core.config import (
     log, IS_LIVE,
+    IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID,
     BINANCE_BASE, BINANCE_HEADERS, _BIN_KEY, _BIN_SECRET,
     BINANCE_DELAY, BINANCE_INTERVAL_MAP, USE_BINANCE,
     SLIPPAGE_STOCK, SLIPPAGE_CRYPTO, STOP_LOSS_PCT, TAKE_PROFIT_PCT,
@@ -30,11 +31,6 @@ from core.config import (
     _save_ban_to_disk,
 )
 import core.config as cfg
-
-# ── IBKR connection settings ──────────────────────────────────
-IBKR_HOST      = cfg.IBKR_HOST
-IBKR_PORT      = cfg.IBKR_PORT
-IBKR_CLIENT_ID = cfg.IBKR_CLIENT_ID
 
 # Global IB instance
 _ib = None
@@ -55,7 +51,8 @@ def get_ib():
         log.info(f"[IBKR] Connected to IB Gateway at {IBKR_HOST}:{IBKR_PORT}")
         return _ib
     except Exception as e:
-        log.error(f"[IBKR] Connection failed: {e}")
+        log.error(f"API connection failed: {e}")
+        log.error(f"[IBKR] Connection failed:")
         _ib = None
         return None
 
@@ -94,10 +91,8 @@ def record_api_failure(source="ibkr"):
 
 # ── IBKR market data ──────────────────────────────────────────
 def _make_contract(symbol, exchange="SMART", currency="USD"):
-    """Create an IBKR Stock contract."""
     return Stock(symbol, exchange, currency)
 
-# Symbol → (exchange, currency) lookup for international markets
 _INTL_MARKET = {}
 try:
     from core.config import ASX_WATCHLIST, FTSE_WATCHLIST
@@ -107,12 +102,11 @@ except Exception:
     pass
 
 def _contract_for(symbol):
-    """Return correct IBKR contract for any symbol."""
     exch, curr = _INTL_MARKET.get(symbol, ("SMART", "USD"))
     return _make_contract(symbol, exch, curr)
 
 def fetch_bars(symbol, crypto=False):
-    """Fetch daily bars for a symbol. Crypto uses Binance, stocks use IBKR."""
+    """Fetch daily bars. Crypto uses Binance, stocks use IBKR."""
     if crypto and USE_BINANCE:
         if time.time() < (cfg._binance_ban_until + 300):
             return None
@@ -146,7 +140,6 @@ def fetch_bars(symbol, crypto=False):
         return None
 
 def fetch_bars_batch(symbols, limit=30):
-    """Fetch daily bars for multiple symbols via IBKR."""
     if not symbols:
         return {}
     results = {}
@@ -159,7 +152,6 @@ def fetch_bars_batch(symbols, limit=30):
     return results
 
 def fetch_latest_price(symbol, crypto=False):
-    """Fetch latest price. Crypto uses Binance, stocks use IBKR."""
     if crypto and USE_BINANCE:
         if time.time() < (cfg._binance_ban_until + 120):
             return None
@@ -183,7 +175,6 @@ def fetch_latest_price(symbol, crypto=False):
         return None
 
 def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
-    """Fetch intraday bars. Crypto uses Binance, stocks use IBKR."""
     if crypto and USE_BINANCE:
         if time.time() < (cfg._binance_ban_until + 300):
             return None
@@ -218,7 +209,6 @@ def fetch_intraday_bars(symbol, timeframe="1Hour", limit=48, crypto=False):
         return None
 
 def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
-    """Fetch intraday bars for multiple symbols via IBKR."""
     if not symbols:
         return {}
     results = {}
@@ -251,7 +241,6 @@ def _limit_to_duration(limit, timeframe):
 
 # ── IBKR account info ─────────────────────────────────────────
 def ibkr_get_account():
-    """Get account summary from IBKR."""
     ib = get_ib()
     if not ib:
         return {}
@@ -274,7 +263,6 @@ def ibkr_get_account():
         return {}
 
 def ibkr_get_positions():
-    """Get open positions from IBKR."""
     ib = get_ib()
     if not ib:
         return []
@@ -295,7 +283,6 @@ def ibkr_get_positions():
         return []
 
 def ibkr_get_open_orders():
-    """Get open orders from IBKR."""
     ib = get_ib()
     if not ib:
         return []
@@ -318,7 +305,6 @@ def ibkr_get_open_orders():
 
 # ── IBKR stop order management ────────────────────────────────
 def place_stop_order_ibkr(symbol, qty, stop_price):
-    """Place a stop-loss order via IBKR."""
     ib = get_ib()
     if not ib:
         return None
@@ -335,7 +321,6 @@ def place_stop_order_ibkr(symbol, qty, stop_price):
         return None
 
 def cancel_stop_order_ibkr(order_id):
-    """Cancel an order via IBKR."""
     ib = get_ib()
     if not ib:
         return False
@@ -353,7 +338,6 @@ def cancel_stop_order_ibkr(order_id):
         return False
 
 def update_exchange_stop(symbol, qty, new_stop_price):
-    """Update trailing stop via IBKR."""
     old_id = exchange_stops.get(symbol)
     if old_id:
         cancel_stop_order_ibkr(old_id)
@@ -575,7 +559,6 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None, order_typ
         contract = _contract_for(symbol)
         ib_side  = "BUY" if side.lower() == "buy" else "SELL"
 
-        # Handle stop order type
         if order_type and "STP" in order_type.upper() and stop_price:
             order = StopOrder(ib_side, qty, stop_price)
             trade = ib.placeOrder(contract, order)
