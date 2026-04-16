@@ -828,13 +828,17 @@ def build_dashboard():
 
     # ── Current BUY signals screener ──────────────────────────
     all_cands = (
-        [dict(c, market="Stock")  for c in state.candidates
+        [dict(c, market="Stock")    for c in state.candidates
          if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
-        [dict(c, market="ASX")    for c in asx_state.candidates
+        [dict(c, market="Intraday") for c in intraday_state.candidates
          if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
-        [dict(c, market="FTSE")   for c in ftse_state.candidates
+        [dict(c, market="SmallCap") for c in smallcap_state.candidates
          if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
-        [dict(c, market="Crypto") for c in crypto_intraday_state.candidates
+        [dict(c, market="ASX")      for c in asx_state.candidates
+         if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
+        [dict(c, market="FTSE")     for c in ftse_state.candidates
+         if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
+        [dict(c, market="Crypto")   for c in crypto_intraday_state.candidates
          if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE]
     )
     if all_cands:
