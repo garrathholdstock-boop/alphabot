@@ -659,7 +659,7 @@ def run_crypto_intraday_cycle(watchlist, st):
     check_intraday_positions(st, crypto=True)
     if st.shutoff: st.running = False; return
 
-    scan_list = watchlist[:10] if USE_BINANCE else watchlist
+    scan_list = watchlist
     results = []
     for sym in scan_list:
         bars = fetch_intraday_bars(sym, timeframe=CRYPTO_INTRADAY_TIMEFRAME,
