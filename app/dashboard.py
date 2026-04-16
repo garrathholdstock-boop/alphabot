@@ -830,7 +830,11 @@ def build_dashboard():
     all_cands = (
         [dict(c, market="Stock")  for c in state.candidates
          if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
-        [dict(c, market="Crypto") for c in crypto_state.candidates
+        [dict(c, market="ASX")    for c in asx_state.candidates
+         if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
+        [dict(c, market="FTSE")   for c in ftse_state.candidates
+         if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE] +
+        [dict(c, market="Crypto") for c in crypto_intraday_state.candidates
          if c["signal"] == "BUY" and c.get("score", 0) >= MIN_SIGNAL_SCORE]
     )
     if all_cands:
@@ -876,7 +880,7 @@ def build_dashboard():
             return '<div class="empty">No scan data yet</div>'
         scored = []
         for c in candidates:
-            sc = c.get("score") if c.get("intraday") else score_signal(c["symbol"], c["price"], c["change"], c.get("rsi"), c.get("vol_ratio"), c.get("closes", [c["price"]] * 22))
+            sc = c.get("score") or 0 if c.get("intraday") else score_signal(c["symbol"], c["price"], c["change"], c.get("rsi"), c.get("vol_ratio"), c.get("closes", [c["price"]] * 22))
             scored.append((sc, c))
         bear_syms    = set(BEAR_TICKERS)
         bear_items   = sorted([(sc, c) for sc, c in scored if c["symbol"] in bear_syms], key=lambda x: -x[0])
