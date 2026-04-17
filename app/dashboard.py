@@ -784,8 +784,8 @@ def build_dashboard():
         rows = ""
         for idx, (sym, pos, color, category) in enumerate(all_pos):
             is_crypto = category in ("Crypto", "CrypID")
-            # Use highest_price from state (updated by IBKR portfolio push) — no market data subscription needed
-            live = pos.get("highest_price", pos["entry_price"])
+            # Live price: IBKR portfolio push (24/7, no subscription) → fallback to highest_price
+            live = cfg.live_prices.get(sym) or pos.get("highest_price", pos["entry_price"])
             entry      = pos["entry_price"]
             qty        = pos["qty"]
             total_val  = qty * live
