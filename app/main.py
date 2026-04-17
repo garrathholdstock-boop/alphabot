@@ -872,10 +872,8 @@ def main():
     log.info(f"Port:   {cfg.PORT}")
     log.info("=" * 50)
 
-    # Start dashboard first — Railway health check needs it immediately
-    from app.dashboard import start_dashboard
-    t = threading.Thread(target=start_dashboard, daemon=True)
-    t.start()
+    # Dashboard runs as standalone FastAPI service — started by start.sh on port 8080
+    log.info(f"Dashboard running on port {cfg.PORT}")
     time.sleep(2)
     log.info(f"Dashboard ready on port {cfg.PORT}")
 
@@ -886,51 +884,10 @@ def main():
     else:
         log.info(f"Connected — Portfolio: ${float(cfg.account_info.get('portfolio_value',0)):,.2f}")
 
-    # Binance startup — NO API calls to avoid triggering bans on restart
+    # Binance startup
     if USE_BINANCE:
         mode = "TESTNET" if cfg.BINANCE_USE_TESTNET else ("LIVE" if IS_LIVE else "PAPER")
-        log.info(f"[BINANCE] Mode: {mode} | Endpoint: {cfg.BINANCE_BASE}")
-        log.info(f"[BINANCE] Scanning {len(CRYPTO_WATCHLIST)} coins — will connect on first cycle")
-
-    # ── Startup position recovery (IBKR) — runs before first scan cycle ──
-    def run_ibkr_startup_recovery():
-        from core.execution import get_ib
-        recovered = 0
-        try:
-          ib_conn = get_ib()
-          if ib_conn and ib_conn.isConnected():
-            ibkr_positions = ib_conn.positions()
-            open_orders = ib_conn.openOrders()
-            stop_syms = {o.contract.symbol for o in open_orders if hasattr(o, 'contract') and hasattr(o, 'order') and getattr(o.order, 'orderType', '') == 'STP'}
-
-            bot_watchlist = set(US_WATCHLIST) | set(CRYPTO_WATCHLIST)
-            for pos in ibkr_positions:
-                sym   = pos.contract.symbol
-                qty   = float(pos.position)
-                entry = float(pos.avgCost)
-                if qty <= 0: continue
-                if sym not in bot_watchlist:
-                    log.info(f"[RECOVERY] Skipping {sym} — not in bot watchlist")
-                    continue
-                stop_pct = STOP_LOSS_PCT
-                stop = entry * (1 - stop_pct / 100)
-                tp   = entry * (1 + TAKE_PROFIT_PCT / 100)
-                if sym not in state.positions:
-                    state.positions[sym] = {
-                        "qty": qty, "entry_price": entry, "stop_price": stop,
-                        "highest_price": entry, "take_profit_price": tp,
-                        "entry_date": datetime.now().date().isoformat(),
-                        "days_held": 0, "entry_ts": datetime.now().isoformat(),
-                    }
-                    log.info(f"[RECOVERY] Restored position: {sym} x{qty} @ ${entry:.2f}")
-                    if sym not in stop_syms:
-                        log.warning(f"[RECOVERY] {sym} has no stop on IBKR — software stop-loss active @ ${stop:.2f}")
-                    else:
-                        log.info(f"[RECOVERY] {sym} already has stop on IBKR ✅")
-                    recovered += 1
-            log.info(f"=== Recovered {recovered} open position(s) ===")
-        except Exception as e:
-            log.error(f"Startup recovery failed: {e}")
+        log.info(f"[BINANCE] Using {mode}")
 
     last_email_day = None
     cycle = 0
@@ -1019,8 +976,6 @@ def main():
                         log.warning(f"PANIC KILL SWITCH: Portfolio down {drawdown_pct:.1f}%!")
                         for sym, pos in list(state.positions.items()):
                             place_order(sym, "sell", pos["qty"], crypto=False, estimated_price=pos["entry_price"])
-                            if sym in exchange_stops:
-                                exchange_stops.pop(sym)
                         for sym, pos in list(crypto_state.positions.items()):
                             place_order(sym, "sell", pos["qty"], crypto=True, estimated_price=pos["entry_price"])
                         state.positions.clear()
