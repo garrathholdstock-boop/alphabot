@@ -981,8 +981,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
                 <span style="font-size:9px;font-weight:700;color:{p_color};background:rgba(0,0,0,0.4);padding:2px 8px;border-radius:10px;">{item['priority']}</span>
                 <span style="font-size:10px;color:#475569;">{item['time']}</span>
               </div>
-              <div style="font-size:13px;color:#e2e8f0;margin-bottom:4px;">{html.escape(item['message'])}</div>
-              <div style="font-size:10px;color:#475569;margin-bottom:8px;">{html.escape(item['detail'][:100])}</div>
+              <div style="font-size:15px;color:#e2e8f0;margin-bottom:4px;">{html.escape(item['message'])}</div>
+              <div style="font-size:13px;color:#475569;margin-bottom:8px;">{html.escape(item['detail'][:100])}</div>
               {briefing_html}
               <div style="display:flex;gap:8px;">
                 <form method="POST" action="/queue/investigate" style="flex:1">
@@ -1005,13 +1005,13 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
     elif resolved:
         queue_html = f"""
         <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:12px;margin-bottom:12px;">
-          <div style="font-size:10px;font-weight:700;color:#00ff88;text-transform:uppercase;margin-bottom:6px;">✅ Queue Clear</div>
-          <div style="font-size:11px;color:#475569;">No pending items.</div>
+          <div style="font-size:13px;font-weight:700;color:#00ff88;text-transform:uppercase;margin-bottom:6px;">✅ Queue Clear</div>
+          <div style="font-size:14px;color:#475569;">No pending items.</div>
         </div>"""
     else:
         queue_html = f"""
         <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:12px;margin-bottom:12px;">
-          <div style="font-size:10px;font-weight:700;color:#00ff88;text-transform:uppercase;margin-bottom:6px;">✅ Queue Clear</div>
+          <div style="font-size:13px;font-weight:700;color:#00ff88;text-transform:uppercase;margin-bottom:6px;">✅ Queue Clear</div>
         </div>"""
 
     # ── Auto-fix log HTML ─────────────────────────────────────
@@ -1031,10 +1031,10 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
     mkt_html = ""
     for mkt, mst in markets.items():
         if mkt in ("UTC_time", "Paris_time"):
-            mkt_html += f'<span style="font-size:10px;color:#64748b;margin-right:10px;">{mst}</span>'
+            mkt_html += f'<span style="font-size:12px;color:#64748b;margin-right:10px;">{mst}</span>'
         else:
             c = "#00ff88" if mst == "OPEN" else "#475569"
-            mkt_html += f'<span style="font-size:10px;font-weight:700;color:{c};margin-right:10px;">{mkt} {mst}</span>'
+            mkt_html += f'<span style="font-size:12px;font-weight:700;color:{c};margin-right:10px;">{mkt} {mst}</span>'
 
     # ── Recent events log ─────────────────────────────────────
     # ── Live event feed — always visible, colour coded ──────
@@ -1055,8 +1055,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
               <span style="font-size:11px;flex-shrink:0;margin-top:1px;">{icon}</span>
               <div style="flex:1;min-width:0;">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                  <span style="font-size:11px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:60])}</span>
-                  <span style="font-size:9px;color:#475569;white-space:nowrap;">{ts}</span>
+                  <span style="font-size:14px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:60])}</span>
+                  <span style="font-size:12px;color:#475569;white-space:nowrap;">{ts}</span>
                 </div>
                 {action_html}
               </div>
@@ -1067,8 +1067,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
     events_html = f"""
     <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">📡 Live Event Feed</div>
-        <div style="display:flex;gap:10px;font-size:9px;">
+        <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">📡 Live Event Feed</div>
+        <div style="display:flex;gap:10px;font-size:12px;">
           <span style="color:#ef4444;font-weight:700;">🔴 P1 Safety</span>
           <span style="color:#f59e0b;font-weight:700;">🟡 P2 Efficiency</span>
           <span style="color:#475569;font-weight:700;">🔵 P3 Bug</span>
@@ -1185,7 +1185,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
     for label, q in quick_btns:
         quick += f"""<form method="POST" action="/ask" style="display:inline-block;margin:3px;">
           <input type="hidden" name="question" value="{html.escape(q)}">
-          <button type="submit" style="background:#111118;border:1px solid #1e1e2e;color:#94a3b8;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;">{label}</button>
+          <button type="submit" style="background:#111118;border:1px solid #1e1e2e;color:#94a3b8;font-family:'JetBrains Mono',monospace;font-size:13px;padding:10px 14px;border-radius:6px;cursor:pointer;">{label}</button>
         </form>"""
 
     quick += """<form method="POST" action="/audit" style="display:inline-block;margin:3px;">
@@ -1211,7 +1211,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       <input type="hidden" name="filename" value="{f}">
       <input type="hidden" name="question" value="{html.escape(question)}">
       <input type="hidden" name="history" value="{html.escape(history)}">
-      <button type="submit" style="background:#0a0a14;border:1px solid #1e1e2e;color:#64748b;font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 9px;border-radius:5px;cursor:pointer;">{f}</button>
+      <button type="submit" style="background:#0a0a14;border:1px solid #1e1e2e;color:#64748b;font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px 12px;border-radius:5px;cursor:pointer;">{f}</button>
     </form>""" for f in safe_files])
 
     telegram_status = "✅ Connected" if (TELEGRAM_TOKEN and TELEGRAM_CHAT_ID != "YOUR_CHAT_ID") else "⚠️ Token set — add TELEGRAM_CHAT_ID to .env"
@@ -1226,16 +1226,16 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
-body {{ background:#0a0a0f; color:#e2e8f0; font-family:'JetBrains Mono',monospace; padding:16px; max-width:900px; margin:0 auto; }}
+body {{ background:#0a0a0f; color:#e2e8f0; font-family:'JetBrains Mono',monospace; padding:16px; max-width:1000px; font-size:15px; margin:0 auto; }}
 header {{ display:flex; align-items:center; gap:12px; margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid #1e1e2e; flex-wrap:wrap; position:sticky; top:0; background:#0a0a0f; z-index:100; padding-top:8px; }}
-.logo {{ font-family:'Syne',sans-serif; font-size:20px; font-weight:800; color:#00ff88; }}
-.badge {{ margin-left:auto; background:#111118; border:1px solid {sc}; color:{sc}; font-size:10px; font-weight:700; padding:4px 10px; border-radius:20px; }}
+.logo {{ font-family:'Syne',sans-serif; font-size:26px; font-weight:800; color:#00ff88; }}
+.badge {{ margin-left:auto; background:#111118; border:1px solid {sc}; color:{sc}; font-size:13px; font-weight:700; padding:6px 14px; border-radius:20px; }}
 .card {{ background:#111118; border:1px solid #1e1e2e; border-radius:10px; padding:14px; margin-bottom:12px; }}
-textarea {{ width:100%; background:#0a0a0f; border:1px solid #1e1e2e; border-radius:8px; color:#e2e8f0; font-family:'JetBrains Mono',monospace; font-size:13px; padding:10px 12px; resize:none; height:70px; }}
+textarea {{ width:100%; background:#0a0a0f; border:1px solid #1e1e2e; border-radius:8px; color:#e2e8f0; font-family:'JetBrains Mono',monospace; font-size:15px; padding:12px 14px; resize:none; height:80px; }}
 textarea:focus {{ outline:none; border-color:#00ff88; }}
-.ask-btn {{ display:block; width:100%; background:#00ff88; border:none; border-radius:8px; color:#000; font-family:'Syne',sans-serif; font-weight:800; font-size:15px; padding:12px; cursor:pointer; margin-top:8px; }}
-table {{ width:100%; border-collapse:collapse; font-size:11px; }}
-th {{ color:#64748b; text-align:left; padding:4px 6px; border-bottom:1px solid #1e1e2e; font-size:9px; text-transform:uppercase; letter-spacing:1px; }}
+.ask-btn {{ display:block; width:100%; background:#00ff88; border:none; border-radius:8px; color:#000; font-family:'Syne',sans-serif; font-weight:800; font-size:17px; padding:14px; cursor:pointer; margin-top:8px; }}
+table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+th {{ color:#64748b; text-align:left; padding:4px 6px; border-bottom:1px solid #1e1e2e; font-size:11px; text-transform:uppercase; letter-spacing:1px; }}
 td {{ padding:5px 6px; border-bottom:1px solid #0f0f18; }}
 details summary {{ cursor:pointer; }}
 </style>
@@ -1254,22 +1254,22 @@ details summary {{ cursor:pointer; }}
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
   <div class="card" style="padding:10px 12px;">
     <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">All-time P&L</div>
-    <div style="font-size:18px;font-weight:700;color:{'#00ff88' if total_pnl>=0 else '#ef4444'};font-family:'Syne',sans-serif;">${total_pnl:+,.0f}</div>
-    <div style="font-size:10px;color:#475569;">{total_trades} trades · {win_rate}% win</div>
+    <div style="font-size:24px;font-weight:700;color:{'#00ff88' if total_pnl>=0 else '#ef4444'};font-family:'Syne',sans-serif;">${total_pnl:+,.0f}</div>
+    <div style="font-size:13px;color:#475569;">{total_trades} trades · {win_rate}% win</div>
   </div>
   <div class="card" style="padding:10px 12px;">
     <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">Today P&L</div>
-    <div style="font-size:18px;font-weight:700;color:{'#00ff88' if today_pnl>=0 else '#ef4444'};font-family:'Syne',sans-serif;">${today_pnl:+,.0f}</div>
-    <div style="font-size:10px;color:#475569;">Trades today: {today_count}</div>
+    <div style="font-size:24px;font-weight:700;color:{'#00ff88' if today_pnl>=0 else '#ef4444'};font-family:'Syne',sans-serif;">${today_pnl:+,.0f}</div>
+    <div style="font-size:13px;color:#475569;">Trades today: {today_count}</div>
   </div>
   <div class="card" style="padding:10px 12px;">
     <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">Queue</div>
-    <div style="font-size:18px;font-weight:700;color:{'#f59e0b' if pending else '#00ff88'};font-family:'Syne',sans-serif;">{len(pending)}</div>
-    <div style="font-size:10px;color:#475569;">items pending</div>
+    <div style="font-size:24px;font-weight:700;color:{'#f59e0b' if pending else '#00ff88'};font-family:'Syne',sans-serif;">{len(pending)}</div>
+    <div style="font-size:13px;color:#475569;">items pending</div>
   </div>
   <div class="card" style="padding:10px 12px;">
     <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">Telegram</div>
-    <div style="font-size:11px;font-weight:700;color:#{'00ff88' if TELEGRAM_CHAT_ID != 'YOUR_CHAT_ID' else 'f59e0b'};margin-top:4px;">{telegram_status}</div>
+    <div style="font-size:14px;font-weight:700;color:#{'00ff88' if TELEGRAM_CHAT_ID != 'YOUR_CHAT_ID' else 'f59e0b'};margin-top:4px;">{telegram_status}</div>
   </div>
 </div>
 
@@ -1283,7 +1283,7 @@ details summary {{ cursor:pointer; }}
 
 <!-- Ask Claude -->
 <div class="card">
-  <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Ask Claude</div>
+  <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Ask Claude</div>
   <form method="POST" action="/ask">
     <textarea name="question" placeholder="What's going on with the bot? Why aren't there any trades?...">{html.escape(question) if not complete and not audit_result else ''}</textarea>
     <button type="submit" class="ask-btn">ASK CLAUDE →</button>
@@ -1292,23 +1292,23 @@ details summary {{ cursor:pointer; }}
 
 <!-- Quick actions -->
 <div class="card">
-  <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Quick Actions</div>
+  <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Quick Actions</div>
   {quick}
 </div>
 
 <!-- File viewer -->
 <div class="card">
-  <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">View File</div>
+  <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">View File</div>
   {file_btns}
 </div>
 
 <!-- Recent trades -->
 <div class="card">
-  <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Recent Trades</div>
+  <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Recent Trades</div>
   <table><tr><th>Symbol</th><th>Side</th><th>Price</th><th>P&L</th><th>Reason</th></tr>{trades_html}</table>
 </div>
 
-<div style="text-align:center;margin-top:20px;font-size:10px;color:#1e1e2e;">
+<div style="text-align:center;margin-top:20px;font-size:12px;color:#1e1e2e;">
   Auto-refreshes every 60s · <a href="http://178.104.170.58:8080" style="color:#1e1e2e;">Dashboard →</a>
 </div>
 
