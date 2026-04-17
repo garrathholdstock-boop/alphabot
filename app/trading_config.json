@@ -1,35 +1,30 @@
 {
-  "_comment": "AlphaBot trading parameters — edit here, applied within 60s, no restart needed",
+  "_comment": "AlphaBot trading parameters \u2014 edit here, applied within 60s, no restart needed",
   "_last_modified": "",
   "_modified_by": "dashboard",
-
   "MIN_SIGNAL_SCORE": 5,
   "MAX_POSITIONS": 3,
   "MAX_TOTAL_POSITIONS": 15,
   "MAX_TRADES_PER_DAY": 50,
   "CYCLE_SECONDS": 60,
-
   "STOP_LOSS_PCT": 5.0,
   "TRAILING_STOP_PCT": 2.0,
   "TAKE_PROFIT_PCT": 10.0,
   "MAX_HOLD_DAYS": 5,
   "CRYPTO_STOP_PCT": 4.0,
-
   "INTRADAY_STOP_LOSS": 1.0,
   "INTRADAY_TAKE_PROFIT": 2.5,
   "INTRADAY_MAX_POSITIONS": 2,
   "CRYPTO_INTRADAY_MAX_POS": 2,
   "CRYPTO_INTRADAY_SL": 1.0,
   "CRYPTO_INTRADAY_TP": 2.0,
-
   "MAX_DAILY_LOSS_PCT": 0.5,
   "MAX_DAILY_SPEND_PCT": 50.0,
   "MAX_EXPOSURE_PCT": 30.0,
   "DAILY_PROFIT_TARGET_PCT": 2.0,
   "MAX_TRADE_PCT": 5.0,
   "CRYPTO_EXPOSURE_PCT": 20.0,
-
-  "MAX_SECTOR_POSITIONS": 1,
+  "MAX_SECTOR_POSITIONS": 2,
   "LOSS_STREAK_LIMIT": 3,
   "VIX_HIGH_THRESHOLD": 25.0,
   "VIX_EXTREME": 35.0
