@@ -32,28 +32,75 @@ from core.config import (
 )
 import core.config as cfg
 
-# Global IB instance
-_ib = None
+# ── Per-thread IB connection pool ────────────────────────────
+# Each thread gets its own IB connection with a unique client ID.
+# This avoids deadlocks when multiple threads call IBKR simultaneously.
+# Client ID assignment:
+#   1 = Main / account / watchdog
+#   2 = US-Swing stocks
+#   3 = Intraday US
+#   4 = FTSE
+#   5 = ASX
+#   6 = Smallcap
+#   7 = Crypto-Swing (fallback, rarely needs IBKR)
+#   8+ = reserved
+
+import threading as _threading
+
+_THREAD_CLIENT_IDS = {
+    "MainThread":    1,
+    "US-Swing":      2,
+    "Intraday":      3,
+    "FTSE":          4,
+    "ASX":           5,
+    "Smallcap":      6,
+    "Crypto-Swing":  7,
+}
+_DEFAULT_CLIENT_ID = 1
+
+# Per-thread IB instance storage
+_ib_pool = {}
+_ib_pool_lock = _threading.Lock()
+
+def _get_client_id():
+    """Return the client ID for the current thread."""
+    thread_name = _threading.current_thread().name
+    return _THREAD_CLIENT_IDS.get(thread_name, _DEFAULT_CLIENT_ID)
 
 def get_ib():
-    """Get or create IB connection. Reconnects if disconnected."""
-    global _ib
+    """Get or create IB connection for the current thread.
+    Each thread maintains its own dedicated connection."""
+    thread_name = _threading.current_thread().name
+    client_id = _get_client_id()
+
+    with _ib_pool_lock:
+        ib = _ib_pool.get(thread_name)
+
+    # Check if existing connection is healthy
+    if ib is not None:
+        try:
+            if ib.isConnected():
+                return ib
+        except:
+            pass
+        # Connection dead — clean it up
+        try:
+            ib.disconnect()
+        except:
+            pass
+
+    # Create new connection for this thread
     try:
-        if _ib and _ib.isConnected():
-            return _ib
-        if _ib:
-            try:
-                _ib.disconnect()
-            except:
-                pass
-        _ib = IB()
-        _ib.connect(IBKR_HOST, IBKR_PORT, clientId=IBKR_CLIENT_ID, timeout=10)
-        log.info(f"[IBKR] Connected to IB Gateway at {IBKR_HOST}:{IBKR_PORT}")
-        return _ib
+        ib = IB()
+        ib.connect(IBKR_HOST, IBKR_PORT, clientId=client_id, timeout=10)
+        log.info(f"[IBKR] Thread '{thread_name}' connected (clientId={client_id})")
+        with _ib_pool_lock:
+            _ib_pool[thread_name] = ib
+        return ib
     except Exception as e:
-        log.error(f"API connection failed: {e}")
-        log.error(f"[IBKR] Connection failed:")
-        _ib = None
+        log.error(f"[IBKR] Thread '{thread_name}' connection failed (clientId={client_id}): {e}")
+        with _ib_pool_lock:
+            _ib_pool.pop(thread_name, None)
         return None
 
 def run_ib(coro):
@@ -636,38 +683,4 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None, order_typ
         return result, fill_price
 
     except Exception as e:
-        log.error(f"[IBKR] place_order {symbol} {side}: {e}")
-        record_api_failure("ibkr")
-        return None, estimated_price or 0
-
-
-# ── Data freshness check ──────────────────────────────────────
-def update_live_prices():
-    """Read current portfolio from IBKR and populate cfg.live_prices.
-    Uses ib.portfolio() which is pushed by IB Gateway continuously —
-    no market data subscription required, works outside market hours."""
-    ib = get_ib()
-    if not ib:
-        return
-    try:
-        for item in ib.portfolio():
-            sym = item.contract.symbol
-            price = item.marketPrice
-            if price and price > 0:
-                cfg.live_prices[sym] = float(price)
-    except Exception as e:
-        log.debug(f"[LIVE PRICES] update failed: {e}")
-def check_data_freshness(bars, max_age_hours=2):
-    if not bars: return False, "no data"
-    try:
-        last_bar     = bars[-1]
-        bar_time_str = last_bar.get("t", "")
-        if not bar_time_str: return True, "unknown"
-        bar_time  = datetime.fromisoformat(str(bar_time_str).replace("Z", "+00:00"))
-        age       = datetime.now(bar_time.tzinfo) - bar_time
-        age_hours = age.total_seconds() / 3600
-        age_str   = f"{age_hours:.1f}h old"
-        if age_hours > max_age_hours: return False, age_str
-        return True, age_str
-    except:
-        return True, "unknown"
+  
