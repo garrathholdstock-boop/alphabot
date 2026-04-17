@@ -1814,4 +1814,62 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
       {row("Cycle Seconds", "CYCLE_SECONDS", 60, step="5", note="Main loop interval (seconds)")}
       {row("Loss Streak Pause Limit", "LOSS_STREAK_LIMIT", 3, step="1")}
       {row("VIX High Threshold", "VIX_HIGH_THRESHOLD", 25.0, step="1.0")}
-      {row("VIX Extreme Threshold", "VIX_EXTRE
+      {row("VIX Extreme Threshold", "VIX_EXTREME", 35.0, step="1.0")}
+    </div>
+
+    <div style="text-align:center;padding:10px 0 30px">
+      <button type="button" onclick="showPin()"
+        style="background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.4);border-radius:10px;
+               color:#ffcc00;font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;
+               padding:16px 48px;cursor:pointer;letter-spacing:1px">
+        🔒 SAVE SETTINGS
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- PIN overlay -->
+<div id="pin-overlay" onclick="if(event.target===this)hidePin()">
+  <div class="pin-box">
+    <div style="font-size:20px;font-weight:700;color:#ffcc00;margin-bottom:8px">🔒 Enter PIN</div>
+    <div style="font-size:13px;color:#475569;margin-bottom:20px">Required to save settings</div>
+    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
+      style="background:#111;border:1px solid rgba(255,204,0,0.3);border-radius:8px;color:#ffcc00;
+             font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;padding:12px;
+             width:100%;text-align:center;letter-spacing:4px;margin-bottom:16px"
+      onkeydown="if(event.key==='Enter')submitSettings()">
+    <div style="display:flex;gap:10px">
+      <button onclick="hidePin()"
+        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#475569;
+               padding:12px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:13px">
+        Cancel
+      </button>
+      <button onclick="submitSettings()"
+        style="flex:2;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.4);border-radius:8px;
+               color:#ffcc00;padding:12px;cursor:pointer;font-family:'JetBrains Mono',monospace;
+               font-size:13px;font-weight:700">
+        Save Settings
+      </button>
+    </div>
+    <div id="pin-error" style="color:#ff4466;font-size:12px;margin-top:10px;display:none">Wrong PIN</div>
+  </div>
+</div>
+
+<script>
+function showPin(){{document.getElementById('pin-overlay').classList.add('visible');document.getElementById('pin-input').focus();}}
+function hidePin(){{document.getElementById('pin-overlay').classList.remove('visible');document.getElementById('pin-error').style.display='none';}}
+function submitSettings(){{
+  var pin=document.getElementById('pin-input').value;
+  var form=document.getElementById('settings-form');
+  var inputs=form.querySelectorAll('input[name]');
+  var data={{}};
+  inputs.forEach(function(i){{data[i.name]=i.type==='number'?parseFloat(i.value):i.value;}});
+  fetch('/settings',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{pin:pin,settings:data}})  }})
+  .then(r=>r.json()).then(d=>{{
+    if(d.status==='ok'){{hidePin();window.location.href='/settings?msg=saved'}}
+    else if(d.status==='wrong_pin'){{document.getElementById('pin-error').style.display='block'}}
+    else{{alert('Error: '+JSON.stringify(d))}}
+  }});
+}}
+</script>
+</body></html>'''
