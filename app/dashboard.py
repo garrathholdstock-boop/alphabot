@@ -194,7 +194,31 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   .card{padding:14px 14px}
   .tab{padding:10px 12px;font-size:11px}
   .lbl{font-size:10px}
+  .pos-table-wrap{display:none}
+  .pos-cards{display:block}
+  .trades-table-wrap{display:none}
+  .trades-cards{display:block}
+  .scan-table th:nth-child(3),.scan-table td:nth-child(3),
+  .scan-table th:nth-child(7),.scan-table td:nth-child(7),
+  .scan-table th:nth-child(8),.scan-table td:nth-child(8){display:none}
 }
+.pos-cards{display:none}
+.trades-cards{display:none}
+.pos-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pos-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.pos-card-sym{font-size:17px;font-weight:700;font-family:'Syne',sans-serif}
+.pos-card-pnl{font-size:15px;font-weight:700;text-align:right;line-height:1.3}
+.pos-card-row{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-bottom:0}
+.pos-card-item{display:flex;flex-direction:column;gap:2px}
+.pos-card-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1.5px}
+.pos-card-value{font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.pos-card-detail{display:none;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
+.pos-card-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.trade-card{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px;margin-bottom:8px}
+.trade-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.trade-card-sym{font-size:15px;font-weight:700;font-family:'Syne',sans-serif;color:#00aaff}
+.trade-card-pnl{font-size:14px;font-weight:700}
+.trade-card-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 8px}
 </style>"""
 
 
@@ -403,14 +427,65 @@ def build_dashboard():
                 f'<span><span style="color:#475569">P&L </span><b style="color:{pnl_c}">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</b></span>'
                 f'</div>{bd_html}</td></tr>'
             )
+        # Build iPhone card HTML for positions
+        iphone_pos_cards = ""
+        for idx,(sym,pos,cat_col,cat) in enumerate(all_pos):
+            live2 = pos.get("_live") or pos.get("highest_price", pos["entry_price"])
+            entry2 = pos["entry_price"]; qty2 = pos["qty"]
+            pnl2 = (live2-entry2)*qty2; pnl_pct2 = ((live2-entry2)/entry2)*100
+            pos_val2 = live2*qty2; pnl_c2 = "#00ff88" if pnl2>=0 else "#ff4466"
+            sign2 = "+" if pnl2>=0 else ""
+            stop_pct2 = round(((pos["stop_price"]-entry2)/entry2)*100,1)
+            tp2 = pos.get("take_profit_price", entry2*1.10)
+            score2 = pos.get("signal_score","—")
+            try:
+                dt2 = datetime.fromisoformat(pos.get("entry_ts",""))
+                if dt2.tzinfo is None: dt2 = dt2.replace(tzinfo=ZoneInfo("UTC"))
+                dt_p2 = dt2.astimezone(PARIS)
+                purchased2 = dt_p2.strftime("%d %b %H:%M")
+                held2 = datetime.now(PARIS) - dt_p2
+                hh2 = int(held2.total_seconds()//3600); hm2 = int((held2.total_seconds()%3600)//60)
+                held_str2 = f"{hh2//24}d {hh2%24}h" if hh2>=24 else f"{hh2}h {hm2}m"
+            except:
+                purchased2 = pos.get("entry_date","—"); held_str2 = "—"
+            bd2 = pos.get("entry_breakdown","")
+            bd_html2 = f'<div style="font-size:11px;color:#888;margin-top:8px;white-space:pre-wrap">{bd2}</div>' if bd2 else ""
+            iphone_pos_cards += (
+                f'<div class="pos-card" style="border-color:{cat_col}22" onclick="toggleCard({idx})">'
+                f'<div class="pos-card-header">'
+                f'<div><span class="pos-card-sym" style="color:{cat_col}">{sym}</span>'
+                f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
+                f'<div class="pos-card-pnl" style="color:{pnl_c2}">{sign2}${pnl2:.2f}<br><span style="font-size:11px;opacity:0.8">{sign2}{pnl_pct2:.1f}%</span></div>'
+                f'</div>'
+                f'<div class="pos-card-row">'
+                f'<div class="pos-card-item"><span class="pos-card-label">Entry</span><span class="pos-card-value">${entry2:.4f}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Live</span><span class="pos-card-value" style="color:#00aaff">${live2:.4f}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Stop</span><span class="pos-card-value" style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct2:+.1f}%)</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Position</span><span class="pos-card-value">${pos_val2:,.0f}</span></div>'
+                f'</div>'
+                f'<div class="pos-card-detail" id="card-det-{idx}">'
+                f'<div class="pos-card-detail-grid">'
+                f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{held_str2}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Purchased</span><span class="pos-card-value">{purchased2}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Score</span><span class="pos-card-value" style="color:#ffcc00">{score2}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Target</span><span class="pos-card-value" style="color:#00ff88">${tp2:.4f}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Qty</span><span class="pos-card-value">{qty2:,}</span></div>'
+                f'</div>{bd_html2}</div>'
+                f'</div>'
+            )
         positions_html = (
             f'<div class="card" style="margin-bottom:16px">'
             f'<div class="section-title">Open Positions ({len(all_pos)}) <span style="font-size:13px;color:#475569;font-weight:400;font-family:\'JetBrains Mono\'">· tap to expand</span></div>'
-            f'<div class="table-wrap"><table><thead><tr>'
+            f'<div class="pos-table-wrap table-wrap"><table><thead><tr>'
             f'<th>Symbol</th><th>Type</th><th>Held</th><th>Purchased</th>'
             f'<th>Entry $</th><th>Live $</th><th>Stop</th><th>Position $</th><th>P&L</th>'
-            f'</tr></thead><tbody>{pos_rows}</tbody></table></div></div>'
-            f'<script>function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}</script>'
+            f'</tr></thead><tbody>{pos_rows}</tbody></table></div>'
+            f'<div class="pos-cards">{iphone_pos_cards}</div>'
+            f'</div>'
+            f'<script>'
+            f'function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}'
+            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);d.style.display=d.style.display==="block"?"none":"block";}}'
+            f'</script>'
         )
     else:
         positions_html = f'<div class="card" style="margin-bottom:16px"><div class="empty">No open positions</div></div>'
@@ -455,14 +530,57 @@ def build_dashboard():
                 f'<td style="color:#475569">{score or "—"}</td>'
                 f'</tr>'
             )
+        # Build iPhone trade cards
+        iphone_trade_cards = ""
+        for row in db_trades:
+            sym_t,pnl_t,side_t,ts_t,score_t = row[0],row[1],row[2],row[3],row[4]
+            qty_t = row[5] if len(row)>5 else None
+            price_t = row[6] if len(row)>6 else None
+            hold_t = row[7] if len(row)>7 else None
+            market_t = row[8] if len(row)>8 else "—"
+            pc_t = "#00ff88" if pnl_t>=0 else "#ff4466"
+            sign_t = "+" if pnl_t>=0 else ""
+            try:
+                dt_t = datetime.fromisoformat(ts_t)
+                if dt_t.tzinfo is None: dt_t = dt_t.replace(tzinfo=ZoneInfo("UTC"))
+                dt_tp = dt_t.astimezone(PARIS)
+                date_t = dt_tp.strftime("%d %b")
+                time_t = dt_tp.strftime("%H:%M")
+            except:
+                date_t = ts_t[:10] if ts_t else "—"; time_t = ""
+            mkt_col_t = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market_t,"#475569")
+            qty_s_t = f"{int(qty_t):,}" if qty_t else "—"
+            price_s_t = f"${price_t:.4f}" if price_t else "—"
+            total_s_t = f"${price_t*qty_t:,.0f}" if price_t and qty_t else "—"
+            hold_s_t = f"{hold_t:.1f}h" if hold_t else "—"
+            iphone_trade_cards += (
+                f'<div class="trade-card">'
+                f'<div class="trade-card-header">'
+                f'<div style="display:flex;align-items:center;gap:8px">'  
+                f'<span style="font-size:16px">{"✅" if pnl_t>0 else "❌"}</span>'
+                f'<div><span class="trade-card-sym">{sym_t}</span>'
+                f'<span style="font-size:10px;color:{mkt_col_t};margin-left:6px;font-weight:700">{market_t}</span></div>'
+                f'</div>'
+                f'<span class="trade-card-pnl" style="color:{pc_t}">{sign_t}${pnl_t:.2f}</span>'
+                f'</div>'
+                f'<div class="trade-card-row">'
+                f'<div class="pos-card-item"><span class="pos-card-label">Date</span><span class="pos-card-value">{date_t} {time_t}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Price</span><span class="pos-card-value">{price_s_t}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Qty</span><span class="pos-card-value">{qty_s_t}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Total</span><span class="pos-card-value">{total_s_t}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{hold_s_t}</span></div>'
+                f'<div class="pos-card-item"><span class="pos-card-label">Score</span><span class="pos-card-value" style="color:#ffcc00">{score_t or "—"}</span></div>'
+                f'</div></div>'
+            )
         trades_html = (
             f'<div class="card" style="margin-bottom:16px">'
             f'<div class="section-title">Recent Trades <span style="font-size:12px;color:#475569;font-weight:400">DB-backed · survives restarts</span></div>'
-            f'<div class="table-wrap"><table><thead><tr>'
+            f'<div class="trades-table-wrap table-wrap"><table><thead><tr>'
             f'<th></th><th>Symbol</th><th>Mkt</th><th>Date</th><th>Time</th>'
             f'<th>Entry $</th><th>Qty</th><th>Total $</th><th>Held</th><th>P&L</th><th>Score</th>'
             f'</tr></thead>'
-            f'<tbody>{trade_rows}</tbody></table>'
+            f'<tbody>{trade_rows}</tbody></table></div>'
+            f'<div class="trades-cards">{iphone_trade_cards}</div>'
             f'<div style="margin-top:10px;font-size:13px;color:#475569">Total: {total_t} trades · '
             f'<span style="color:{_col(total_pnl_db)}">{_fmt(total_pnl_db)}</span> all-time · '
             f'{win_rate}% win rate</div></div>'
@@ -569,12 +687,13 @@ def build_dashboard():
     sc_scored     = score_candidates(st_candidates.get("smallcap", []))
 
     # ── READY TO TRADE screener — signals that qualify RIGHT NOW ──
-    def ready_to_trade_rows(scored, color, label):
+    def ready_to_trade_rows(scored, color, label, held_syms=set()):
         rows = ""
         for sc, ema_gap, c in scored:
             ema_crossed = ema_gap is not None and ema_gap > 0
             score_ok = sc >= MIN_SIGNAL_SCORE
             if not (score_ok and ema_crossed): continue
+            if c["symbol"] in held_syms: continue
             cc = "#00ff88" if c["change"]>=0 else "#ff4466"
             chg_s = "+" if c["change"]>=0 else ""
             rsi = c.get("rsi")
@@ -597,12 +716,13 @@ def build_dashboard():
             )
         return rows
 
+    _held_syms = set(sym for sym,_,_c,_t in all_pos) if all_pos else set()
     rtt_rows = (
-        ready_to_trade_rows(crypto_scored, "#00ff88", "Crypto") +
-        ready_to_trade_rows(us_scored,     "#00aaff", "US") +
-        ready_to_trade_rows(ftse_scored,   "#cc88ff", "FTSE") +
-        ready_to_trade_rows(asx_scored,    "#ffaa00", "ASX") +
-        ready_to_trade_rows(sc_scored,     "#ffcc00", "SmCap")
+        ready_to_trade_rows(crypto_scored, "#00ff88", "Crypto", _held_syms) +
+        ready_to_trade_rows(us_scored,     "#00aaff", "US",     _held_syms) +
+        ready_to_trade_rows(ftse_scored,   "#cc88ff", "FTSE",   _held_syms) +
+        ready_to_trade_rows(asx_scored,    "#ffaa00", "ASX",    _held_syms) +
+        ready_to_trade_rows(sc_scored,     "#ffcc00", "SmCap",  _held_syms)
     )
     if rtt_rows:
         ready_to_trade_html = (
@@ -684,7 +804,7 @@ def build_dashboard():
                     )
                 return rows
 
-            thead = ('<div style="overflow-x:auto"><table><thead><tr>'
+            thead = ('<div style="overflow-x:auto"><table class="scan-table"><thead><tr>'
                      '<th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th><th>Score</th>'
                      '<th>EMA Cross</th><th>RSI</th><th>Vol</th></tr></thead><tbody>')
             tfoot = '</tbody></table></div>'
