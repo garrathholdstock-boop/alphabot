@@ -99,7 +99,7 @@ def _db_recent_trades(limit=10):
     try:
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute(
-            "SELECT symbol, pnl, side, created_at, score, qty, price FROM trades "
+            "SELECT symbol, pnl, side, created_at, score FROM trades "
             "WHERE side='SELL' ORDER BY created_at DESC LIMIT ?",
             (limit,)
         ).fetchall()
@@ -245,11 +245,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div style="display:flex;gap:14px">
       <div style="text-align:right">
         <div style="font-size:10px;color:#00aaff">US P&L</div>
-        <div style="font-family:monospace;font-size:13px;font-weight:700;color:{stocks_pnl_color}" id="live-stocks-pnl">{stocks_pnl}</div>
+        <div style="font-family:monospace;font-size:13px;font-weight:700;color:{stocks_pnl_color}">{stocks_pnl}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:10px;color:#00ff88">Crypto P&L</div>
-        <div style="font-family:monospace;font-size:13px;font-weight:700;color:{crypto_pnl_color}" id="live-crypto-pnl">{crypto_pnl}</div>
+        <div style="font-family:monospace;font-size:13px;font-weight:700;color:{crypto_pnl_color}">{crypto_pnl}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:10px;color:#444">Portfolio</div>
@@ -297,13 +297,13 @@ function pinCmd(path, label) {{
   <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">
     <div class="card" style="padding:12px 16px">
       <div style="display:flex;align-items:baseline;justify-content:space-between">
-        <div><div class="lbl">Total Balance · IBKR + Binance</div><div class="big blue" style="font-size:28px" id="live-portfolio">{portfolio}</div></div>
+        <div><div class="lbl">Total Balance · IBKR + Binance</div><div class="big blue" style="font-size:28px">{portfolio}</div></div>
         <div style="text-align:right"><div style="font-size:11px;color:#555">{now_date}</div><div style="font-size:11px;color:#444">{market_status} <span class="dot {market_dot}" style="display:inline-block;vertical-align:middle"></span></div></div>
       </div>
       <div style="margin-top:8px;display:flex;gap:24px;font-size:12px;align-items:center">
-        <span><span style="color:#555">Today </span><span style="font-weight:700;color:{combined_pnl_color}" id="live-today-pct">{combined_pnl_pct_fmt}%</span></span>
-        <span><span style="color:#555">Trades </span><span style="font-weight:700" id="live-trades-today">{trades_today_count}</span></span>
-        <span><span style="color:#555">P&L </span><span style="font-weight:700;color:{combined_pnl_color}" id="live-today-pnl">{combined_pnl}</span></span>
+        <span><span style="color:#555">Today </span><span style="font-weight:700;color:{combined_pnl_color}">{combined_pnl_pct_fmt}%</span></span>
+        <span><span style="color:#555">Trades </span><span style="font-weight:700">{trades_today_count}</span></span>
+        <span><span style="color:#555">P&L </span><span style="font-weight:700;color:{combined_pnl_color}">{combined_pnl}</span></span>
       </div>
     </div>
     <div class="card" style="padding:12px 16px">
@@ -520,54 +520,8 @@ function pinCmd(path, label) {{
   </div>
 </div>
 <script>
-// Live number polling — updates top strip every 30s without full reload
-var _reload_t = 60;
-var _poll_t   = 30;
-var _el       = document.getElementById("refresh-timer");
-
-function _fmtPnl(v) {{
-  return (v >= 0 ? "+$" : "-$") + Math.abs(v).toFixed(2).replace(/\B(?=(\d{{3}})+(?!\d))/g, ",");
-}}
-function _fmtPort(v) {{
-  return "$" + v.toFixed(2).replace(/\B(?=(\d{{3}})+(?!\d))/g, ",");
-}}
-
-function pollLive() {{
-  fetch("/api").then(r => r.json()).then(d => {{
-    // Update portfolio
-    var pe = document.getElementById("live-portfolio");
-    if (pe) pe.textContent = _fmtPort(d.portfolio || 0);
-    // Update today P&L
-    var te = document.getElementById("live-today-pnl");
-    if (te) {{
-      te.textContent = _fmtPnl(d.today_pnl || 0);
-      te.style.color = (d.today_pnl || 0) >= 0 ? "#00ff88" : "#ff4466";
-    }}
-    // Update trade count
-    var tc = document.getElementById("live-trades-today");
-    if (tc) tc.textContent = (d.stocks ? d.stocks.trades : 0);
-    // Update header P&Ls
-    var sp = document.getElementById("live-stocks-pnl");
-    if (sp) {{
-      sp.textContent = _fmtPnl(d.today_pnl || 0);
-      sp.style.color = (d.today_pnl || 0) >= 0 ? "#00ff88" : "#ff4466";
-    }}
-    var cp = document.getElementById("live-crypto-pnl");
-    if (cp) {{
-      cp.textContent = _fmtPnl(d.crypto ? d.crypto.pnl : 0);
-      cp.style.color = (d.crypto && d.crypto.pnl >= 0) ? "#00ff88" : "#ff4466";
-    }}
-  }}).catch(function(){{}});
-}}
-
-setInterval(function() {{
-  _reload_t--; _poll_t--;
-  if (_el) _el.textContent = "↻ refresh in " + _reload_t + "s";
-  if (_poll_t <= 0) {{ pollLive(); _poll_t = 30; }}
-  if (_reload_t <= 0) window.location.reload();
-}}, 1000);
-
-pollLive(); // immediate first poll
+var _t = 60; var _el = document.getElementById("refresh-timer");
+setInterval(function() {{ _t--; if (_el) _el.textContent = "↻ refreshing in " + _t + "s"; if (_t<=0) window.location.reload(); }}, 1000);
 </script>
 </body>
 </html>"""
@@ -781,90 +735,63 @@ def build_dashboard():
         [(sym, pos, "purple","FTSE")    for sym, pos in ftse_state.positions.items()]
     )
     if all_pos:
+        from core.execution import fetch_latest_price
         rows = ""
         for idx, (sym, pos, color, category) in enumerate(all_pos):
             is_crypto = category in ("Crypto", "CrypID")
-            # Live price: IBKR portfolio push (24/7, no subscription) → fallback to highest_price
-            live = cfg.live_prices.get(sym) or pos.get("highest_price", pos["entry_price"])
-            entry      = pos["entry_price"]
-            qty        = pos["qty"]
-            total_val  = qty * live
-            pnl        = (live - entry) * qty
-            pnl_pct    = ((live - entry) / entry) * 100
-            pnl_c      = "green" if pnl >= 0 else "red"
-            sign       = "+" if pnl >= 0 else ""
-            entry_ts   = pos.get("entry_ts", "")
-            paris      = ZoneInfo("Europe/Paris")
-            now_paris  = datetime.now(paris)
+            try:
+                live = fetch_latest_price(sym, crypto=is_crypto) or pos.get("highest_price", pos["entry_price"])
+            except:
+                live = pos.get("highest_price", pos["entry_price"])
+            entry   = pos["entry_price"]
+            pnl     = (live - entry) * pos["qty"]
+            pnl_pct = ((live - entry) / entry) * 100
+            pnl_c   = "green" if pnl >= 0 else "red"
+            sign    = "+" if pnl >= 0 else ""
+            entry_ts = pos.get("entry_ts", "")
+            paris = ZoneInfo("Europe/Paris")
+            now_paris = datetime.now(paris)
             try:
                 dt = datetime.fromisoformat(entry_ts)
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-                dt_paris   = dt.astimezone(paris)
-                held       = now_paris - dt_paris
-                held_hrs   = int(held.total_seconds() // 3600)
-                held_mins  = int((held.total_seconds() % 3600) // 60)
-                entry_date = dt_paris.strftime("%d %b")
-                entry_time = dt_paris.strftime("%H:%M")
+                dt_paris = dt.astimezone(paris)
+                held = now_paris - dt_paris
+                held_hrs  = int(held.total_seconds() // 3600)
+                held_mins = int((held.total_seconds() % 3600) // 60)
                 if held_hrs >= 24:
                     held_days = held_hrs // 24
                     held_rem  = held_hrs % 24
-                    held_str  = f"{held_days}d {held_rem}h"
+                    entry_dt  = f"Held {held_days}d {held_rem}h"
                 else:
-                    held_str = f"{held_hrs}h {held_mins}m"
+                    entry_dt = f"Held {held_hrs}h {held_mins}m"
             except:
-                entry_date = pos.get("entry_date", "—")
-                entry_time = "—"
-                held_str   = "—"
+                entry_dt = pos.get("entry_date", "—")
             cat_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ID":"#aa88ff","CrypID":"#00ff88","ASX":"#ffaa00","FTSE":"#cc88ff"}
             cat_color  = cat_colors.get(category, "#555")
             stop_pct   = round(((pos["stop_price"] - entry) / entry) * 100, 1)
             tp_price   = pos.get("take_profit_price", entry * 1.10)
+            tp_pct     = round(((tp_price - entry) / entry) * 100, 1)
+            days_held  = pos.get("days_held", 0)
             score      = pos.get("signal_score", "—")
-            breakdown  = pos.get("entry_breakdown", "")
-
-            # Build expandable detail row
-            detail_html = (
-                f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px 20px;font-size:11px;color:#888;padding:4px 0">'
-                f'<div><span style="color:#555">Signal Score: </span><span style="color:#ffcc00;font-weight:700">{score}/10</span></div>'
-                f'<div><span style="color:#555">Qty: </span><span style="font-weight:700">{qty:,.0f}</span></div>'
-                f'<div><span style="color:#555">Position Size: </span><span style="font-weight:700">${total_val:,.2f}</span></div>'
-                f'<div><span style="color:#555">Entry: </span><span style="font-weight:700">${entry:.4f}</span></div>'
-                f'<div><span style="color:#555">Stop: </span><span style="color:#ff4466;font-weight:700">${pos["stop_price"]:.4f} ({stop_pct:+.1f}%)</span></div>'
-                f'<div><span style="color:#555">Target: </span><span style="color:#00ff88;font-weight:700">${tp_price:.4f}</span></div>'
-                f'</div>'
-            )
-            if breakdown:
-                detail_html += f'<div style="margin-top:8px;font-size:11px;color:#666;white-space:pre-wrap;font-family:monospace;border-top:1px solid rgba(255,255,255,0.04);padding-top:8px">{breakdown}</div>'
 
             rows += (
-                f'<tr onclick="toggleDetail({idx})" style="cursor:pointer">'
+                f'<tr>'
                 f'<td style="font-weight:700" class="{color}">{sym}</td>'
                 f'<td><span style="font-size:10px;color:{cat_color};font-weight:700">{category}</span></td>'
-                f'<td style="color:#555;font-size:11px">{held_str}</td>'
-                f'<td style="color:#555;font-size:11px">{entry_date} {entry_time}</td>'
+                f'<td style="color:#555;font-size:11px">{entry_dt}</td>'
                 f'<td style="font-family:monospace">${entry:.4f}</td>'
-                f'<td style="font-family:monospace;color:#00aaff" id="live-{sym}">${live:.4f}</td>'
+                f'<td style="font-family:monospace;color:#00aaff">${live:.4f}</td>'
                 f'<td class="red" style="font-family:monospace">${pos["stop_price"]:.4f} ({stop_pct:+.1f}%)</td>'
-                f'<td style="font-family:monospace;color:#888">${total_val:,.2f}</td>'
-                f'<td class="{pnl_c}" style="font-weight:700;font-family:monospace" id="pnl-{sym}">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
-                f'</tr>'
-                f'<tr id="detail-{idx}" style="display:none;background:rgba(255,255,255,0.015)">'
-                f'<td colspan="9" style="padding:12px 16px">{detail_html}</td>'
+                f'<td class="{pnl_c}" style="font-weight:700;font-family:monospace">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
                 f'</tr>'
             )
         positions_html = (
             f'<div class="card" style="margin-bottom:20px">'
-            f'<div class="section-title">Open Positions ({len(all_pos)}) <span style="font-size:11px;color:#555;font-weight:400">— click row for detail</span></div>'
+            f'<div class="section-title">Open Positions ({len(all_pos)})</div>'
             f'<div class="table-wrap"><table><thead><tr>'
-            f'<th>Symbol</th><th>Type</th><th>Held</th><th>Purchased</th><th>Entry $</th><th>Live $</th><th>Stop</th><th>Position $</th><th>P&L</th>'
+            f'<th>Symbol</th><th>Type</th><th>Held</th><th>Entry $</th><th>Live $</th><th>Stop</th><th>P&L</th>'
             f'</tr></thead><tbody>{rows}</tbody></table></div></div>'
-            f'<script>'
-            f'function toggleDetail(idx) {{'
-            f'  var r = document.getElementById("detail-"+idx);'
-            f'  r.style.display = r.style.display === "none" ? "table-row" : "none";'
-            f'}}'
-            f'</script>'
         )
     else:
         positions_html = ""
@@ -873,30 +800,14 @@ def build_dashboard():
     db_trades = _db_recent_trades(limit=10)
     if db_trades:
         rows = ""
-        for row in db_trades:
-            sym, pnl, side, created_at, score = row[0], row[1], row[2], row[3], row[4]
-            qty   = row[5] if len(row) > 5 else None
-            price = row[6] if len(row) > 6 else None
-            pc    = "green" if pnl >= 0 else "red"
-            sign  = "+" if pnl >= 0 else ""
-            # Split timestamp into date and time
-            if created_at and len(created_at) >= 16:
-                ts_date = created_at[:10]
-                ts_time = created_at[11:16]
-            else:
-                ts_date = created_at or "—"
-                ts_time = ""
-            total_val = f"${qty * price:,.2f}" if qty and price else "—"
-            qty_str   = f"{qty:,.0f}" if qty else "—"
-            price_str = f"${price:.4f}" if price else "—"
+        for sym, pnl, side, created_at, score in db_trades:
+            pc   = "green" if pnl >= 0 else "red"
+            sign = "+" if pnl >= 0 else ""
+            ts   = created_at[:16] if created_at else "—"
             rows += (
                 f'<tr><td>{"✅" if pnl>0 else "❌"}</td>'
                 f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
-                f'<td style="color:#555">{ts_date}</td>'
-                f'<td style="color:#666">{ts_time}</td>'
-                f'<td style="font-family:monospace;color:#888">{price_str}</td>'
-                f'<td style="font-family:monospace;color:#777">{qty_str}</td>'
-                f'<td style="font-family:monospace;color:#666">{total_val}</td>'
+                f'<td style="color:#555">{ts}</td>'
                 f'<td class="{pc}" style="font-weight:700">{sign}${pnl:.2f}</td>'
                 f'<td style="color:#555">{score or "—"}</td></tr>'
             )
@@ -904,7 +815,7 @@ def build_dashboard():
             f'<div class="card" style="margin-bottom:20px">'
             f'<div class="section-title">Recent Trades (DB)</div>'
             f'<div class="table-wrap"><table><thead><tr>'
-            f'<th></th><th>Symbol</th><th>Date</th><th>Time</th><th>Entry $</th><th>Qty</th><th>Total $</th><th>P&L</th><th>Score</th>'
+            f'<th></th><th>Symbol</th><th>Time</th><th>P&L</th><th>Score</th>'
             f'</tr></thead><tbody>{rows}</tbody></table></div>'
             f'<div style="margin-top:8px;font-size:11px;color:#555">Total: {total_trades_db} trades · '
             f'<span style="color:{"#00cc66" if total_pnl_db>=0 else "#ff4466"}">'
@@ -1058,7 +969,7 @@ def build_dashboard():
         )
 
     stocks_scan_html = build_scan_table(state.candidates, "blue")
-    crypto_scan_html = build_scan_table(crypto_state.candidates, "green")
+    crypto_scan_html = build_scan_table(crypto_intraday_state.candidates, "green")
     asx_scan_html    = build_scan_table(asx_state.candidates, "amber")
     ftse_scan_html   = build_scan_table(ftse_state.candidates, "purple")
 
@@ -1103,7 +1014,7 @@ def build_dashboard():
         mode_badge="badge-live" if IS_LIVE else "badge-paper",
         mode_label="LIVE" if IS_LIVE else "PAPER",
         portfolio=portfolio,
-        stocks_pnl=pnl_str(_db_today_pnl()), stocks_pnl_color=pnl_color(_db_today_pnl()),
+        stocks_pnl=pnl_str(state.daily_pnl), stocks_pnl_color=pnl_color(state.daily_pnl),
         crypto_pnl=pnl_str(crypto_state.daily_pnl), crypto_pnl_color=pnl_color(crypto_state.daily_pnl),
         market_status="Open" if market else "Closed",
         market_dot="dot-green" if market else "dot-red",
@@ -1548,3 +1459,4 @@ def start_dashboard():
     server = ThreadedHTTPServer(("0.0.0.0", PORT), DashboardHandler)
     log.info(f"Dashboard running on port {PORT}")
     server.serve_forever()
+
