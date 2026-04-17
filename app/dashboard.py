@@ -28,6 +28,26 @@ from core.config import (
     _state_lock,
 )
 import core.config as cfg
+import json as _json
+_CONFIG_PATH = "/home/alphabot/app/trading_config.json"
+
+def _load_tcfg():
+    try:
+        with open(_CONFIG_PATH) as f: return _json.load(f)
+    except: return {}
+
+def _save_tcfg(updates: dict):
+    try:
+        c = _load_tcfg()
+        c.update(updates)
+        import datetime as _dt
+        c["_last_modified"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c["_modified_by"] = "dashboard"
+        with open(_CONFIG_PATH, "w") as f: _json.dump(c, f, indent=2)
+        return True
+    except Exception as e:
+        log.error(f"[SETTINGS] Save failed: {e}")
+        return False
 from core.risk import (
     total_exposure, all_positions_count, calc_profit_factor, calc_sharpe,
     vol_adjusted_size, is_market_open, is_intraday_window,
@@ -1503,6 +1523,199 @@ async def close_all(request: Request):
         st.shutoff = True
     return JSONResponse({"status": "closed"})
 
+
+# ═══════════════════════════════════════════════════════════════
+# SETTINGS PANEL
+# ═══════════════════════════════════════════════════════════════
+def _build_settings_page(msg=None, msg_type="ok"):
+    c = _load_tcfg()
+    def v(k, default=""): return c.get(k, default)
+    msg_html = ""
+    if msg:
+        col = "#00ff88" if msg_type == "ok" else "#ff4466"
+        msg_html = f'''<div style="background:rgba(0,255,136,0.08);border:1px solid {col};border-radius:10px;padding:14px 20px;margin-bottom:20px;color:{col};font-weight:700">
+            {"✅" if msg_type == "ok" else "❌"} {msg}</div>'''
+
+    def row(label, key, default, typ="number", step="1", note=""):
+        val = v(key, default)
+        return f'''<div style="display:grid;grid-template-columns:220px 140px 1fr;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#e0e0e0">{label}</div>
+              {"<div style=\'font-size:11px;color:#475569;margin-top:3px\'>" + note + "</div>" if note else ""}
+            </div>
+            <input name="{key}" type="{typ}" step="{step}" value="{val}"
+              style="background:#0d1117;border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#00ff88;
+                     font-family:\'JetBrains Mono\',monospace;font-size:15px;font-weight:700;padding:9px 14px;width:100%;text-align:right">
+            <div style="font-size:11px;color:#475569">{note if not note else ""}</div>
+        </div>'''
+
+    return f'''<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AlphaBot Settings</title>
+{BASE_CSS}
+<style>
+.settings-section{{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:22px 26px;margin-bottom:20px}}
+.settings-section-title{{font-family:\'Syne\',sans-serif;font-size:16px;font-weight:700;color:#ffcc00;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.06)}}
+input[type=number]{{-moz-appearance:textfield}}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{{-webkit-appearance:none;margin:0}}
+#pin-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center}}
+#pin-overlay.visible{{display:flex}}
+.pin-box{{background:#0d1117;border:1px solid rgba(255,204,0,0.3);border-radius:16px;padding:36px 40px;text-align:center;max-width:360px;width:90%}}
+</style>
+</head><body>
+<div class="header">
+  <div class="logo">Alpha<span>Bot</span> <span style="color:#ffcc00;font-size:15px">⚙ Settings</span></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="badge {"badge-live" if IS_LIVE else "badge-paper"}">{"● LIVE" if IS_LIVE else "◎ PAPER"}</span>
+  </div>
+</div>
+<div class="controls-bar">
+  <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
+  <a href="/analytics" class="tab" style="text-decoration:none">📊 Intelligence</a>
+  <a href="/settings" class="tab" style="text-decoration:none;color:#ffcc00;border-bottom:2px solid #ffcc00">⚙️ Settings</a>
+</div>
+
+<div class="container" style="max-width:860px">
+  {msg_html}
+
+  <div style="background:rgba(255,204,0,0.06);border:1px solid rgba(255,204,0,0.2);border-radius:10px;padding:14px 18px;margin-bottom:22px;font-size:13px;color:#ffcc00">
+    ⚡ Changes apply within <strong>60 seconds</strong> — no restart needed. PIN required to save.
+  </div>
+
+  <form id="settings-form">
+
+    <div class="settings-section">
+      <div class="settings-section-title">🎯 Signal & Position Limits</div>
+      {row("Min Signal Score", "MIN_SIGNAL_SCORE", 5, step="1", note="5 = paper, 7+ = live")}
+      {row("Max Positions Per Strategy", "MAX_POSITIONS", 3, step="1")}
+      {row("Max Total Positions", "MAX_TOTAL_POSITIONS", 15, step="1")}
+      {row("Max Trades Per Day", "MAX_TRADES_PER_DAY", 50, step="1")}
+      {row("Max Sector Positions", "MAX_SECTOR_POSITIONS", 1, step="1")}
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">🛑 Stop Loss & Profit Targets</div>
+      {row("Stop Loss %", "STOP_LOSS_PCT", 5.0, step="0.1", note="Swing trades")}
+      {row("Trailing Stop %", "TRAILING_STOP_PCT", 2.0, step="0.1")}
+      {row("Take Profit %", "TAKE_PROFIT_PCT", 10.0, step="0.1", note="Swing trades")}
+      {row("Crypto Stop %", "CRYPTO_STOP_PCT", 4.0, step="0.1")}
+      {row("Max Hold Days", "MAX_HOLD_DAYS", 5, step="1")}
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">⚡ Intraday Settings</div>
+      {row("Intraday Stop Loss %", "INTRADAY_STOP_LOSS", 1.0, step="0.1")}
+      {row("Intraday Take Profit %", "INTRADAY_TAKE_PROFIT", 2.5, step="0.1")}
+      {row("Max Intraday Positions", "INTRADAY_MAX_POSITIONS", 2, step="1")}
+      {row("Crypto Intraday Stop %", "CRYPTO_INTRADAY_SL", 1.0, step="0.1")}
+      {row("Crypto Intraday TP %", "CRYPTO_INTRADAY_TP", 2.0, step="0.1")}
+      {row("Max Crypto Intraday Positions", "CRYPTO_INTRADAY_MAX_POS", 2, step="1")}
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">💰 Risk & Exposure Limits</div>
+      {row("Max Daily Loss %", "MAX_DAILY_LOSS_PCT", 0.5, step="0.1", note="% of portfolio")}
+      {row("Daily Profit Target %", "DAILY_PROFIT_TARGET_PCT", 2.0, step="0.1")}
+      {row("Max Daily Spend %", "MAX_DAILY_SPEND_PCT", 50.0, step="1.0")}
+      {row("Max Portfolio Exposure %", "MAX_EXPOSURE_PCT", 30.0, step="1.0")}
+      {row("Max Trade Size %", "MAX_TRADE_PCT", 5.0, step="0.5")}
+      {row("Crypto Exposure %", "CRYPTO_EXPOSURE_PCT", 20.0, step="1.0")}
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">🔧 Bot Cycle</div>
+      {row("Cycle Seconds", "CYCLE_SECONDS", 60, step="5", note="Main loop interval (seconds)")}
+      {row("Loss Streak Pause Limit", "LOSS_STREAK_LIMIT", 3, step="1")}
+      {row("VIX High Threshold", "VIX_HIGH_THRESHOLD", 25.0, step="1.0")}
+      {row("VIX Extreme Threshold", "VIX_EXTREME", 35.0, step="1.0")}
+    </div>
+
+    <div style="text-align:center;padding:10px 0 30px">
+      <button type="button" onclick="showPin()"
+        style="background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.4);border-radius:10px;
+               color:#ffcc00;font-family:\'JetBrains Mono\',monospace;font-size:15px;font-weight:700;
+               padding:16px 48px;cursor:pointer;letter-spacing:1px">
+        🔒 SAVE SETTINGS
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- PIN overlay -->
+<div id="pin-overlay" onclick="if(event.target===this)hidePin()">
+  <div class="pin-box">
+    <div style="font-size:20px;font-weight:700;color:#ffcc00;margin-bottom:8px">🔒 Enter PIN</div>
+    <div style="font-size:13px;color:#475569;margin-bottom:20px">Required to save settings</div>
+    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
+      style="background:#111;border:1px solid rgba(255,204,0,0.3);border-radius:8px;color:#ffcc00;
+             font-family:\'JetBrains Mono\',monospace;font-size:22px;font-weight:700;padding:12px;
+             width:100%;text-align:center;letter-spacing:4px;margin-bottom:16px"
+      onkeydown="if(event.key===\'Enter\')submitSettings()">
+    <div style="display:flex;gap:10px">
+      <button onclick="hidePin()"
+        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#475569;
+               padding:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;font-size:13px">
+        Cancel
+      </button>
+      <button onclick="submitSettings()"
+        style="flex:2;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.4);border-radius:8px;
+               color:#ffcc00;padding:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;
+               font-size:13px;font-weight:700">
+        Save Settings
+      </button>
+    </div>
+    <div id="pin-error" style="color:#ff4466;font-size:12px;margin-top:10px;display:none">Wrong PIN</div>
+  </div>
+</div>
+
+<script>
+function showPin(){{document.getElementById(\'pin-overlay\').classList.add(\'visible\');document.getElementById(\'pin-input\').focus();}}
+function hidePin(){{document.getElementById(\'pin-overlay\').classList.remove(\'visible\');document.getElementById(\'pin-error\').style.display=\'none\';}}
+function submitSettings(){{
+  var pin=document.getElementById(\'pin-input\').value;
+  var form=document.getElementById(\'settings-form\');
+  var inputs=form.querySelectorAll(\'input[name]\');
+  var data={{}};
+  inputs.forEach(function(i){{data[i.name]=i.type===\'number\'?parseFloat(i.value):i.value;}});
+  fetch(\'/settings\',{{method:\'POST\',headers:{{\'Content-Type\':\'application/json\'}},body:JSON.stringify({{pin:pin,settings:data}})  }})
+  .then(r=>r.json()).then(d=>{{
+    if(d.status===\'ok\'){{hidePin();window.location.href=\'/settings?msg=saved\'}}
+    else if(d.status===\'wrong_pin\'){{document.getElementById(\'pin-error\').style.display=\'block\'}}
+    else{{alert(\'Error: \'+JSON.stringify(d))}}
+  }});
+}}
+</script>
+</body></html>'''
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_get(request: Request, msg: str = None):
+    msg_text = "Settings saved — changes apply within 60 seconds." if msg == "saved" else None
+    return HTMLResponse(_build_settings_page(msg_text))
+
+@app.post("/settings")
+async def settings_post(request: Request):
+    try:
+        body = await request.json()
+        if body.get("pin") != KILL_PIN:
+            return JSONResponse({"status": "wrong_pin"})
+        updates = body.get("settings", {})
+        # Type-cast all values
+        int_keys = {"MIN_SIGNAL_SCORE","MAX_POSITIONS","MAX_TOTAL_POSITIONS","MAX_TRADES_PER_DAY",
+                    "CYCLE_SECONDS","MAX_HOLD_DAYS","INTRADAY_MAX_POSITIONS","CRYPTO_INTRADAY_MAX_POS",
+                    "MAX_SECTOR_POSITIONS","LOSS_STREAK_LIMIT"}
+        clean = {}
+        for k, v in updates.items():
+            if k.startswith("_"): continue
+            try:
+                clean[k] = int(float(v)) if k in int_keys else float(v)
+            except: pass
+        if _save_tcfg(clean):
+            log.info(f"[SETTINGS] Updated: {clean}")
+            return JSONResponse({"status": "ok", "updated": len(clean)})
+        return JSONResponse({"status": "error", "msg": "Failed to write config"})
+    except Exception as e:
+        log.error(f"[SETTINGS] POST error: {e}")
+        return JSONResponse({"status": "error", "msg": str(e)})
 
 # ═══════════════════════════════════════════════════════════════
 # KEEP start_dashboard() for backwards compat with main.py
