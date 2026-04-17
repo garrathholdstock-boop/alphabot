@@ -1037,19 +1037,45 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
             mkt_html += f'<span style="font-size:10px;font-weight:700;color:{c};margin-right:10px;">{mkt} {mst}</span>'
 
     # ── Recent events log ─────────────────────────────────────
+    # ── Live event feed — always visible, colour coded ──────
     events_html = ""
+    # Always show the feed, even if empty
+    feed_rows = ""
     if recent_events:
-        rows = ""
         for e in recent_events:
-            p = e.get("priority","?")
-            pc = {"P1":"#ef4444","P2":"#f59e0b","P3":"#64748b"}.get(p,"#64748b")
-            rows += f"<tr><td style='color:{pc};font-weight:700;font-size:9px'>{p}</td><td style='color:#e2e8f0;font-size:10px'>{html.escape(e.get('message','')[:50])}</td><td style='color:#475569;font-size:9px'>{e.get('created_at','')[:16]}</td></tr>"
-        events_html = f"""
-        <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
-          <details><summary style="cursor:pointer;font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Event Log (last {len(recent_events)})</summary>
-          <div style="margin-top:8px;"><table><tr><th>Pri</th><th>Event</th><th>Time</th></tr>{rows}</table></div>
-          </details>
-        </div>"""
+            p = e.get("priority","P3")
+            pc = {"P1":"#ef4444","P2":"#f59e0b","P3":"#475569"}.get(p,"#475569")
+            bg = {"P1":"rgba(239,68,68,0.06)","P2":"rgba(245,158,11,0.06)","P3":"rgba(255,255,255,0.02)"}.get(p,"")
+            icon = {"P1":"🔴","P2":"🟡","P3":"🔵"}.get(p,"⚪")
+            action = e.get("action_taken","")
+            action_html = f'<span style="color:#00ff88;font-size:9px;margin-left:6px;">→ {html.escape(action[:40])}</span>' if action else ""
+            ts = e.get("created_at","")[:16].replace("T"," ")
+            feed_rows += f'''
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:{bg};border-left:2px solid {pc};margin-bottom:2px;border-radius:0 4px 4px 0;">
+              <span style="font-size:11px;flex-shrink:0;margin-top:1px;">{icon}</span>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                  <span style="font-size:11px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:60])}</span>
+                  <span style="font-size:9px;color:#475569;white-space:nowrap;">{ts}</span>
+                </div>
+                {action_html}
+              </div>
+            </div>'''
+    else:
+        feed_rows = '<div style="text-align:center;padding:20px;color:#475569;font-size:11px;">No events logged yet — monitor running every 5 mins</div>'
+
+    events_html = f"""
+    <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">📡 Live Event Feed</div>
+        <div style="display:flex;gap:10px;font-size:9px;">
+          <span style="color:#ef4444;font-weight:700;">🔴 P1 Safety</span>
+          <span style="color:#f59e0b;font-weight:700;">🟡 P2 Efficiency</span>
+          <span style="color:#475569;font-weight:700;">🔵 P3 Bug</span>
+        </div>
+      </div>
+      <div style="max-height:240px;overflow-y:auto;">{feed_rows}</div>
+    </div>"""
 
     # ── Trades table ──────────────────────────────────────────
     trades_html = ""
