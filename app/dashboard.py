@@ -233,7 +233,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 .pos-card-item{display:flex;flex-direction:column;gap:2px}
 .pos-card-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1.5px}
 .pos-card-value{font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace}
-.pos-card-detail{display:none;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
+.pos-card-detail{display:block;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
 .pos-card-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .trade-card{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px;margin-bottom:8px}
 .trade-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
