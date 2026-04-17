@@ -198,9 +198,10 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   .pos-cards{display:block}
   .trades-table-wrap{display:none}
   .trades-cards{display:block}
-  .scan-table th:nth-child(3),.scan-table td:nth-child(3),
+  .scan-table th:nth-child(6),.scan-table td:nth-child(6),
   .scan-table th:nth-child(7),.scan-table td:nth-child(7),
   .scan-table th:nth-child(8),.scan-table td:nth-child(8){display:none}
+  .scan-table td:nth-child(4),.scan-table td:nth-child(5){white-space:nowrap}
 }
 .pos-cards{display:none}
 .trades-cards{display:none}
@@ -451,8 +452,8 @@ def build_dashboard():
             bd2 = pos.get("entry_breakdown","")
             bd_html2 = f'<div style="font-size:11px;color:#888;margin-top:8px;white-space:pre-wrap">{bd2}</div>' if bd2 else ""
             iphone_pos_cards += (
-                f'<div class="pos-card" style="border-color:{cat_col}22" onclick="toggleCard({idx})">'
-                f'<div class="pos-card-header">'
+                f'<div class="pos-card" style="border-color:{cat_col}22">'
+                f'<div class="pos-card-header" onclick="toggleCard({idx})" style="cursor:pointer;-webkit-tap-highlight-color:transparent">'
                 f'<div><span class="pos-card-sym" style="color:{cat_col}">{sym}</span>'
                 f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
                 f'<div style="text-align:right">'
