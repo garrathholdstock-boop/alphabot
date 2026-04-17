@@ -1315,9 +1315,9 @@ function pinCmd(path,label){{
   </div>
 </div>
 
+{trades_html}
 {positions_html}
 {ready_to_trade_html}
-{trades_html}
 
 <!-- Market Scanner — vertical accordion, open markets first -->
 {market_scanner_html}
