@@ -275,8 +275,16 @@ def run_cycle(watchlist, st, crypto=False):
                 else:
                     break
 
-            if worst_sym and score_gap >= 1.5 and worst_pct > 0.1:
-                log.info(f"[{st.label}] 🔄 ROTATE: sell {worst_sym} (score {worst_curr_score:.1f}, +{worst_pct:.2f}%) → buy {s['symbol']} (score {sig_score:.1f}, gap +{score_gap:.1f})")
+            # Minimum hold time before rotation — don't sell winners too early
+            worst_hold_mins = 0
+            if worst_pos and worst_pos.get("entry_ts"):
+                try:
+                    worst_hold_mins = (datetime.now() - datetime.fromisoformat(worst_pos["entry_ts"])).total_seconds() / 60
+                except:
+                    worst_hold_mins = 999
+
+            if worst_sym and score_gap >= 1.5 and worst_hold_mins >= 15:
+                log.info(f"[{st.label}] 🔄 ROTATE: sell {worst_sym} (score {worst_curr_score:.1f}, held {worst_hold_mins:.0f}m) → buy {s['symbol']} (score {sig_score:.1f}, gap +{score_gap:.1f})")
                 ord_rot, rot_price = place_order(worst_sym, "sell", worst_pos["qty"], crypto=crypto, estimated_price=worst_price)
                 if ord_rot:
                     pnl_rot = (rot_price - worst_pos["entry_price"]) * worst_pos["qty"]
