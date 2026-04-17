@@ -1260,7 +1260,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="refresh" content="60">
+<!-- auto-refresh via JS to avoid Safari form interference -->
 <title>AlphaBot Agent v8</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
@@ -1314,7 +1314,6 @@ details summary {{ cursor:pointer; }}
 
 {queue_html}
 {autofix_html}
-{events_html}
 {err_html}
 {agent_html}
 {cmd_html}
@@ -1341,6 +1340,12 @@ details summary {{ cursor:pointer; }}
   {file_btns}
 </div>
 
+<!-- Live event feed — below the fold, reference only -->
+{events_html}
+
+<!-- Auto-fix log -->
+
+
 <!-- Recent trades -->
 <div class="card">
   <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Recent Trades</div>
@@ -1350,7 +1355,13 @@ details summary {{ cursor:pointer; }}
 <div style="text-align:center;margin-top:20px;font-size:12px;color:#1e1e2e;">
   Auto-refreshes every 60s · <a href="http://178.104.170.58:8080" style="color:#1e1e2e;">Dashboard →</a>
 </div>
-
+<script>
+var _t=60;
+setInterval(function(){{
+  _t--;
+  if(_t<=0){{ window.location.reload(); }}
+}},1000);
+</script>
 </body>
 </html>"""
 
