@@ -255,6 +255,15 @@ def ibkr_get_account():
             elif item.tag == "GrossPositionValue":
                 result["long_market_value"] = float(item.value)
         result["last_equity"] = result.get("portfolio_value", 0)
+        # Update live prices from portfolio push (no market data subscription needed)
+        try:
+            for item in ib.portfolio():
+                sym = item.contract.symbol
+                price = item.marketPrice
+                if price and price > 0:
+                    cfg.live_prices[sym] = float(price)
+        except Exception:
+            pass
         record_api_success()
         return result
     except Exception as e:
