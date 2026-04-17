@@ -475,12 +475,207 @@ def build_dashboard():
             f'<th>EMA Cross</th><th>RSI</th><th>Vol</th></tr></thead><tbody>{rows}</tbody></table></div>'
         )
 
-    stocks_scan   = build_scan_table(state.candidates, "#00aaff")
-    crypto_scan   = build_scan_table(crypto_intraday_state.candidates, "#00ff88")
-    asx_scan      = build_scan_table(asx_state.candidates, "#ffaa00")
-    ftse_scan     = build_scan_table(ftse_state.candidates, "#cc88ff")
-    smallcap_scan = build_scan_table(smallcap_state.candidates, "#ffcc00") if smallcap_state.candidates else (
-        f'<div style="text-align:center;padding:24px;color:#475569">Pool: {len(smallcap_pool.get("symbols",[]))} stocks loaded — scan next cycle</div>'
+    # ── Build scored candidates per market ──
+    def score_candidates(candidates):
+        out = []
+        for c in candidates:
+            sc = score_signal(c["symbol"],c["price"],c["change"],c.get("rsi"),c.get("vol_ratio"),c.get("closes",[c["price"]]*22))
+            sma9=c.get("sma9"); sma21=c.get("sma21")
+            ema_gap = round(((sma9-sma21)/sma21)*100,2) if sma9 and sma21 and sma21>0 else None
+            out.append((sc, ema_gap, c))
+        out.sort(key=lambda x: -x[0])
+        return out
+
+    us_scored     = score_candidates(state.candidates)
+    crypto_scored = score_candidates(crypto_intraday_state.candidates)
+    asx_scored    = score_candidates(asx_state.candidates)
+    ftse_scored   = score_candidates(ftse_state.candidates)
+    sc_scored     = score_candidates(smallcap_state.candidates)
+
+    # ── READY TO TRADE screener — signals that qualify RIGHT NOW ──
+    def ready_to_trade_rows(scored, color, label):
+        rows = ""
+        for sc, ema_gap, c in scored:
+            ema_crossed = ema_gap is not None and ema_gap > 0
+            score_ok = sc >= MIN_SIGNAL_SCORE
+            if not (score_ok and ema_crossed): continue
+            cc = "#00ff88" if c["change"]>=0 else "#ff4466"
+            chg_s = "+" if c["change"]>=0 else ""
+            rsi = c.get("rsi")
+            rsi_s = f"{rsi:.1f}" if rsi else "—"
+            rsi_c = "#00ff88" if rsi and 50<=rsi<=65 else ("#ffcc00" if rsi and rsi<=75 else "#ff4466" if rsi and rsi>75 else "#475569")
+            vr = c.get("vol_ratio",0)
+            vr_s = f"{vr:.2f}x" if vr else "—"
+            vr_c = "#00ff88" if vr>=1.5 else ("#ffcc00" if vr>=1.2 else "#475569")
+            rows += (
+                f'<tr>'
+                f'<td style="font-weight:700;color:{color}">{c["symbol"]}</td>'
+                f'<td style="font-size:11px;color:{color};font-weight:700">{label}</td>'
+                f'<td>${c["price"]:.4f}</td>'
+                f'<td style="color:{cc}">{chg_s}{c["change"]:.2f}%</td>'
+                f'<td><span class="sig-buy">🟢 BUY {sc:.1f}</span></td>'
+                f'<td style="color:#00ff88;font-weight:700">+{ema_gap:.2f}% ✅</td>'
+                f'<td style="color:{rsi_c};font-weight:700">{rsi_s}</td>'
+                f'<td style="color:{vr_c};font-weight:700">{vr_s}</td>'
+                f'</tr>'
+            )
+        return rows
+
+    rtt_rows = (
+        ready_to_trade_rows(crypto_scored, "#00ff88", "Crypto") +
+        ready_to_trade_rows(us_scored,     "#00aaff", "US") +
+        ready_to_trade_rows(ftse_scored,   "#cc88ff", "FTSE") +
+        ready_to_trade_rows(asx_scored,    "#ffaa00", "ASX") +
+        ready_to_trade_rows(sc_scored,     "#ffcc00", "SmCap")
+    )
+    if rtt_rows:
+        ready_to_trade_html = (
+            f'<div class="card" style="margin-bottom:16px;border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.03)">' 
+            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' 
+            f'<div class="section-title" style="color:#00ff88;margin-bottom:0">🟢 READY TO TRADE</div>' 
+            f'<div style="font-size:13px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed — eligible for immediate execution</div>' 
+            f'</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Symbol</th><th>Market</th><th>Price</th><th>Chg%</th><th>Signal</th><th>EMA Cross</th><th>RSI</th><th>Vol</th>'
+            f'</tr></thead><tbody>{rtt_rows}</tbody></table></div></div>'
+        )
+    else:
+        ready_to_trade_html = (
+            f'<div class="card" style="margin-bottom:16px;border-color:rgba(255,255,255,0.07)">' 
+            f'<div style="display:flex;align-items:center;gap:12px">' 
+            f'<div class="section-title" style="color:#475569;margin-bottom:0">🟢 READY TO TRADE</div>' 
+            f'<div style="font-size:13px;color:#475569">No signals qualify right now — watching {sum(len(x) for x in [us_scored,crypto_scored,ftse_scored,asx_scored,sc_scored])} stocks across all markets</div>'
+            f'</div></div>'
+        )
+
+    # ── Build per-market accordion panels ──
+    def build_market_accordion(mid, label, icon, color, open_now, scored, is_open):
+        if not scored:
+            preview_html = f'<div style="padding:16px;color:#475569;font-size:14px">No scan data yet — waiting for first cycle</div>'
+            full_html = preview_html
+            buys = watch = 0
+        else:
+            buys  = sum(1 for sc,eg,c in scored if sc>=MIN_SIGNAL_SCORE and eg and eg>0)
+            watch = sum(1 for sc,eg,c in scored if sc>=MIN_SIGNAL_SCORE and (not eg or eg<=0))
+            near  = sum(1 for sc,eg,c in scored if MIN_SIGNAL_SCORE-1.5<=sc<MIN_SIGNAL_SCORE)
+            total = len(scored)
+
+            def mk_rows(items):
+                rows = ""
+                for sc,ema_gap,c in items:
+                    ema_crossed = ema_gap is not None and ema_gap > 0
+                    score_ok = sc >= MIN_SIGNAL_SCORE
+                    if score_ok and ema_crossed:   sig = f'<span class="sig-buy">🟢 BUY {sc:.1f}</span>'
+                    elif score_ok:                 sig = f'<span style="background:rgba(0,170,255,0.15);color:#00aaff;border:1px solid #00aaff;padding:3px 9px;border-radius:5px;font-size:12px;font-weight:700">👀 WATCH {sc:.1f}</span>'
+                    elif ema_crossed:              sig = f'<span style="background:rgba(255,204,0,0.1);color:#ffcc00;border:1px solid #ffcc00;padding:3px 9px;border-radius:5px;font-size:12px;font-weight:700">⚡ SIGNAL {sc:.1f}</span>'
+                    else:                          sig = f'<span class="sig-hold">{sc:.1f}/{MIN_SIGNAL_SCORE}</span>'
+                    rsi=c.get("rsi")
+                    if rsi:
+                        if 50<=rsi<=65:    rc="#00ff88"; rl=f"{rsi:.1f} ✅"
+                        elif rsi>75:       rc="#ff4466"; rl=f"{rsi:.1f} 🔴"
+                        elif rsi>65:       rc="#ffcc00"; rl=f"{rsi:.1f} ⚠"
+                        else:               rc="#475569"; rl=f"{rsi:.1f}"
+                    else: rc="#475569"; rl="—"
+                    vr=c.get("vol_ratio",0)
+                    if vr>=2.0:    vc="#00ff88"; vl=f"{vr:.2f}x 🔥"
+                    elif vr>=1.5:  vc="#00aaff"; vl=f"{vr:.2f}x ✅"
+                    elif vr>=1.2:  vc="#ffcc00"; vl=f"{vr:.2f}x ⚠"
+                    elif vr>0:     vc="#475569"; vl=f"{vr:.2f}x"
+                    else:           vc="#475569"; vl="—"
+                    pct=min(100,int((sc/11)*100))
+                    if sc>=MIN_SIGNAL_SCORE:     bc="#00ff88"; prox=f"✅ {sc:.1f}"
+                    elif sc>=MIN_SIGNAL_SCORE-1: bc="#ffcc00"; prox=f"🔥 {sc:.1f}"
+                    elif sc>=MIN_SIGNAL_SCORE-2: bc="#ff8800"; prox=f"⚡ {sc:.1f}"
+                    else:                         bc="#333";    prox=f"{sc:.1f}"
+                    sbar = (
+                        f'<div style="display:flex;align-items:center;gap:7px">'
+                        f'<div style="width:50px;height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden">'
+                        f'<div style="width:{pct}%;height:100%;background:{bc};border-radius:3px"></div></div>'
+                        f'<span style="font-size:12px;color:{bc};font-weight:700">{prox}</span></div>'
+                    )
+                    eg_str = f"+{ema_gap:.2f}% ✅" if ema_gap and ema_gap>0 else (f"{ema_gap:.2f}% 🔥" if ema_gap and ema_gap>-0.5 else (f"{ema_gap:.2f}% ⚡" if ema_gap and ema_gap>-1.5 else (f"{ema_gap:.2f}%" if ema_gap else "—")))
+                    eg_col = "#00ff88" if ema_gap and ema_gap>0 else ("#ffcc00" if ema_gap and ema_gap>-0.5 else ("#ff8800" if ema_gap and ema_gap>-1.5 else "#475569"))
+                    cc="#00ff88" if c["change"]>=0 else "#ff4466"
+                    chg_s="+" if c["change"]>=0 else ""
+                    rows += (
+                        f'<tr><td style="font-weight:700;color:{color}">{c["symbol"]}</td>'
+                        f'<td>${c["price"]:.4f}</td>'
+                        f'<td style="color:{cc}">{chg_s}{c["change"]:.2f}%</td>'
+                        f'<td>{sig}</td><td>{sbar}</td>'
+                        f'<td style="color:{eg_col};font-weight:700">{eg_str}</td>'
+                        f'<td style="color:{rc};font-weight:700">{rl}</td>'
+                        f'<td style="color:{vc};font-weight:700">{vl}</td></tr>'
+                    )
+                return rows
+
+            thead = ('<div style="overflow-x:auto"><table><thead><tr>'
+                     '<th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th><th>Score</th>'
+                     '<th>EMA Cross</th><th>RSI</th><th>Vol</th></tr></thead><tbody>')
+            tfoot = '</tbody></table></div>'
+            summary = (
+                f'<div style="display:flex;gap:16px;margin-bottom:12px;font-size:14px;flex-wrap:wrap">'
+                f'<span style="color:#00ff88;font-weight:700">🟢 {buys} BUY</span>'
+                f'<span style="color:#00aaff;font-weight:700">👀 {watch} WATCH</span>'
+                f'<span style="color:#ff8800;font-weight:700">⚡ {near} NEAR</span>'
+                f'<span style="color:#475569;margin-left:auto">{total} scanned</span></div>'
+            )
+            preview_rows = mk_rows(scored[:10])
+            full_rows    = mk_rows(scored)
+            preview_html = summary + thead + preview_rows + tfoot
+            show_all_btn = (
+                f'<div id="mkt-btn-{mid}" style="margin-top:10px;text-align:center">'
+                f'<button onclick="showFullMarket(\'{mid}\')" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:7px;color:#475569;padding:8px 20px;font-size:13px;cursor:pointer;font-family:monospace">'
+                f'▼ Show all {total} stocks</button></div>' if total > 10 else ''
+            )
+            full_html = summary + thead + full_rows + tfoot
+
+        # Market status badge
+        status_badge = (
+            f'<span style="font-size:12px;font-weight:700;color:{color};background:rgba(255,255,255,0.06);'
+            f'padding:3px 10px;border-radius:5px;margin-left:8px">OPEN</span>'
+            if open_now else
+            f'<span style="font-size:12px;color:#475569;background:rgba(255,255,255,0.03);'
+            f'padding:3px 10px;border-radius:5px;margin-left:8px">CLOSED</span>'
+        )
+        buys_badge = (
+            f'<span style="font-size:12px;color:#00ff88;font-weight:700;margin-left:auto">🟢 {buys} BUY</span>'
+            if buys > 0 else
+            f'<span style="font-size:12px;color:#475569;margin-left:auto">{len(scored)} scanned</span>'
+        ) if scored else ''
+
+        border_col = color if open_now else "rgba(255,255,255,0.07)"
+        bg_col = f"rgba({'0,255,136' if color=='#00ff88' else '0,170,255' if color=='#00aaff' else '204,136,255' if color=='#cc88ff' else '255,170,0' if color=='#ffaa00' else '255,204,0'},0.03)" if open_now else "transparent"
+
+        return (
+            f'<div style="border:1px solid {border_col};border-radius:12px;margin-bottom:10px;background:{bg_col};overflow:hidden">'
+            f'<div onclick="toggleMarket(\'{mid}\')" style="display:flex;align-items:center;gap:10px;padding:14px 18px;cursor:pointer;user-select:none">'
+            f'<span style="font-size:18px">{icon}</span>'
+            f'<span style="font-size:16px;font-weight:700;color:{color if open_now else "#475569"}">{label}</span>'
+            f'{status_badge}'
+            f'{buys_badge}'
+            f'<span id="mkt-arrow-{mid}" style="font-size:13px;color:#475569;margin-left:12px">{"▼" if open_now else "▶"}</span>'
+            f'</div>'
+            f'<div id="mkt-body-{mid}" style="display:{"block" if open_now else "none"};padding:0 18px 16px 18px">'
+            f'<div id="mkt-preview-{mid}">{preview_html}</div>'
+            f'<div id="mkt-full-{mid}" style="display:none">{full_html}</div>'
+            f'{show_all_btn if scored and len(scored)>10 else ""}'
+            f'</div>'
+            f'</div>'
+        )
+
+    # Order: crypto always first (24/7), then open markets, then closed
+    market_scanner_html = (
+        f'<div style="margin-bottom:20px">'
+        f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
+        f'<div class="section-title" style="margin-bottom:0">📡 Market Scanner</div>'
+        f'<div style="font-size:13px;color:#475569">Open markets expanded · top 10 shown · tap to expand/collapse</div>'
+        f'</div>'
+        + build_market_accordion("crypto","Crypto","🪙","#00ff88", True, crypto_scored, True)
+        + build_market_accordion("us","US Stocks","📈","#00aaff", market_open, us_scored, market_open)
+        + build_market_accordion("ftse","FTSE","🎩","#cc88ff", ftse_open, ftse_scored, ftse_open)
+        + build_market_accordion("asx","ASX","🦘","#ffaa00", asx_open, asx_scored, asx_open)
+        + build_market_accordion("smallcap","Small Cap","📊","#ffcc00", market_open, sc_scored, market_open)
+        + f'</div>'
     )
 
     # ── News ──
@@ -724,31 +919,25 @@ function pinCmd(path,label){{
 
 {positions_html}
 {trades_html}
+{ready_to_trade_html}
 
-<!-- Scan tabs -->
-<div style="margin-bottom:20px">
-  <div class="tab-bar" style="margin-bottom:0;border-bottom:none">
-    <div class="tab" onclick="showScan('stocks',this)" style="border-bottom:2px solid #00aaff;color:#00aaff">📈 US Stocks</div>
-    <div class="tab" onclick="showScan('crypto',this)">🪙 Crypto</div>
-    <div class="tab" onclick="showScan('smallcap',this)" style="color:#ffcc00">📊 Small Cap</div>
-    <div class="tab" onclick="showScan('asx',this)" style="color:#ffaa00">🦘 ASX</div>
-    <div class="tab" onclick="showScan('ftse',this)" style="color:#cc88ff">🎩 FTSE</div>
-  </div>
-  <div class="card" style="border-radius:0 14px 14px 14px;margin-top:0">
-    <div id="scan-stocks" class="scan-panel active">{stocks_scan}</div>
-    <div id="scan-crypto" class="scan-panel">{crypto_scan}</div>
-    <div id="scan-smallcap" class="scan-panel">{smallcap_scan}</div>
-    <div id="scan-asx" class="scan-panel">{asx_scan}</div>
-    <div id="scan-ftse" class="scan-panel">{ftse_scan}</div>
-  </div>
-</div>
+<!-- Market Scanner — vertical accordion, open markets first -->
+{market_scanner_html}
 <script>
-function showScan(tab,el){{
-  document.querySelectorAll('.scan-panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.tab-bar .tab').forEach(t=>{{t.style.borderBottomColor='transparent';t.style.color='#475569';}});
-  document.getElementById('scan-'+tab).classList.add('active');
-  var cols={{stocks:'#00aaff',crypto:'#00ff88',smallcap:'#ffcc00',asx:'#ffaa00',ftse:'#cc88ff'}};
-  el.style.borderBottomColor=cols[tab]||'#e0e0e0';el.style.color=cols[tab]||'#e0e0e0';
+function toggleMarket(id){{
+  var body=document.getElementById('mkt-body-'+id);
+  var arr=document.getElementById('mkt-arrow-'+id);
+  var expanded=body.style.display!=='none';
+  body.style.display=expanded?'none':'block';
+  arr.textContent=expanded?'▶':'▼';
+}}
+function showFullMarket(id){{
+  var preview=document.getElementById('mkt-preview-'+id);
+  var full=document.getElementById('mkt-full-'+id);
+  var btn=document.getElementById('mkt-btn-'+id);
+  preview.style.display='none';
+  full.style.display='block';
+  btn.style.display='none';
 }}
 </script>
 
