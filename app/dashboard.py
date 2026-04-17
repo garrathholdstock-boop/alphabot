@@ -735,63 +735,72 @@ def build_dashboard():
         [(sym, pos, "purple","FTSE")    for sym, pos in ftse_state.positions.items()]
     )
     if all_pos:
-        from core.execution import fetch_latest_price
         rows = ""
         for idx, (sym, pos, color, category) in enumerate(all_pos):
-            is_crypto = category in ("Crypto", "CrypID")
-            try:
-                live = fetch_latest_price(sym, crypto=is_crypto) or pos.get("highest_price", pos["entry_price"])
-            except:
-                live = pos.get("highest_price", pos["entry_price"])
-            entry   = pos["entry_price"]
-            pnl     = (live - entry) * pos["qty"]
-            pnl_pct = ((live - entry) / entry) * 100
-            pnl_c   = "green" if pnl >= 0 else "red"
-            sign    = "+" if pnl >= 0 else ""
+            # Use portfolio-backed price (no market data subscription needed)
+            live     = cfg.live_prices.get(sym) or pos.get("highest_price", pos["entry_price"])
+            entry    = pos["entry_price"]
+            qty      = pos["qty"]
+            pnl      = (live - entry) * qty
+            pnl_pct  = ((live - entry) / entry) * 100
+            pos_val  = live * qty
+            pnl_c    = "green" if pnl >= 0 else "red"
+            sign     = "+" if pnl >= 0 else ""
             entry_ts = pos.get("entry_ts", "")
-            paris = ZoneInfo("Europe/Paris")
+            paris     = ZoneInfo("Europe/Paris")
             now_paris = datetime.now(paris)
             try:
                 dt = datetime.fromisoformat(entry_ts)
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-                dt_paris = dt.astimezone(paris)
-                held = now_paris - dt_paris
+                dt_paris  = dt.astimezone(paris)
+                purchased = dt_paris.strftime("%d %b %H:%M")
+                held      = now_paris - dt_paris
                 held_hrs  = int(held.total_seconds() // 3600)
                 held_mins = int((held.total_seconds() % 3600) // 60)
                 if held_hrs >= 24:
                     held_days = held_hrs // 24
                     held_rem  = held_hrs % 24
-                    entry_dt  = f"Held {held_days}d {held_rem}h"
+                    entry_dt  = f"{held_days}d {held_rem}h"
                 else:
-                    entry_dt = f"Held {held_hrs}h {held_mins}m"
+                    entry_dt = f"{held_hrs}h {held_mins}m"
             except:
-                entry_dt = pos.get("entry_date", "—")
+                purchased = pos.get("entry_date", "—")
+                entry_dt  = "—"
             cat_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ID":"#aa88ff","CrypID":"#00ff88","ASX":"#ffaa00","FTSE":"#cc88ff"}
             cat_color  = cat_colors.get(category, "#555")
             stop_pct   = round(((pos["stop_price"] - entry) / entry) * 100, 1)
             tp_price   = pos.get("take_profit_price", entry * 1.10)
-            tp_pct     = round(((tp_price - entry) / entry) * 100, 1)
-            days_held  = pos.get("days_held", 0)
             score      = pos.get("signal_score", "—")
+            breakdown  = pos.get("entry_breakdown", "")
+            bd_html    = f'<div style="font-size:11px;color:#888;margin-top:4px;white-space:pre-wrap">{breakdown}</div>' if breakdown else ""
 
             rows += (
-                f'<tr>'
+                f'<tr onclick="toggleDetail({idx})" style="cursor:pointer">'
                 f'<td style="font-weight:700" class="{color}">{sym}</td>'
                 f'<td><span style="font-size:10px;color:{cat_color};font-weight:700">{category}</span></td>'
                 f'<td style="color:#555;font-size:11px">{entry_dt}</td>'
+                f'<td style="color:#777;font-size:11px">{purchased}</td>'
                 f'<td style="font-family:monospace">${entry:.4f}</td>'
                 f'<td style="font-family:monospace;color:#00aaff">${live:.4f}</td>'
                 f'<td class="red" style="font-family:monospace">${pos["stop_price"]:.4f} ({stop_pct:+.1f}%)</td>'
+                f'<td style="font-family:monospace;color:#555">${pos_val:,.0f}</td>'
                 f'<td class="{pnl_c}" style="font-weight:700;font-family:monospace">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
                 f'</tr>'
+                f'<tr id="detail-{idx}" style="display:none;background:rgba(255,255,255,0.02)">'
+                f'<td colspan="9" style="padding:10px 16px;font-size:12px;color:#aaa">'
+                f'<b style="color:#ffcc00">Score: {score}</b> &nbsp;|&nbsp; '
+                f'Qty: {qty} &nbsp;|&nbsp; Position: ${pos_val:,.0f} &nbsp;|&nbsp; '
+                f'Entry: ${entry:.4f} &nbsp;|&nbsp; Stop: ${pos["stop_price"]:.4f} &nbsp;|&nbsp; Target: ${tp_price:.4f}'
+                f'{bd_html}</td></tr>'
             )
         positions_html = (
             f'<div class="card" style="margin-bottom:20px">'
-            f'<div class="section-title">Open Positions ({len(all_pos)})</div>'
+            f'<div class="section-title">Open Positions ({len(all_pos)}) <span style="font-size:11px;color:#555;font-weight:400">· tap to expand</span></div>'
             f'<div class="table-wrap"><table><thead><tr>'
-            f'<th>Symbol</th><th>Type</th><th>Held</th><th>Entry $</th><th>Live $</th><th>Stop</th><th>P&L</th>'
+            f'<th>Symbol</th><th>Type</th><th>Held</th><th>Purchased</th><th>Entry $</th><th>Live $</th><th>Stop</th><th>Position $</th><th>P&L</th>'
             f'</tr></thead><tbody>{rows}</tbody></table></div></div>'
+            f'<script>function toggleDetail(idx){{var r=document.getElementById("detail-"+idx);r.style.display=r.style.display==="none"?"table-row":"none";}}</script>'
         )
     else:
         positions_html = ""
@@ -1459,4 +1468,3 @@ def start_dashboard():
     server = ThreadedHTTPServer(("0.0.0.0", PORT), DashboardHandler)
     log.info(f"Dashboard running on port {PORT}")
     server.serve_forever()
-
