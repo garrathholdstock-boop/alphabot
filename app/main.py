@@ -872,10 +872,8 @@ def main():
     log.info(f"Port:   {cfg.PORT}")
     log.info("=" * 50)
 
-    # Dashboard runs as standalone FastAPI service — started by start.sh on port 8080
-    log.info(f"Dashboard running on port {cfg.PORT}")
-    time.sleep(2)
-    log.info(f"Dashboard ready on port {cfg.PORT}")
+    # Dashboard runs as standalone uvicorn service on port 8080 — started by start.sh
+    log.info("AlphaBot bot process starting — dashboard runs separately on port 8080")
 
     # Verify IBKR connection
     cfg.account_info = ibkr_get_account() or {}
