@@ -166,7 +166,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ background: #090b0e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; font-size: 14px; }}
   .header {{ background: #0d1117; border-bottom: 1px solid #1e2a1e; padding: 16px 24px;
-             display: flex; align-items: center; justify-content: space-between; }}
+             display: flex; align-items: center; justify-content: space-between;
+             position: sticky; top: 0; z-index: 100; }}
   .logo {{ display: flex; align-items: center; gap: 10px; }}
   .logo-icon {{ width: 32px; height: 32px; background: linear-gradient(135deg,#00ff88,#00aaff);
                 border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }}
@@ -262,7 +263,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 <!-- Kill switch controls -->
-<div style="background:#0d1117;border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<div style="background:#0d1117;border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:73px;z-index:99">
   <span style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px">Controls:</span>
   <button onclick="pinCmd('/kill','🛑 Kill all bots?')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">🛑 KILL ALL BOTS</button>
   <button onclick="pinCmd('/close-all','💰 Close all positions?')" style="padding:6px 16px;border-radius:6px;border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px">💰 CLOSE ALL POSITIONS</button>
