@@ -873,7 +873,7 @@ def call_claude(messages, system=None, max_tokens=1500):
     if not CLAUDE_API_KEY:
         return "ERROR: CLAUDE_API_KEY not set."
     try:
-        client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+        client = anthropic.Anthropic(api_key=CLAUDE_API_KEY, timeout=60.0)
         r = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=max_tokens,
@@ -882,7 +882,8 @@ def call_claude(messages, system=None, max_tokens=1500):
         )
         return r.content[0].text
     except Exception as e:
-        return f"Claude API error: {e}"
+        _log_agent(f"Claude API error: {e}")
+        return f"STATUS: INVESTIGATING\n\nANALYSIS:\nClaude API error: {e}. Check CLAUDE_API_KEY in .env and retry.\n\nNEXT_COMMAND:\n```\necho $CLAUDE_API_KEY | head -c 20\n```\n\nREASON:\nVerify API key is set correctly."
 
 
 def compress_history(steps, question):
@@ -1322,11 +1323,23 @@ details summary {{ cursor:pointer; }}
 <!-- Ask Claude -->
 <div class="card">
   <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Ask Claude</div>
-  <form method="POST" action="/ask">
-    <textarea name="question" placeholder="What's going on with the bot? Why aren't there any trades?...">{html.escape(question) if not complete and not audit_result else ''}</textarea>
-    <button type="submit" class="ask-btn">ASK CLAUDE →</button>
+  <form method="POST" action="/ask" id="ask-form" onsubmit="showThinking()">
+    <textarea name="question" id="ask-q" placeholder="What's going on with the bot? Why aren't there any trades?...">{html.escape(question) if not complete and not audit_result else ''}</textarea>
+    <button type="submit" id="ask-btn" class="ask-btn">ASK CLAUDE →</button>
   </form>
 </div>
+<script>
+function showThinking() {{
+  var btn = document.getElementById('ask-btn');
+  var q = document.getElementById('ask-q').value.trim();
+  if (!q) {{ return false; }}
+  btn.textContent = '⏳ Thinking... (10-20 seconds)';
+  btn.style.background = '#1e1e2e';
+  btn.style.color = '#00ff88';
+  btn.disabled = false;
+  return true;
+}}
+</script>
 
 <!-- Quick actions -->
 <div class="card">
