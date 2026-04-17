@@ -382,6 +382,9 @@ exchange_stops = {}
 # ── Binance balance cache ─────────────────────────────────────
 _binance_balance_cache = {"value": 0.0, "ts": 0}
 
+# ── Live price cache (populated each cycle from IBKR portfolio) ───
+live_prices = {}  # symbol -> float, updated every cycle from ib.portfolio()
+
 # ── API health tracking ───────────────────────────────────────
 api_health = {
     "ibkr_fails": 0,
