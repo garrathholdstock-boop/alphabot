@@ -44,6 +44,7 @@ from core.config import (
     SECTOR_MAP, MAX_SECTOR_POSITIONS,
 )
 import core.config as cfg
+from core.config import load_trading_config
 
 from core.execution import (
     ibkr_get_account, ibkr_get_positions, ibkr_get_open_orders, fetch_bars, fetch_bars_batch,
@@ -874,7 +875,6 @@ def main():
     log.info(f"Port:   {cfg.PORT}")
     log.info("=" * 50)
 
-    # Dashboard runs as standalone uvicorn service on port 8080 — started by start.sh
     log.info("AlphaBot bot process starting — dashboard runs separately on port 8080")
 
     # Verify IBKR connection
@@ -890,23 +890,89 @@ def main():
         log.info(f"[BINANCE] Using {mode}")
 
     last_email_day = None
-    cycle = 0
 
     # Run IBKR position recovery before first scan cycle
     try:
         run_ibkr_startup_recovery()
     except NameError:
-        pass  # function defined below in older versions
+        pass
+
+    # ── Thread-safe cycle trackers ──
+    _thread_lock = threading.Lock()
+    _cycle_counter = {"main": 0}
+
+    def _run_thread(name, fn, interval_seconds):
+        """Generic thread runner — calls fn() every interval_seconds."""
+        log.info(f"[THREAD] {name} thread starting (interval={interval_seconds}s)")
+        while True:
+            try:
+                fn()
+            except Exception as e:
+                log.error(f"[THREAD:{name}] Error: {e}")
+            time.sleep(interval_seconds)
+
+    # ── Thread 1: US Stocks swing cycle (60s) ──
+    def _us_stocks_thread():
+        run_cycle(US_WATCHLIST, state, crypto=False)
+
+    # ── Thread 2: Crypto swing cycle (60s) ──
+    def _crypto_swing_thread():
+        if not (USE_BINANCE and time.time() < (cfg._binance_ban_until + 300)):
+            run_cycle(CRYPTO_WATCHLIST, crypto_state, crypto=True)
+
+    # ── Thread 3: FTSE cycle (60s) ──
+    def _ftse_thread():
+        update_ftse_regime()
+        run_intl_cycle(FTSE_WATCHLIST, ftse_state, ftse_regime, is_ftse_open, "FTSE")
+
+    # ── Thread 4: ASX cycle (60s) ──
+    def _asx_thread():
+        update_asx_regime()
+        run_intl_cycle(ASX_WATCHLIST, asx_state, asx_regime, is_asx_open, "ASX")
+
+    # ── Thread 5: Intraday US + Crypto (30s) ──
+    def _intraday_thread():
+        run_intraday_cycle(US_WATCHLIST, intraday_state)
+        if not (USE_BINANCE and time.time() < (cfg._binance_ban_until + 300)):
+            run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
+
+    # ── Thread 6: Smallcap cycle (120s) ──
+    def _smallcap_thread():
+        if smallcap_pool["symbols"] and is_market_open():
+            run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
+
+    # Start all trading threads as daemons
+    trading_threads = [
+        ("US-Swing",   _us_stocks_thread,  60),
+        ("Crypto-Swing", _crypto_swing_thread, 60),
+        ("FTSE",       _ftse_thread,        60),
+        ("ASX",        _asx_thread,         60),
+        ("Intraday",   _intraday_thread,    30),
+        ("Smallcap",   _smallcap_thread,   120),
+    ]
+    for name, fn, interval in trading_threads:
+        t = threading.Thread(target=_run_thread, args=(name, fn, interval), daemon=True, name=name)
+        t.start()
+        log.info(f"[THREAD] Started: {name} ({interval}s interval)")
+        time.sleep(2)  # stagger thread starts to avoid API hammering
+
+    # ── Main orchestration loop (10s) ──
+    # Handles: account refresh, status.json write, watchdog, panic kill, regime updates
+    cycle = 0
+    et = datetime.now(ZoneInfo("America/New_York"))
 
     while True:
         try:
             cycle += 1
 
+            # Hot-reload trading params from config.json every cycle
+            load_trading_config()
+
             log.info(f"\n{'─'*50}")
             log.info(f"Main cycle {cycle} | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             log.info(f"[WATCHDOG] Cycle {cycle} alive | Stocks P&L: ${state.daily_pnl:+.2f} | Crypto P&L: ${crypto_state.daily_pnl:+.2f} | Positions: {len(state.positions)}S/{len(crypto_state.positions)}C")
 
-            # Every 10 cycles: reconcile positions
+            # Every 10 cycles: reconcile positions with IBKR
             if cycle % 10 == 0:
                 try:
                     ibkr_orders = ibkr_get_open_orders() or []
@@ -921,11 +987,11 @@ def main():
                 except Exception as e:
                     log.warning(f"[WATCHDOG] Reconciliation failed: {e}")
 
-            # Refresh account info
+            # Refresh account info + live prices
             cfg.account_info = ibkr_get_account() or cfg.account_info
             update_live_prices()
 
-            # Write positions snapshot for dashboard (separate process)
+            # Write positions snapshot for dashboard
             try:
                 snap = {}
                 for label, st in [("Stock", state), ("Crypto", crypto_state),
@@ -938,7 +1004,7 @@ def main():
             except Exception as _e:
                 log.warning(f"[SNAPSHOT] {_e}")
 
-            # Write status snapshot for dashboard (separate process)
+            # Write status snapshot for dashboard
             try:
                 status_snap = {
                     "cycle": cycle,
@@ -1060,8 +1126,6 @@ def main():
                 update_market_regime()
                 check_circuit_breaker()
             update_crypto_regime()
-            update_asx_regime()
-            update_ftse_regime()
 
             # Weekly Binance watchlist refresh (Monday 9am ET)
             et_now = datetime.now(ZoneInfo("America/New_York"))
@@ -1076,16 +1140,6 @@ def main():
             if should_refresh_smallcap() and is_market_open():
                 log.info("[SMALLCAP] Starting pool refresh in background...")
                 threading.Thread(target=refresh_smallcap_pool, daemon=True).start()
-
-            # ── Run all bot cycles ──
-            run_cycle(US_WATCHLIST, state, crypto=False)
-            run_cycle(CRYPTO_WATCHLIST, crypto_state, crypto=True)
-            run_intl_cycle(ASX_WATCHLIST, asx_state, asx_regime, is_asx_open, "ASX")
-            run_intl_cycle(FTSE_WATCHLIST, ftse_state, ftse_regime, is_ftse_open, "FTSE")
-            if smallcap_pool["symbols"]:
-                run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
-            run_intraday_cycle(US_WATCHLIST, intraday_state)
-            run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
 
             # Morning news scan at 9:00am ET
             et = datetime.now(ZoneInfo("America/New_York"))
@@ -1111,10 +1165,6 @@ def main():
             if et.hour == 12 and et.minute < 2:
                 threading.Thread(target=run_near_miss_simulations, daemon=True).start()
 
-            # Intraday cycles run in main loop directly
-            run_intraday_cycle(US_WATCHLIST, intraday_state)
-            if not (USE_BINANCE and time.time() < (cfg._binance_ban_until + 300)):
-                run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
             time.sleep(CYCLE_SECONDS)
 
         except KeyboardInterrupt:
@@ -1131,8 +1181,6 @@ def main():
                         log.warning(f"[CRASH RECOVERY] Missing stop for {sym} — software stop-loss active")
             except: pass
             time.sleep(30)
-
-
 def run_ibkr_startup_recovery():
     """Recover open positions from IBKR on startup."""
     try:
