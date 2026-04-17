@@ -49,7 +49,7 @@ from core.execution import (
     ibkr_get_account, ibkr_get_positions, ibkr_get_open_orders, fetch_bars, fetch_bars_batch,
     fetch_latest_price, fetch_intraday_bars, fetch_intraday_bars_batch,
     place_order,
-    update_exchange_stop, binance_get_top_coins,
+    update_exchange_stop, binance_get_top_coins, update_live_prices, update_live_prices,
 )
 from core.risk import (
     total_exposure, all_positions_count, all_symbols_held, sectors_held,
@@ -923,6 +923,7 @@ def main():
 
             # Refresh account info
             cfg.account_info = ibkr_get_account() or cfg.account_info
+            update_live_prices()
 
             # Write positions snapshot for dashboard (separate process)
             try:
