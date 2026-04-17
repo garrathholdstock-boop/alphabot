@@ -47,7 +47,7 @@ from core.execution import (
     ibkr_get_account, ibkr_get_positions, ibkr_get_open_orders, fetch_bars, fetch_bars_batch,
     fetch_latest_price, fetch_intraday_bars, fetch_intraday_bars_batch,
     place_order,
-    update_exchange_stop, binance_get_top_coins, update_live_prices,
+    update_exchange_stop, binance_get_top_coins,
 )
 from core.risk import (
     total_exposure, all_positions_count, all_symbols_held, sectors_held,
@@ -659,7 +659,7 @@ def run_crypto_intraday_cycle(watchlist, st):
     check_intraday_positions(st, crypto=True)
     if st.shutoff: st.running = False; return
 
-    scan_list = watchlist[:10] if USE_BINANCE else watchlist
+    scan_list = watchlist
     results = []
     for sym in scan_list:
         bars = fetch_intraday_bars(sym, timeframe=CRYPTO_INTRADAY_TIMEFRAME,
@@ -944,9 +944,6 @@ def main():
 
             # Refresh account info
             cfg.account_info = ibkr_get_account() or cfg.account_info
-
-            # Refresh live prices from IBKR portfolio push (works 24/7, no subscription needed)
-            update_live_prices()
 
             # ── Dynamic limit scaling from live balances ──
             if cfg.account_info:
