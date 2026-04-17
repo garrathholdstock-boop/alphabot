@@ -70,8 +70,7 @@ P2_PATTERNS = [
                           "🟡 P2: Binance orders failing — crypto blocked"),
     ("binance_ban",       r"\[BINANCE\] Ban active|binance_ban_until",
                           "🟡 P2: Binance rate-limit ban active"),
-    ("zero_scans",        r"\[US\] 0 qualified BUY.*scanned|\[FTSE\] 0 qualified.*scanned",
-                          "🟡 P2: Zero qualified signals for open market"),
+    # zero_scans removed - 0 signals is normal market behaviour, not a bug
     ("slow_cycle",        None,       # handled by timing logic
                           "🟡 P2: Bot cycle running >3× normal speed"),
     ("execution_block",   r"ORDER FAILED|place_order.*failed",
@@ -341,6 +340,54 @@ def classify_log(log_text):
     return events
 
 
+def _check_signal_execution_gap(log, now_paris, alerted):
+    """
+    P2 trigger: a BUY signal met threshold AND slots are available
+    but no order was placed in the same cycle window.
+    Detects: "✅ BUY SIGNAL BREAKDOWN" followed by no "Executing: BUY" within 2 log lines,
+    OR "qualified BUY" count > 0 but no BUY order in last 10 mins during market hours.
+    """
+    try:
+        lines = log.split("\n")
+        # Look for qualified BUY signals in the log
+        qualified_buys = [l for l in lines if "qualified BUY" in l and "/82 scanned" not in l
+                         and "0 qualified" not in l]
+        executing_buys = [l for l in lines if "Executing: BUY" in l or "IBKR MARKET] BUY" in l
+                         or "IBKR LIMIT] BUY" in l]
+
+        if qualified_buys and not executing_buys:
+            # Signals qualified but no execution attempted at all
+            if "signal_no_execution" not in alerted:
+                alerted.add("signal_no_execution")
+                sample = qualified_buys[-1][:80] if qualified_buys else ""
+                with _queue_lock:
+                    approval_queue.insert(0, {
+                        "id": str(uuid.uuid4())[:8],
+                        "priority": "P2",
+                        "event_type": "signal_no_execution",
+                        "message": "BUY signal qualified but no order executed — slot may be blocked",
+                        "detail": sample,
+                        "time": now_paris.strftime("%H:%M"),
+                        "status": "pending",
+                        "claude_briefing": _generate_briefing("no_trades_90min", log),
+                    })
+                db_log_event("P2", "signal_no_execution",
+                            "Qualified BUY signal with no execution", sample)
+                send_telegram(
+                    f"🟡 <b>P2: BUY signal blocked</b>\n"
+                    f"Signal qualified but no order placed.\n"
+                    f"Check: position caps, daily spend limit, regime.\n"
+                    f"→ http://178.104.170.58:8000", "P2")
+        elif qualified_buys and executing_buys:
+            # Good — signals are executing, clear the alert
+            alerted.discard("signal_no_execution")
+        else:
+            # No signals — market quiet, totally normal
+            alerted.discard("signal_no_execution")
+    except Exception as e:
+        _log_agent(f"_check_signal_execution_gap error: {e}")
+
+
 def run_monitor():
     """Background thread — runs every 5 mins."""
     global _last_cycle_time, _last_no_trade_alert, _last_binance_alert, _monitor_running
@@ -432,42 +479,12 @@ def run_monitor():
             markets = get_market_hours()
             any_market_open = any(markets[m] == "OPEN" for m in ["US", "FTSE", "ASX", "CRYPTO"])
             if any_market_open:
-                # Check last trade time
-                try:
-                    conn = sqlite3.connect(DB_PATH)
-                    r = conn.execute(
-                        "SELECT created_at FROM trades ORDER BY created_at DESC LIMIT 1"
-                    ).fetchone()
-                    conn.close()
-                    if r:
-                        last_trade = datetime.fromisoformat(r[0])
-                        mins_since = (datetime.now() - last_trade).total_seconds() / 60
-                        if mins_since > 90 and "no_trade_90min" not in alerted:
-                            alerted.add("no_trade_90min")
-                            msg = (f"🟡 <b>P2: No trades in {int(mins_since)} mins</b>\n"
-                                   f"Markets open, bot running, but no executions.\n"
-                                   f"Check approval queue at port 8000.")
-                            send_telegram(msg, "P2")
-                            with _queue_lock:
-                                approval_queue.insert(0, {
-                                    "id": str(uuid.uuid4())[:8],
-                                    "priority": "P2",
-                                    "event_type": "no_trades_90min",
-                                    "message": f"No trades in {int(mins_since)} mins (market open)",
-                                    "detail": f"Last trade: {r[0]}",
-                                    "time": now_paris.strftime("%H:%M"),
-                                    "status": "pending",
-                                    "claude_briefing": _generate_briefing("no_trades_90min", log),
-                                })
-                            db_log_event("P2", "no_trades_90min",
-                                        f"No trades for {int(mins_since)} mins", "")
-                    else:
-                        pass  # No trades yet today — normal
-                except:
-                    pass
+                # Real P2: signal qualified but no execution — slots may be blocked
+                _check_signal_execution_gap(log, now_paris, alerted)
             else:
-                # Markets closed — reset no_trade alert
-                alerted.discard("no_trade_90min")
+                # Markets closed — reset execution gap alert
+                alerted.discard("signal_no_execution")
+
 
             # ── Morning briefing at 07:00 Paris ─────────────
             if now_paris.hour == 7 and now_paris.minute < 5:
@@ -1051,27 +1068,25 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
             action_html = f'<div style="color:#00ff88;font-size:11px;margin-top:2px;">→ {html.escape(action[:60])}</div>' if action else ""
             ts = e.get("created_at","")[:16].replace("T"," ")
             ev_type = e.get("event_type","unknown")
+            safe_ev = ev_type.replace("'","").replace('"','')
+            safe_msg = html.escape(e.get("message","")).replace("'","&#39;")
+            safe_detail = html.escape(action).replace("'","&#39;")
             feed_rows += f'''
-            <form method="POST" action="/event/investigate" style="margin:0;display:block;">
-              <input type="hidden" name="event_type" value="{ev_type}">
-              <input type="hidden" name="message" value="{html.escape(e.get('message',''))}">
-              <input type="hidden" name="detail" value="{html.escape(action)}">
-              <button type="submit" style="width:100%;background:none;border:none;padding:0;cursor:pointer;text-align:left;display:block;">
-                <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:{bg};border-left:3px solid {pc};margin-bottom:3px;border-radius:0 6px 6px 0;" onmouseover="this.style.opacity='0.75'" onmouseout="this.style.opacity='1'">
-                  <span style="font-size:16px;flex-shrink:0;">{icon}</span>
-                  <div style="flex:1;min-width:0;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-                      <span style="font-size:14px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:65])}</span>
-                      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-                        <span style="font-size:11px;color:#475569;">{ts}</span>
-                        <span style="font-size:12px;color:{pc};font-weight:700;">→ Tap to investigate</span>
-                      </div>
-                    </div>
-                    {action_html}
+            <div onclick="investigateEvent('{safe_ev}','{safe_msg}','{safe_detail}')"
+                 style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:{bg};border-left:3px solid {pc};margin-bottom:3px;border-radius:0 6px 6px 0;cursor:pointer;"
+                 onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">
+              <span style="font-size:16px;flex-shrink:0;">{icon}</span>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <span style="font-size:14px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:65])}</span>
+                  <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                    <span style="font-size:11px;color:#475569;">{ts}</span>
+                    <span style="font-size:12px;color:{pc};font-weight:700;">→ Investigate</span>
                   </div>
                 </div>
-              </button>
-            </form>'''
+                {action_html}
+              </div>
+            </div>'''
     else:
         feed_rows = '<div style="text-align:center;padding:24px;color:#475569;font-size:13px;">No events yet — monitor checks every 5 mins</div>'
 
@@ -1086,7 +1101,20 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         </div>
       </div>
       <div style="max-height:320px;overflow-y:auto;">{feed_rows}</div>
-    </div>"""
+    </div>
+    <form id="event-inv-form" method="POST" action="/event/investigate" style="display:none;">
+      <input type="hidden" id="eif-type" name="event_type">
+      <input type="hidden" id="eif-msg" name="message">
+      <input type="hidden" id="eif-detail" name="detail">
+    </form>
+    <script>
+    function investigateEvent(ev_type, message, detail) {{
+      document.getElementById('eif-type').value = ev_type;
+      document.getElementById('eif-msg').value = message;
+      document.getElementById('eif-detail').value = detail;
+      document.getElementById('event-inv-form').submit();
+    }}
+    </script>"""
 
     # ── Trades table ──────────────────────────────────────────
     trades_html = ""
