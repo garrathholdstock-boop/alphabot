@@ -8,7 +8,7 @@ import time
 import logging
 import hashlib as _hashlib
 from datetime import datetime
-from dotenv import load_dotenv
+from dotenv import load_dotenv 
 load_dotenv()
 
 try:
@@ -48,8 +48,8 @@ IBKR_PORT      = 4001 if IS_LIVE else 4004
 IBKR_CLIENT_ID = 1
 
 # ── Binance ───────────────────────────────────────────────────
-BINANCE_KEY            = os.environ.get("BINANCE_KEY",    "")
-BINANCE_SECRET         = os.environ.get("BINANCE_SECRET", "")
+BINANCE_KEY            = os.environ.get("BINANCE_KEY",    "") or os.environ.get("BINANCE_TESTNET_KEY", "")
+BINANCE_SECRET         = os.environ.get("BINANCE_SECRET", "") or os.environ.get("BINANCE_TESTNET_SECRET", "")
 BINANCE_USE_TESTNET    = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
 
 if BINANCE_USE_TESTNET and BINANCE_KEY:
