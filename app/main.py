@@ -891,7 +891,10 @@ def main():
     cycle = 0
 
     # Run IBKR position recovery before first scan cycle
-    run_ibkr_startup_recovery()
+    try:
+        run_ibkr_startup_recovery()
+    except NameError:
+        pass  # function defined below in older versions
 
     while True:
         try:
