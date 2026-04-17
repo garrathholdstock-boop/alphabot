@@ -1,0 +1,248 @@
+2026-04-17 18:22:51 [INFO] [BINANCE] Using TESTNET
+2026-04-17 18:22:51 [INFO] [DB] Trading Intelligence Database ready
+2026-04-17 18:22:51 [INFO] ==================================================
+2026-04-17 18:22:51 [INFO] AlphaBot starting up
+2026-04-17 18:22:51 [INFO] Mode:   PAPER trading
+2026-04-17 18:22:51 [INFO] Port:   8080
+2026-04-17 18:22:51 [INFO] ==================================================
+2026-04-17 18:22:51 [INFO] AlphaBot bot process starting — dashboard runs separately on port 8080
+2026-04-17 18:22:51 [INFO] [BINANCE] Using TESTNET
+2026-04-17 18:22:52 [INFO] [DB] Trading Intelligence Database ready
+2026-04-17 18:22:52 [INFO] [IBKR] Connected to IB Gateway at 127.0.0.1:4004
+2026-04-17 18:22:52 [INFO] Connected — Portfolio: $1,020,446.95
+2026-04-17 18:22:52 [INFO] [BINANCE] Using TESTNET
+2026-04-17 18:22:52 [INFO] [RECOVERY] Restored position: TSLA x257.0 @ $386.38
+2026-04-17 18:22:52 [WARNING] [RECOVERY] TSLA has no stop on IBKR — software stop-loss active @ $367.06
+2026-04-17 18:22:52 [INFO] === Recovered 1 open position(s) ===
+
+2026-04-17 18:22:52 [INFO] [THREAD] US-Swing thread starting (interval=60s)
+2026-04-17 18:22:52 [INFO] [STOCKS] Cycle 1 | P&L: $+0.00 | Positions: 1
+2026-04-17 18:22:52 [INFO] [THREAD] Started: US-Swing (60s interval)
+2026-04-17 18:22:54 [INFO] [THREAD] Crypto-Swing thread starting (interval=60s)
+2026-04-17 18:22:54 [INFO] [THREAD] Started: Crypto-Swing (60s interval)
+2026-04-17 18:22:54 [INFO] [CRYPTO] Cycle 1 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:22:56 [INFO] [THREAD] FTSE thread starting (interval=60s)
+2026-04-17 18:22:56 [INFO] [THREAD] Started: FTSE (60s interval)
+2026-04-17 18:22:58 [INFO] [THREAD] ASX thread starting (interval=60s)
+2026-04-17 18:22:58 [INFO] [THREAD] Started: ASX (60s interval)
+2026-04-17 18:23:00 [INFO] [THREAD] Intraday thread starting (interval=30s)
+2026-04-17 18:23:00 [INFO] [INTRADAY] Cycle 1 | P&L: $+0.00
+2026-04-17 18:23:00 [INFO] [THREAD] Started: Intraday (30s interval)
+2026-04-17 18:23:02 [INFO] [THREAD] Smallcap thread starting (interval=120s)
+2026-04-17 18:23:02 [INFO] [THREAD] Started: Smallcap (120s interval)
+2026-04-17 18:23:04 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:23:04 [INFO] Main cycle 1 | 2026-04-17 18:23:04
+2026-04-17 18:23:04 [INFO] [WATCHDOG] Cycle 1 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:23:05 [INFO] [SIZING] IBKR:$1,020,446.95 + Binance:$9,720.23 = Total:$1,030,167.18 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:23:05 [INFO] [REGIME] VIX via VIXY proxy: 15.81 (VIXY=$27.74)
+2026-04-17 18:23:05 [INFO] [REGIME] BULL | SPY: $709.83 MA20: $666.6015 | VIX: 15.811799999999998
+2026-04-17 18:23:06 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:23:06 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:23:06 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:23:06 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:23:16 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:23:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:23:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:24:06 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:24:06 [INFO] Main cycle 2 | 2026-04-17 18:24:06
+2026-04-17 18:24:06 [INFO] [WATCHDOG] Cycle 2 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:24:06 [INFO] [SIZING] IBKR:$1,020,446.95 + Binance:$9,720.23 = Total:$1,030,167.18 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:24:07 [INFO] [REGIME] VIX via VIXY proxy: 15.82 (VIXY=$27.76)
+2026-04-17 18:24:07 [INFO] [REGIME] BULL | SPY: $709.65 MA20: $666.5925 | VIX: 15.8232
+2026-04-17 18:24:08 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:24:08 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:24:08 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:24:08 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:24:16 [INFO] [CRYPTO] Cycle 2 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:24:39 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:25:08 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:25:08 [INFO] Main cycle 3 | 2026-04-17 18:25:08
+2026-04-17 18:25:08 [INFO] [WATCHDOG] Cycle 3 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:25:08 [INFO] [SIZING] IBKR:$1,020,446.95 + Binance:$9,720.23 = Total:$1,030,167.18 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:25:08 [INFO] [REGIME] VIX via VIXY proxy: 15.82 (VIXY=$27.76)
+2026-04-17 18:25:08 [INFO] [REGIME] BULL | SPY: $709.58 MA20: $666.589 | VIX: 15.8232
+2026-04-17 18:25:09 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:25:09 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:25:09 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:25:09 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:25:39 [INFO] [CRYPTO] Cycle 3 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:25:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:25:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:26:01 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:26:09 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:26:09 [INFO] Main cycle 4 | 2026-04-17 18:26:09
+2026-04-17 18:26:09 [INFO] [WATCHDOG] Cycle 4 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:26:09 [INFO] [SIZING] IBKR:$1,020,446.95 + Binance:$9,720.23 = Total:$1,030,167.18 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:26:09 [INFO] [REGIME] VIX via VIXY proxy: 15.82 (VIXY=$27.75)
+2026-04-17 18:26:09 [INFO] [REGIME] BULL | SPY: $709.54 MA20: $666.587 | VIX: 15.817499999999999
+2026-04-17 18:26:10 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:26:10 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:26:10 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:26:10 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:27:01 [INFO] [CRYPTO] Cycle 4 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:27:10 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:27:10 [INFO] Main cycle 5 | 2026-04-17 18:27:10
+2026-04-17 18:27:10 [INFO] [WATCHDOG] Cycle 5 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:27:10 [INFO] [SIZING] IBKR:$1,020,448.40 + Binance:$9,720.23 = Total:$1,030,168.63 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:27:11 [INFO] [REGIME] VIX via VIXY proxy: 15.81 (VIXY=$27.73)
+2026-04-17 18:27:11 [INFO] [REGIME] BULL | SPY: $709.59 MA20: $666.5895 | VIX: 15.806099999999999
+2026-04-17 18:27:12 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:27:12 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:27:12 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:27:12 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:27:23 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:27:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:27:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:28:12 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:28:12 [INFO] Main cycle 6 | 2026-04-17 18:28:12
+2026-04-17 18:28:12 [INFO] [WATCHDOG] Cycle 6 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:28:12 [INFO] [SIZING] IBKR:$1,020,448.40 + Binance:$9,720.23 = Total:$1,030,168.63 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:28:13 [INFO] [REGIME] VIX via VIXY proxy: 15.81 (VIXY=$27.73)
+2026-04-17 18:28:13 [INFO] [REGIME] BULL | SPY: $709.75 MA20: $666.5975000000001 | VIX: 15.806099999999999
+2026-04-17 18:28:13 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:28:13 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:28:13 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:28:13 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:28:23 [INFO] [CRYPTO] Cycle 5 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:28:31 [INFO] [BINANCE] Using TESTNET
+2026-04-17 18:28:46 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:29:13 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:29:13 [INFO] Main cycle 7 | 2026-04-17 18:29:13
+2026-04-17 18:29:13 [INFO] [WATCHDOG] Cycle 7 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:29:13 [INFO] [SIZING] IBKR:$1,020,448.40 + Binance:$9,720.23 = Total:$1,030,168.63 | StockTrade:$51022 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:29:14 [INFO] [REGIME] VIX via VIXY proxy: 15.81 (VIXY=$27.74)
+2026-04-17 18:29:14 [INFO] [REGIME] BULL | SPY: $709.51 MA20: $666.5855 | VIX: 15.811799999999998
+2026-04-17 18:29:15 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:29:15 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:29:15 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:29:15 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:29:46 [INFO] [CRYPTO] Cycle 6 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:29:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:29:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:30:08 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:30:15 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:30:15 [INFO] Main cycle 8 | 2026-04-17 18:30:15
+2026-04-17 18:30:15 [INFO] [WATCHDOG] Cycle 8 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:30:15 [INFO] [SIZING] IBKR:$1,020,323.68 + Binance:$9,720.23 = Total:$1,030,043.91 | StockTrade:$51016 CryptoTrade:$194 DailyLoss:$5150
+2026-04-17 18:30:15 [INFO] [REGIME] VIX via VIXY proxy: 15.82 (VIXY=$27.76)
+2026-04-17 18:30:15 [INFO] [REGIME] BULL | SPY: $709.45 MA20: $666.5825 | VIX: 15.8232
+2026-04-17 18:30:16 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:30:16 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:30:16 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:30:16 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:31:08 [INFO] [CRYPTO] Cycle 7 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:31:16 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:31:16 [INFO] Main cycle 9 | 2026-04-17 18:31:16
+2026-04-17 18:31:16 [INFO] [WATCHDOG] Cycle 9 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:31:16 [INFO] [SIZING] IBKR:$1,020,323.68 + Binance:$9,720.23 = Total:$1,030,043.91 | StockTrade:$51016 CryptoTrade:$194 DailyLoss:$5150
+2026-04-17 18:31:16 [INFO] [REGIME] VIX via VIXY proxy: 15.79 (VIXY=$27.71)
+2026-04-17 18:31:16 [INFO] [REGIME] BULL | SPY: $709.68 MA20: $666.594 | VIX: 15.794699999999999
+2026-04-17 18:31:18 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:31:18 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:31:18 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:31:18 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:31:31 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:31:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:31:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:32:18 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:32:18 [INFO] Main cycle 10 | 2026-04-17 18:32:18
+2026-04-17 18:32:18 [INFO] [WATCHDOG] Cycle 10 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:32:18 [INFO] [SIZING] IBKR:$1,020,323.68 + Binance:$9,720.23 = Total:$1,030,043.91 | StockTrade:$51016 CryptoTrade:$194 DailyLoss:$5150
+2026-04-17 18:32:18 [INFO] [REGIME] VIX via VIXY proxy: 15.78 (VIXY=$27.69)
+2026-04-17 18:32:18 [INFO] [REGIME] BULL | SPY: $709.69 MA20: $666.5944999999999 | VIX: 15.783299999999999
+2026-04-17 18:32:19 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:32:19 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:32:19 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:32:19 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:32:31 [INFO] [CRYPTO] Cycle 8 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:32:53 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:33:19 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:33:19 [INFO] Main cycle 11 | 2026-04-17 18:33:19
+2026-04-17 18:33:19 [INFO] [WATCHDOG] Cycle 11 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:33:19 [INFO] [SIZING] IBKR:$1,020,523.33 + Binance:$9,720.23 = Total:$1,030,243.56 | StockTrade:$51026 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:33:20 [INFO] [REGIME] VIX via VIXY proxy: 15.78 (VIXY=$27.69)
+2026-04-17 18:33:20 [INFO] [REGIME] BULL | SPY: $709.77 MA20: $666.5985000000001 | VIX: 15.783299999999999
+2026-04-17 18:33:21 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:33:21 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:33:21 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:33:21 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:33:53 [INFO] [CRYPTO] Cycle 9 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:33:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:33:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:34:15 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:34:21 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:34:21 [INFO] Main cycle 12 | 2026-04-17 18:34:21
+2026-04-17 18:34:21 [INFO] [WATCHDOG] Cycle 12 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:34:21 [INFO] [SIZING] IBKR:$1,020,523.33 + Binance:$9,720.23 = Total:$1,030,243.56 | StockTrade:$51026 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:34:21 [INFO] [REGIME] VIX via VIXY proxy: 15.78 (VIXY=$27.69)
+2026-04-17 18:34:21 [INFO] [REGIME] BULL | SPY: $709.75 MA20: $666.5975000000001 | VIX: 15.783299999999999
+2026-04-17 18:34:22 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:34:22 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:34:22 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:34:22 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:35:15 [INFO] [CRYPTO] Cycle 10 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:35:22 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:35:22 [INFO] Main cycle 13 | 2026-04-17 18:35:22
+2026-04-17 18:35:22 [INFO] [WATCHDOG] Cycle 13 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:35:22 [INFO] [SIZING] IBKR:$1,020,523.33 + Binance:$9,720.23 = Total:$1,030,243.56 | StockTrade:$51026 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:35:22 [INFO] [REGIME] VIX via VIXY proxy: 15.80 (VIXY=$27.72)
+2026-04-17 18:35:22 [INFO] [REGIME] BULL | SPY: $709.65 MA20: $666.5925 | VIX: 15.800399999999998
+2026-04-17 18:35:24 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:35:24 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:35:24 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:35:24 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:35:38 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:35:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:35:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:36:24 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:36:24 [INFO] Main cycle 14 | 2026-04-17 18:36:24
+2026-04-17 18:36:24 [INFO] [WATCHDOG] Cycle 14 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:36:24 [INFO] [SIZING] IBKR:$1,020,520.78 + Binance:$9,720.23 = Total:$1,030,241.01 | StockTrade:$51026 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:36:24 [INFO] [REGIME] VIX via VIXY proxy: 15.81 (VIXY=$27.74)
+2026-04-17 18:36:24 [INFO] [REGIME] BULL | SPY: $709.36 MA20: $666.578 | VIX: 15.811799999999998
+2026-04-17 18:36:25 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:36:25 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:36:25 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:36:25 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:36:38 [INFO] [CRYPTO] Cycle 11 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:37:00 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:37:25 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:37:25 [INFO] Main cycle 15 | 2026-04-17 18:37:25
+2026-04-17 18:37:25 [INFO] [WATCHDOG] Cycle 15 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:37:25 [INFO] [SIZING] IBKR:$1,020,520.78 + Binance:$9,720.23 = Total:$1,030,241.01 | StockTrade:$51026 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:37:25 [INFO] [REGIME] VIX via VIXY proxy: 15.82 (VIXY=$27.76)
+2026-04-17 18:37:25 [INFO] [REGIME] BULL | SPY: $709.31 MA20: $666.5755 | VIX: 15.8232
+2026-04-17 18:37:26 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:37:26 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:37:26 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:37:26 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
+2026-04-17 18:37:56 [INFO] [FTSE REGIME] BULL | HSBA: $1363.60 MA20: $1262.28
+2026-04-17 18:37:58 [INFO] [ASX REGIME] BULL | CBA: $178.23 MA20: $176.39
+2026-04-17 18:38:00 [INFO] [CRYPTO] Cycle 12 | P&L: $+0.00 | Positions: 0
+2026-04-17 18:38:22 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-17 18:38:26 [INFO] 
+──────────────────────────────────────────────────
+2026-04-17 18:38:26 [INFO] Main cycle 16 | 2026-04-17 18:38:26
+2026-04-17 18:38:26 [INFO] [WATCHDOG] Cycle 16 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 1S/0C
+2026-04-17 18:38:26 [INFO] [SIZING] IBKR:$1,020,520.78 + Binance:$9,720.23 = Total:$1,030,241.01 | StockTrade:$51026 CryptoTrade:$194 DailyLoss:$5151
+2026-04-17 18:38:27 [INFO] [REGIME] VIX via VIXY proxy: 15.82 (VIXY=$27.76)
+2026-04-17 18:38:27 [INFO] [REGIME] BULL | SPY: $709.38 MA20: $666.579 | VIX: 15.8232
+2026-04-17 18:38:28 [INFO] [SMALLCAP] Starting pool refresh in background...
+2026-04-17 18:38:28 [INFO] [SMALLCAP] Refreshing small cap pool...
+2026-04-17 18:38:28 [INFO] [SMALLCAP] 83 candidates from US_WATCHLIST
+2026-04-17 18:38:28 [INFO] [SMALLCAP] Pool refreshed: 0 stocks | Top 5: []
