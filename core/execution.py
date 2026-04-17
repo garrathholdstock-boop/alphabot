@@ -427,16 +427,20 @@ def binance_get_lot_size(symbol):
         return _binance_lot_cache[symbol]
     try:
         data = binance_get("/api/v3/exchangeInfo", {"symbol": symbol})
-        if not data: return 0.0001, 0.0001
-        for filt in data.get("symbols", [{}])[0].get("filters", []):
+        if not data: return 0.0001, 0.0001, 0.0
+        symbol_info = data.get("symbols", [{}])[0]
+        min_qty, step_qty, min_notional = 0.0001, 0.0001, 0.0
+        for filt in symbol_info.get("filters", []):
             if filt.get("filterType") == "LOT_SIZE":
                 min_qty  = float(filt["minQty"])
                 step_qty = float(filt["stepSize"])
-                _binance_lot_cache[symbol] = (min_qty, step_qty)
-                return min_qty, step_qty
+            elif filt.get("filterType") in ("MIN_NOTIONAL", "NOTIONAL"):
+                min_notional = float(filt.get("minNotional", filt.get("minVal", 0)))
+        _binance_lot_cache[symbol] = (min_qty, step_qty, min_notional)
+        return min_qty, step_qty, min_notional
     except:
         pass
-    return 0.0001, 0.0001
+    return 0.0001, 0.0001, 0.0
 
 def round_step(qty, step):
     import math
@@ -449,11 +453,14 @@ def binance_place_order(symbol, side, usdt_amount):
     if not price:
         log.error(f"[BINANCE] Cannot get price for {symbol}")
         return None
-    min_qty, step_qty = binance_get_lot_size(symbol)
+    min_qty, step_qty, min_notional = binance_get_lot_size(symbol)
     raw_qty = usdt_amount / price
     qty     = round_step(raw_qty, step_qty)
     if qty < min_qty:
         log.warning(f"[BINANCE] {symbol} qty {qty} below min {min_qty} — skipping")
+        return None
+    if min_notional > 0 and qty * price < min_notional:
+        log.warning(f"[BINANCE] {symbol} notional ${qty*price:.4f} below min ${min_notional} — skipping")
         return None
     result = binance_post("/api/v3/order", {
         "symbol":           symbol,
