@@ -85,6 +85,13 @@ def init_db():
 def db_record_trade(symbol, side, qty, price, pnl, score, rsi, vol_ratio,
                     hold_hours, reason, breakdown, market="stock"):
     try:
+        # Sanitise — score/rsi/vol_ratio may be "—" strings from recovery
+        def _safe_float(v):
+            try: return float(v) if v and v != "—" else None
+            except: return None
+        score     = _safe_float(score)
+        rsi       = _safe_float(rsi)
+        vol_ratio = _safe_float(vol_ratio)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         now = datetime.now()
