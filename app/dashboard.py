@@ -455,7 +455,10 @@ def build_dashboard():
                 f'<div class="pos-card-header">'
                 f'<div><span class="pos-card-sym" style="color:{cat_col}">{sym}</span>'
                 f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
-                f'<div class="pos-card-pnl" style="color:{pnl_c2}">{sign2}${pnl2:.2f}<br><span style="font-size:11px;opacity:0.8">{sign2}{pnl_pct2:.1f}%</span></div>'
+                f'<div style="text-align:right">'
+                f'<div class="pos-card-pnl" style="color:{pnl_c2}">{sign2}${pnl2:.2f} <span style="font-size:11px;opacity:0.8">({sign2}{pnl_pct2:.1f}%)</span></div>'
+                f'<div class="tap-hint" style="font-size:10px;color:#475569;margin-top:3px">tap for more ▾</div>'
+                f'</div>'
                 f'</div>'
                 f'<div class="pos-card-row">'
                 f'<div class="pos-card-item"><span class="pos-card-label">Entry</span><span class="pos-card-value">${entry2:.4f}</span></div>'
@@ -484,7 +487,7 @@ def build_dashboard():
             f'</div>'
             f'<script>'
             f'function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}'
-            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);d.style.display=d.style.display==="block"?"none":"block";}}'
+            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);var open=d.style.display==="block";d.style.display=open?"none":"block";var card=d.parentElement;var hint=card.querySelector(".tap-hint");if(hint)hint.textContent=open?"tap for more ▾":"tap to close ▴";}}'
             f'</script>'
         )
     else:
@@ -633,12 +636,7 @@ def build_dashboard():
             elif sc>=MIN_SIGNAL_SCORE-1: bc="#ffcc00"; prox=f"🔥 {sc:.1f}/{MIN_SIGNAL_SCORE}"
             elif sc>=MIN_SIGNAL_SCORE-2: bc="#ff8800"; prox=f"⚡ {sc:.1f}/{MIN_SIGNAL_SCORE}"
             else:                         bc="#333";    prox=f"{sc:.1f}/{MIN_SIGNAL_SCORE}"
-            score_bar = (
-                f'<div style="display:flex;align-items:center;gap:8px">'
-                f'<div style="width:55px;height:7px;background:#1a1a1a;border-radius:4px;overflow:hidden">'
-                f'<div style="width:{pct}%;height:100%;background:{bc};border-radius:4px"></div></div>'
-                f'<span style="font-size:12px;color:{bc};font-weight:700">{prox}</span></div>'
-            )
+            score_bar = f'<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:{bc};display:inline-block;box-shadow:0 0 4px {bc}"></span><span style="font-size:13px;font-weight:700;color:{bc}">{prox}</span></span>'
             if ema_gap is not None:
                 if ema_gap>0:      ec="#00ff88"; es=f"+{ema_gap:.2f}% ✅"
                 elif ema_gap>-0.5: ec="#ffcc00"; es=f"{ema_gap:.2f}% 🔥"
@@ -783,12 +781,7 @@ def build_dashboard():
                     elif sc>=MIN_SIGNAL_SCORE-1: bc="#ffcc00"; prox=f"🔥 {sc:.1f}"
                     elif sc>=MIN_SIGNAL_SCORE-2: bc="#ff8800"; prox=f"⚡ {sc:.1f}"
                     else:                         bc="#333";    prox=f"{sc:.1f}"
-                    sbar = (
-                        f'<div style="display:flex;align-items:center;gap:7px">'
-                        f'<div style="width:50px;height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden">'
-                        f'<div style="width:{pct}%;height:100%;background:{bc};border-radius:3px"></div></div>'
-                        f'<span style="font-size:12px;color:{bc};font-weight:700">{prox}</span></div>'
-                    )
+                    sbar = f'<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:{bc};display:inline-block;box-shadow:0 0 4px {bc}"></span><span style="font-size:13px;font-weight:700;color:{bc}">{prox}</span></span>'
                     eg_str = f"+{ema_gap:.2f}% ✅" if ema_gap and ema_gap>0 else (f"{ema_gap:.2f}% 🔥" if ema_gap and ema_gap>-0.5 else (f"{ema_gap:.2f}% ⚡" if ema_gap and ema_gap>-1.5 else (f"{ema_gap:.2f}%" if ema_gap else "—")))
                     eg_col = "#00ff88" if ema_gap and ema_gap>0 else ("#ffcc00" if ema_gap and ema_gap>-0.5 else ("#ff8800" if ema_gap and ema_gap>-1.5 else "#475569"))
                     cc="#00ff88" if c["change"]>=0 else "#ff4466"
