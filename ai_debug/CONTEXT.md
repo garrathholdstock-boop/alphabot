@@ -1,60 +1,71 @@
 # AlphaBot Debug Agent - Persistent Context
+## Last Updated
+17-Apr-2026 19:40 Paris (auto-updated by agent)
 
 ## Architecture
-- VPS: 178.104.170.58 (Hetzner), user: root
-- Git root: /home/alphabot/app/ (branch: master)
-- Bot start: bash /home/alphabot/start.sh -> screen session "alphabot"
-- **Dashboard: port 8080** (app/dashboard.py - separate thread, NOT in main loop logs)
-- **Debug agent: port 8000** (ai_debug/main.py)
+- VPS: 178.104.170.58 (Hetzner), user: root, Paris = UTC+2
+- Git root: /home/alphabot/app/ (branch: main)
+- Bot start: bash /home/alphabot/start.sh → screen session "alphabot"
+- start.sh runs: python3 -m app.main (NOT python3 app/main.py)
+- Dashboard: port 8080 | Debug agent: port 8000
 - DB: /home/alphabot/app/alphabot.db
 - GitHub: https://github.com/garrathholdstock-boop/alphabot
 
 ## File Structure
-- app/main.py (1154 lines) - main trading loop
-- app/dashboard.py - web dashboard on port 8080
-- core/config.py - all config and watchlists
-- core/execution.py - order execution
-- core/risk.py - risk management
-- data/analytics.py - analytics
-- data/database.py - DB operations
-- start.sh - starts bot in screen session
+- app/main.py — main trading loop (6 disciplines)
+- app/dashboard.py — web dashboard port 8080
+- core/config.py — all config + watchlists
+- core/execution.py — order execution (IBKR + Binance)
+- core/risk.py — risk management
+- data/analytics.py — signal scoring
+- data/database.py — DB operations
+- ai_debug/main.py — this agent (port 8000)
+- start.sh — starts bot in screen session
 
 ## Config (core/config.py + .env)
-- MIN_SIGNAL_SCORE=5 (raise to 7 before going live)
-- IS_LIVE=false (paper trading)
+- MIN_SIGNAL_SCORE=5 (RAISE TO 7 BEFORE GOING LIVE)
+- IS_LIVE=false (paper trading — DUQ191770)
 - MAX_POSITIONS=3 per discipline, MAX_TOTAL_POSITIONS=15
 - CYCLE_SECONDS=60
 - STOP_LOSS_PCT=5%
-- Brokers: Alpaca (US paper), IBKR (stops+ASX+FTSE), Binance (401 error ongoing)
+- Brokers: IBKR (US stocks + ASX + FTSE), Binance TESTNET (crypto)
+- BINANCE_TESTNET=true — BINANCE_SECRET may be corrupted (check .env)
 
-## KNOWN COSMETIC ERRORS - ALWAYS IGNORE THESE
-- Error 10089 HOOD/SOFI/FCEL - market data subscription, harmless
-- Binance POST 401 - API permissions not fully set, crypto trades blocked but not crashing
-- BrokenPipeError in dashboard - client disconnected, harmless
-- Stock(symbol='candidates'...) - was a one-time glitch, already fixed
+## Bot Architecture — 6 Disciplines
+1. US Stocks (state) — 9am ET daily scan
+2. US Intraday (intraday_state) — 9:30am-4pm ET
+3. Small Cap (smallcap_state) — US hours
+4. ASX (asx_state) — 2am-8am Paris
+5. FTSE (ftse_state) — 9am-5:30pm Paris
+6. Crypto Intraday (crypto_intraday_state) — 24/7 Binance testnet
 
-## Fixes Made By Agent (most recent first)
-1. Removed sub-cent meme coins SHIB/PEPE/FLOKI/BONK from CRYPTO_WATCHLIST_BINANCE (caused scoring issues)
-2. Fixed MIN_SIGNAL_SCORE default 2->5 in config
-3. Fixed buys[:3]->[:10] in smallcap scan (was only passing 3 candidates)
-4. Fixed tm_pct_fmt typo in dashboard
+## Current Status
+- Bot running: YES
+- All-time P&L: $+0.00 (0 trades, 0% win rate)
+- Open positions: HOOD x7540, TSLA x257, PLUG x70702 (check dashboard for live)
 
-## Dashboard Notes
-- Dashboard runs as a daemon thread started from app/main.py line 888-890
-- It imports from app.dashboard and runs on PORT (default 8080)
-- If dashboard not loading: check if port 8080 is accessible, check screen log for errors
-- Dashboard has 5 stat cards + near misses + trades table
+## KNOWN COSMETIC ERRORS — ALWAYS IGNORE
+- Error 10089, Error 300 — market data subscription, harmless
+- BrokenPipeError in dashboard — client disconnected, harmless
+- DeprecationWarning utcnow() — Python 3.12, cosmetic
+- reqHistoricalData Timeout for SPY — harmless, retries next cycle
+- Can't find EId with tickerId — harmless IBKR cosmetic
 
-## Current Paper Positions (as of 15-Apr-26)
-- SOFI, MSFT, HOOD (paper trades)
-- Alpaca paper balance: ~$1,014,299
+## Priority Matrix
+- P1 SAFETY: bot down, stop not firing, IBKR disconnect, kill switch, daily loss limit
+- P2 EFFICIENCY: no trades 90+ mins, Binance failing, zero scans, execution block
+- P3 BUGS: dashboard mismatches, near-miss anomalies, new unknown errors
 
 ## Remaining Roadmap
-- P1: Fix Binance 401 (check API key permissions in Binance dashboard)
-- P1: Raise MIN_SIGNAL_SCORE 5->7 before going live
-- P2: Weekly Tuning Tracker on analytics page
-- P3: Pre-open news check, earnings calendar
-- P5: IBKR migration for ASX+FTSE+US (account DUQ191770 approved)
+- P1: Verify BINANCE_SECRET not corrupted; raise MIN_SIGNAL_SCORE 5→7 before live
+- P2: Minimum hold time on rotation (10-15 min); Weekly Tuning Tracker
+- P3: Pre-open news 9:30am Paris; earnings calendar
+- P4: ATR stops (after 2wk paper); CYCLE_SECONDS 60→300
+- P5: IS_LIVE=true, IBKR live account DUQ191770
 
-## Last Updated
-Never (initial setup)
+## Deploy Workflow
+cd /home/alphabot/app && git pull origin main
+screen -S alphabot -X quit && sleep 2 && bash /home/alphabot/start.sh
+
+## Emergency
+pkill -9 -f python3 && screen -wipe && bash /home/alphabot/start.sh
