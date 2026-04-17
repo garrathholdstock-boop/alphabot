@@ -773,7 +773,12 @@ def build_dashboard():
             tp_price   = pos.get("take_profit_price", entry * 1.10)
             score      = pos.get("signal_score", "—")
             breakdown  = pos.get("entry_breakdown", "")
-            bd_html    = f'<div style="font-size:11px;color:#888;margin-top:4px;white-space:pre-wrap">{breakdown}</div>' if breakdown else ""
+            bd_html = (
+                f'<div style="font-size:11px;color:#888;margin-top:8px;white-space:pre-wrap;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">{breakdown}</div>'
+                if breakdown else ""
+            )
+            gain_loss_str = f'<span style="color:{("#00ff88" if pnl>=0 else "#ff4466")};font-weight:700">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</span>'
+            target_pct = round(((tp_price - entry) / entry) * 100, 1)
 
             rows += (
                 f'<tr onclick="toggleDetail({idx})" style="cursor:pointer">'
@@ -788,10 +793,17 @@ def build_dashboard():
                 f'<td class="{pnl_c}" style="font-weight:700;font-family:monospace">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
                 f'</tr>'
                 f'<tr id="detail-{idx}" style="display:none;background:rgba(255,255,255,0.02)">'
-                f'<td colspan="9" style="padding:10px 16px;font-size:12px;color:#aaa">'
-                f'<b style="color:#ffcc00">Score: {score}</b> &nbsp;|&nbsp; '
-                f'Qty: {qty} &nbsp;|&nbsp; Position: ${pos_val:,.0f} &nbsp;|&nbsp; '
-                f'Entry: ${entry:.4f} &nbsp;|&nbsp; Stop: ${pos["stop_price"]:.4f} &nbsp;|&nbsp; Target: ${tp_price:.4f}'
+                f'<td colspan="9" style="padding:12px 16px;font-size:12px">'
+                f'<div style="display:flex;flex-wrap:wrap;gap:16px;color:#aaa">'
+                f'<span><span style="color:#555">Score </span><b style="color:#ffcc00">{score}/10</b></span>'
+                f'<span><span style="color:#555">Qty </span><b>{qty:,}</b></span>'
+                f'<span><span style="color:#555">Position </span><b>${pos_val:,.0f}</b></span>'
+                f'<span><span style="color:#555">Entry </span><b>${entry:.4f}</b></span>'
+                f'<span><span style="color:#555">Live </span><b style="color:#00aaff">${live:.4f}</b></span>'
+                f'<span><span style="color:#555">Stop </span><b style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct:+.1f}%)</b></span>'
+                f'<span><span style="color:#555">Target </span><b style="color:#00ff88">${tp_price:.4f} (+{target_pct:.1f}%)</b></span>'
+                f'<span><span style="color:#555">P&L </span>{gain_loss_str}</span>'
+                f'</div>'
                 f'{bd_html}</td></tr>'
             )
         positions_html = (
