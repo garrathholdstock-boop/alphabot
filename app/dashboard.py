@@ -614,78 +614,149 @@ def build_dashboard():
 
     # ── Scan table builder ──
     bear_syms = set(BEAR_TICKERS)
+    # ── Gate helper functions (shared by scanner + RTT) ──────────
+    from core.config import MAX_SECTOR_POSITIONS, SECTOR_MAP as _SECTOR_MAP
+
+    def _dot(ok, close=False, size=14):
+        if ok:    return f'<span style="color:#00ff88;font-size:{size}px;line-height:1;filter:drop-shadow(0 0 3px #00ff88)">●</span>'
+        if close: return f'<span style="color:#ffcc00;font-size:{size}px;line-height:1;filter:drop-shadow(0 0 3px #ffcc00)">●</span>'
+        return     f'<span style="color:#ff4466;font-size:{size}px;line-height:1">●</span>'
+
+    def _gates(sc, ema_gap, c, held_syms):
+        """Returns (dot, value_str, pass) for each gate."""
+        rsi = c.get("rsi"); vr = c.get("vol_ratio",0); sym = c["symbol"]
+        vwap = c.get("vwap"); sec = _SECTOR_MAP.get(sym)
+        held_sec = sum(1 for s in held_syms if _SECTOR_MAP.get(s)==sec) if sec else 0
+
+        g_scr  = _dot(sc>=MIN_SIGNAL_SCORE, sc>=MIN_SIGNAL_SCORE-1)
+        g_ema  = _dot(ema_gap is not None and ema_gap>0, ema_gap is not None and ema_gap>-0.5)
+        g_rsi  = _dot(not rsi or rsi<75, rsi and rsi<80) if rsi else _dot(True)
+        g_vol  = _dot(vr>=1.5, vr>=1.2)
+        g_vap  = _dot(vwap!="BELOW") if vwap else _dot(True)
+        g_sec  = _dot(held_sec < MAX_SECTOR_POSITIONS, held_sec <= MAX_SECTOR_POSITIONS)
+
+        v_scr  = f"{sc:.1f}/{MIN_SIGNAL_SCORE}"
+        v_ema  = (f"+{ema_gap:.2f}%" if ema_gap and ema_gap>0 else f"{ema_gap:.2f}%" if ema_gap else "—")
+        v_rsi  = f"{rsi:.1f}" if rsi else "—"
+        v_vol  = f"{vr:.2f}x" if vr else "—"
+        v_vap  = vwap or "n/a"
+        v_sec  = f"{held_sec}/{MAX_SECTOR_POSITIONS}" if sec else "—"
+
+        all_pass = (sc>=MIN_SIGNAL_SCORE and ema_gap is not None and ema_gap>0
+                    and (not rsi or rsi<75) and vr>=1.5
+                    and vwap!="BELOW" and held_sec<MAX_SECTOR_POSITIONS)
+        return (g_scr,g_ema,g_rsi,g_vol,g_vap,g_sec,
+                v_scr,v_ema,v_rsi,v_vol,v_vap,v_sec, all_pass)
+
+    _held_syms_gates = set(sym for sym,_,_c,_t in all_pos) if all_pos else set()
+
     def build_scan_table(candidates, color):
         if not candidates:
             return '<div class="empty">No scan data yet</div>'
         scored = []
         for c in candidates:
             sc = score_signal(c["symbol"],c["price"],c["change"],c.get("rsi"),c.get("vol_ratio"),c.get("closes",[c["price"]]*22))
-            scored.append((sc,c))
-        normal = sorted([(sc,c) for sc,c in scored if c["symbol"] not in bear_syms],key=lambda x:-x[0])
-        bears  = sorted([(sc,c) for sc,c in scored if c["symbol"] in bear_syms],key=lambda x:-x[0])
-        scored = normal + bears
-        buys   = sum(1 for sc,c in scored if sc>=MIN_SIGNAL_SCORE)
-        watch  = sum(1 for sc,c in scored if sc>=MIN_SIGNAL_SCORE-1 and sc<MIN_SIGNAL_SCORE)
-        rows = ""
-        for sc,c in scored:
             sma9=c.get("sma9"); sma21=c.get("sma21")
             ema_gap = round(((sma9-sma21)/sma21)*100,2) if sma9 and sma21 and sma21>0 else None
-            ema_crossed = ema_gap is not None and ema_gap > 0
-            score_ok = sc >= MIN_SIGNAL_SCORE
-            if score_ok and ema_crossed:   sig = f'<span class="sig-buy">🟢 BUY {sc:.1f}</span>'
-            elif score_ok:                 sig = f'<span style="background:rgba(0,170,255,0.15);color:#00aaff;border:1px solid #00aaff;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:700">👀 WATCH {sc:.1f}</span>'
-            elif ema_crossed:              sig = f'<span style="background:rgba(255,204,0,0.1);color:#ffcc00;border:1px solid #ffcc00;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:700">⚡ SIGNAL {sc:.1f}</span>'
-            elif c["signal"]=="SELL":     sig = f'<span class="sig-sell">SELL</span>'
-            else:                          sig = f'<span class="sig-hold">{sc:.1f}/{MIN_SIGNAL_SCORE}</span>'
-            rsi=c.get("rsi")
-            if rsi:
-                if 50<=rsi<=65:    rsi_col="#00ff88"; rsi_lbl=f"{rsi:.1f} ✅"
-                elif 40<=rsi<50:   rsi_col="#00aaff"; rsi_lbl=f"{rsi:.1f} 📈"
-                elif 65<rsi<=75:   rsi_col="#ffcc00"; rsi_lbl=f"{rsi:.1f} ⚠"
-                elif rsi>75:       rsi_col="#ff4466"; rsi_lbl=f"{rsi:.1f} 🔴"
-                elif rsi<30:       rsi_col="#ff8800"; rsi_lbl=f"{rsi:.1f} 📉"
-                else:               rsi_col="#475569"; rsi_lbl=f"{rsi:.1f}"
-            else: rsi_col="#475569"; rsi_lbl="—"
-            vr=c.get("vol_ratio",0)
-            if vr>=2.0:    vc="#00ff88"; vl=f"{vr:.2f}x 🔥"
-            elif vr>=1.5:  vc="#00aaff"; vl=f"{vr:.2f}x ✅"
-            elif vr>=1.2:  vc="#ffcc00"; vl=f"{vr:.2f}x ⚠"
-            elif vr>0:     vc="#475569"; vl=f"{vr:.2f}x"
-            else:           vc="#475569"; vl="—"
-            pct=min(100,int((sc/11)*100))
-            if sc>=MIN_SIGNAL_SCORE:     bc="#00ff88"; prox=f"✅ {sc:.1f}"
-            elif sc>=MIN_SIGNAL_SCORE-1: bc="#ffcc00"; prox=f"🔥 {sc:.1f}/{MIN_SIGNAL_SCORE}"
-            elif sc>=MIN_SIGNAL_SCORE-2: bc="#ff8800"; prox=f"⚡ {sc:.1f}/{MIN_SIGNAL_SCORE}"
-            else:                         bc="#333";    prox=f"{sc:.1f}/{MIN_SIGNAL_SCORE}"
-            score_bar = f'<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:{bc};display:inline-block;box-shadow:0 0 4px {bc}"></span><span style="font-size:13px;font-weight:700;color:{bc}">{prox}</span></span>'
-            if ema_gap is not None:
-                if ema_gap>0:      ec="#00ff88"; es=f"+{ema_gap:.2f}% ✅"
-                elif ema_gap>-0.5: ec="#ffcc00"; es=f"{ema_gap:.2f}% 🔥"
-                elif ema_gap>-1.5: ec="#ff8800"; es=f"{ema_gap:.2f}% ⚡"
-                else:               ec="#475569"; es=f"{ema_gap:.2f}%"
-            else: ec="#475569"; es="—"
-            bear_badge = ('<span style="font-size:10px;background:rgba(255,136,0,0.2);color:#ff8800;border:1px solid rgba(255,136,0,0.4);border-radius:4px;padding:1px 6px;margin-left:5px;font-weight:700">BEAR</span>' if c["symbol"] in bear_syms else "")
+            scored.append((sc,ema_gap,c))
+        normal = sorted([(sc,eg,c) for sc,eg,c in scored if c["symbol"] not in bear_syms],key=lambda x:-x[0])
+        bears  = sorted([(sc,eg,c) for sc,eg,c in scored if c["symbol"] in bear_syms],key=lambda x:-x[0])
+        scored = normal + bears
+        buys  = sum(1 for sc,eg,c in scored if sc>=MIN_SIGNAL_SCORE and eg is not None and eg>0)
+        watch = sum(1 for sc,eg,c in scored if sc>=MIN_SIGNAL_SCORE-1 and sc<MIN_SIGNAL_SCORE)
+        rows = ""
+        for sc,ema_gap,c in scored:
+            sym = c["symbol"]
+            g_scr,g_ema,g_rsi,g_vol,g_vap,g_sec,v_scr,v_ema,v_rsi,v_vol,v_vap,v_sec,all_pass = _gates(sc,ema_gap,c,_held_syms_gates)
+            bear_badge = ('<span style="font-size:9px;background:rgba(255,136,0,0.2);color:#ff8800;border:1px solid rgba(255,136,0,0.4);border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:700">BEAR</span>' if sym in bear_syms else "")
             cc = "#00ff88" if c["change"]>=0 else "#ff4466"
             chg_s = "+" if c["change"]>=0 else ""
-            row_bg = "background:rgba(255,136,0,0.03);" if c["symbol"] in bear_syms else ""
-            rows += (
-                f'<tr style="{row_bg}">'
-                f'<td style="font-weight:700;color:{color}">{c["symbol"]}{bear_badge}</td>'
-                f'<td>${c["price"]:.4f}</td>'
-                f'<td style="color:{cc}">{chg_s}{c["change"]:.2f}%</td>'
-                f'<td>{sig}</td><td>{score_bar}</td>'
-                f'<td style="color:{ec};font-weight:700">{es}</td>'
-                f'<td style="color:{rsi_col};font-weight:700">{rsi_lbl}</td>'
-                f'<td style="color:{vc};font-weight:700">{vl}</td></tr>'
-            )
+            price_s = f"${c['price']:.4f}" if c['price'] < 10 else f"${c['price']:.2f}"
+            row_glow = "border-left:2px solid #00ff88;background:rgba(0,255,136,0.04);" if all_pass else (
+                       "border-left:2px solid #333;" if sc < MIN_SIGNAL_SCORE-1 else "border-left:2px solid #ffcc00;background:rgba(255,204,0,0.02);")
+            rid = f"sc_{sym}"
+
+            # ── Desktop row (hidden on mobile) ──
+            rows += f"""
+<tr class="scan-row-desktop" onclick="toggleScan('{rid}')" style="cursor:pointer;{row_glow}">
+  <td style="font-weight:700;color:{color};white-space:nowrap">{sym}{bear_badge}</td>
+  <td style="color:#e0e0e0">{price_s}</td>
+  <td style="color:{cc};font-weight:700">{chg_s}{c["change"]:.2f}%</td>
+  <td style="text-align:center">
+    <span style="display:inline-flex;align-items:center;gap:5px">
+      {g_scr}
+      <span style="font-size:11px;font-weight:700;color:{"#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#475569"}">{v_scr}</span>
+    </span>
+  </td>
+  <td style="text-align:center">
+    <span style="display:inline-flex;align-items:center;gap:5px">
+      {g_ema}
+      <span style="font-size:11px;color:{"#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#475569"}">{v_ema}</span>
+    </span>
+  </td>
+  <td style="text-align:center">
+    <span style="display:inline-flex;align-items:center;gap:5px">
+      {g_rsi}
+      <span style="font-size:11px;color:{"#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#475569"}">{v_rsi}</span>
+    </span>
+  </td>
+  <td style="text-align:center">
+    <span style="display:inline-flex;align-items:center;gap:5px">
+      {g_vol}
+      <span style="font-size:11px;color:{"#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#475569"}">{v_vol}</span>
+    </span>
+  </td>
+  <td style="text-align:center">{g_vap}</td>
+  <td style="text-align:center">{g_sec}<span style="font-size:10px;color:#475569;margin-left:3px">{v_sec}</span></td>
+</tr>
+<tr id="{rid}_detail" class="scan-row-desktop" style="display:none;background:rgba(255,255,255,0.02)">
+  <td colspan="9" style="padding:10px 16px;font-size:12px;color:#475569;border-bottom:1px solid rgba(255,255,255,0.04)">
+    Score {v_scr} · EMA {v_ema} · RSI {v_rsi} · Vol {v_vol} · VWAP {v_vap} · Sector {v_sec}
+    {"&nbsp;&nbsp;<span style=\"color:#00ff88;font-weight:700\">✅ ALL GATES PASS — eligible to trade</span>" if all_pass else ""}
+  </td>
+</tr>"""
+
+            # ── Mobile row (hidden on desktop) ──
+            rows += f"""
+<tr class="scan-row-mobile" onclick="toggleScan('{rid}_mob')" style="cursor:pointer;{row_glow}">
+  <td style="font-weight:700;color:{color};font-size:13px;padding-right:4px">{sym}</td>
+  <td style="font-size:12px;color:#e0e0e0">{price_s}</td>
+  <td style="font-size:12px;color:{cc}">{chg_s}{c["change"]:.1f}%</td>
+  <td style="text-align:center;padding:0 2px">{g_scr}</td>
+  <td style="text-align:center;padding:0 2px">{g_ema}</td>
+  <td style="text-align:center;padding:0 2px">{g_rsi}</td>
+  <td style="text-align:center;padding:0 2px">{g_vol}</td>
+  <td style="text-align:center;padding:0 2px">{g_vap}</td>
+  <td style="text-align:center;padding:0 2px">{g_sec}</td>
+</tr>
+<tr id="{rid}_mob_detail" class="scan-row-mobile" style="display:none;background:rgba(255,255,255,0.02)">
+  <td colspan="9" style="padding:8px 12px;font-size:11px;color:#475569">
+    SCR:{v_scr} EMA:{v_ema} RSI:{v_rsi} Vol:{v_vol} VAP:{v_vap} Sec:{v_sec}
+  </td>
+</tr>"""
+
+        scanner_css = """
+<style>
+@media(min-width:600px){.scan-row-mobile{display:none!important}}
+@media(max-width:599px){.scan-row-desktop{display:none!important}}
+</style>"""
         return (
-            f'<div style="display:flex;gap:18px;margin-bottom:16px;font-size:14px;flex-wrap:wrap">'
-            f'<span style="color:#00ff88;font-weight:700">🟢 {buys} BUY</span>'
-            f'<span style="color:#00aaff;font-weight:700">👀 {watch} NEAR</span>'
+            f'{scanner_css}'
+            f'<div style="display:flex;gap:18px;margin-bottom:14px;font-size:14px;flex-wrap:wrap">'
+            f'<span style="color:#00ff88;font-weight:700">🟢 {buys} READY</span>'
+            f'<span style="color:#ffcc00;font-weight:700">⚡ {watch} CLOSE</span>'
             f'<span style="color:#475569;margin-left:auto">{len(scored)} scanned</span></div>'
-            f'<div style="overflow-x:auto"><table><thead><tr>'
-            f'<th>Symbol</th><th>Price</th><th>Chg%</th><th>Signal</th><th>Score</th>'
-            f'<th>EMA Cross</th><th>RSI</th><th>Vol</th></tr></thead><tbody>{rows}</tbody></table></div>'
+            f'<div style="overflow-x:auto">'
+            f'<table><thead>'
+            f'<tr class="scan-row-desktop"><th>Symbol</th><th>Price</th><th>Chg%</th>'
+            f'<th>SCR</th><th>EMA</th><th>RSI</th><th>VOL</th><th>VAP</th><th>SEC</th></tr>'
+            f'<tr class="scan-row-mobile" style="font-size:10px;color:#475569">'
+            f'<th>SYM</th><th>PRICE</th><th>CHG</th>'
+            f'<th style="text-align:center">SCR</th><th style="text-align:center">EMA</th>'
+            f'<th style="text-align:center">RSI</th><th style="text-align:center">VOL</th>'
+            f'<th style="text-align:center">VAP</th><th style="text-align:center">SEC</th></tr>'
+            f'</thead><tbody>{rows}</tbody></table></div>'
+            f'<script>function toggleScan(id){{var d=document.getElementById(id+"_detail");if(d)d.style.display=d.style.display==="none"?"table-row":"none";}}</script>'
         )
 
     # ── Build scored candidates per market ──
@@ -705,34 +776,48 @@ def build_dashboard():
     ftse_scored   = score_candidates(st_candidates.get("ftse", []))
     sc_scored     = score_candidates(st_candidates.get("smallcap", []))
 
-    # ── READY TO TRADE screener — signals that qualify RIGHT NOW ──
+    # ── READY TO TRADE — traffic light gate rows ──
     def ready_to_trade_rows(scored, color, label, held_syms=set()):
         rows = ""
         for sc, ema_gap, c in scored:
-            ema_crossed = ema_gap is not None and ema_gap > 0
-            score_ok = sc >= MIN_SIGNAL_SCORE
-            if not (score_ok and ema_crossed): continue
-            if c["symbol"] in held_syms: continue
-            cc = "#00ff88" if c["change"]>=0 else "#ff4466"
+            if sc < MIN_SIGNAL_SCORE: continue
+            if ema_gap is None or ema_gap <= 0: continue
+            sym = c["symbol"]
+            g_scr,g_ema,g_rsi,g_vol,g_vap,g_sec,v_scr,v_ema,v_rsi,v_vol,v_vap,v_sec,all_pass = _gates(sc,ema_gap,c,held_syms)
+            cc    = "#00ff88" if c["change"]>=0 else "#ff4466"
             chg_s = "+" if c["change"]>=0 else ""
-            rsi = c.get("rsi")
-            rsi_s = f"{rsi:.1f}" if rsi else "—"
-            rsi_c = "#00ff88" if rsi and 50<=rsi<=65 else ("#ffcc00" if rsi and rsi<=75 else "#ff4466" if rsi and rsi>75 else "#475569")
-            vr = c.get("vol_ratio",0)
-            vr_s = f"{vr:.2f}x" if vr else "—"
-            vr_c = "#00ff88" if vr>=1.5 else ("#ffcc00" if vr>=1.2 else "#475569")
-            rows += (
-                f'<tr>'
-                f'<td style="font-weight:700;color:{color}">{c["symbol"]}</td>'
-                f'<td style="font-size:11px;color:{color};font-weight:700">{label}</td>'
-                f'<td>${c["price"]:.4f}</td>'
-                f'<td style="color:{cc}">{chg_s}{c["change"]:.2f}%</td>'
-                f'<td><span class="sig-buy">🟢 BUY {sc:.1f}</span></td>'
-                f'<td style="color:#00ff88;font-weight:700">+{ema_gap:.2f}% ✅</td>'
-                f'<td style="color:{rsi_c};font-weight:700">{rsi_s}</td>'
-                f'<td style="color:{vr_c};font-weight:700">{vr_s}</td>'
-                f'</tr>'
-            )
+            price_s = f"${c['price']:.4f}" if c['price'] < 10 else f"${c['price']:.2f}"
+            row_border = "border-left:3px solid #00ff88;" if all_pass else "border-left:3px solid #ffcc00;"
+            row_bg     = "background:rgba(0,255,136,0.05);" if all_pass else "background:rgba(255,204,0,0.02);"
+            rid = f"rtt_{sym}_{label}"
+
+            rows += f"""<div style="margin-bottom:4px">
+<div onclick="toggleRTT('{rid}')" style="display:grid;grid-template-columns:72px 64px 52px repeat(6,30px);
+  align-items:center;gap:3px;padding:9px 10px;border-radius:8px;{row_border}{row_bg}cursor:pointer">
+  <div style="font-weight:700;color:{color};font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{sym}</div>
+  <div style="font-size:12px;color:#e0e0e0">{price_s}</div>
+  <div style="font-size:11px;color:{cc}">{chg_s}{c["change"]:.1f}%</div>
+  <div style="text-align:center" title="Score {v_scr}">{g_scr}</div>
+  <div style="text-align:center" title="EMA {v_ema}">{g_ema}</div>
+  <div style="text-align:center" title="RSI {v_rsi}">{g_rsi}</div>
+  <div style="text-align:center" title="Vol {v_vol}">{g_vol}</div>
+  <div style="text-align:center" title="VWAP {v_vap}">{g_vap}</div>
+  <div style="text-align:center" title="Sector {v_sec}">{g_sec}</div>
+</div>
+<div id="{rid}_detail" style="display:none;padding:8px 12px 10px;font-size:11px;color:#475569;
+  background:rgba(255,255,255,0.02);border-radius:0 0 8px 8px;
+  border:1px solid rgba(255,255,255,0.05);border-top:none">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+    <div><b style="color:#e0e0e0">Score</b><br>{v_scr}</div>
+    <div><b style="color:#e0e0e0">EMA</b><br>{v_ema}</div>
+    <div><b style="color:#e0e0e0">RSI</b><br>{v_rsi}</div>
+    <div><b style="color:#e0e0e0">Volume</b><br>{v_vol}</div>
+    <div><b style="color:#e0e0e0">VWAP</b><br>{v_vap}</div>
+    <div><b style="color:#e0e0e0">Sector</b><br>{v_sec}</div>
+  </div>
+  {"<div style=\"margin-top:6px;color:#00ff88;font-weight:700;font-size:12px\">✅ ALL GATES PASS — bot will execute</div>" if all_pass else "<div style=\"margin-top:6px;color:#ffcc00;font-size:11px\">⚠ Some gates failing — held back</div>"}
+</div>
+</div>"""
         return rows
 
     _held_syms = set(sym for sym,_,_c,_t in all_pos) if all_pos else set()
@@ -746,27 +831,19 @@ def build_dashboard():
     if rtt_rows:
         ready_to_trade_html = (
             f'<div class="card" style="margin-bottom:16px;border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.03)">'
-            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
             f'<div class="section-title" style="color:#00ff88;margin-bottom:0">🟢 READY TO TRADE</div>'
-            f'<div style="font-size:13px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed — eligible for immediate execution</div>'
+            f'<div style="font-size:12px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed</div>'
             f'</div>'
-            f'<div style="display:grid;grid-template-columns:80px 70px 58px repeat(6,32px);'
-            f'gap:4px;padding:4px 12px 8px;font-size:10px;color:#475569;letter-spacing:0.5px;font-weight:700">'
-            f'<div>SYMBOL</div><div>PRICE</div><div>CHG%</div>'
-            f'<div style="text-align:center">SCR</div>'
-            f'<div style="text-align:center">EMA</div>'
-            f'<div style="text-align:center">RSI</div>'
-            f'<div style="text-align:center">VOL</div>'
-            f'<div style="text-align:center">VAP</div>'
-            f'<div style="text-align:center">SEC</div>'
+            f'<div style="display:grid;grid-template-columns:72px 64px 52px repeat(6,30px);'
+            f'gap:3px;padding:3px 10px 8px;font-size:9px;letter-spacing:0.8px;color:#475569;font-weight:700;text-transform:uppercase">'
+            f'<div>Symbol</div><div>Price</div><div>Chg%</div>'
+            f'<div style="text-align:center">Scr</div><div style="text-align:center">EMA</div>'
+            f'<div style="text-align:center">RSI</div><div style="text-align:center">Vol</div>'
+            f'<div style="text-align:center">Vap</div><div style="text-align:center">Sec</div>'
             f'</div>'
             f'{rtt_rows}'
-            f'<script>'
-            f'function toggleRTT(id){{'
-            f'  var d=document.getElementById(id+"_detail");'
-            f'  d.style.display=d.style.display==="none"?"block":"none";'
-            f'}}'
-            f'</script>'
+            f'<script>function toggleRTT(id){{var d=document.getElementById(id+"_detail");if(d)d.style.display=d.style.display==="none"?"block":"none";}}</script>'
             f'</div>'
         )
     else:
