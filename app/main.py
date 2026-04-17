@@ -7,6 +7,8 @@ and the main orchestration loop.
 import time
 import threading
 import logging
+import json
+import os
 from datetime import datetime, timedelta
 try:
     from zoneinfo import ZoneInfo
@@ -921,6 +923,19 @@ def main():
 
             # Refresh account info
             cfg.account_info = ibkr_get_account() or cfg.account_info
+
+            # Write positions snapshot for dashboard (separate process)
+            try:
+                snap = {}
+                for label, st in [("Stock", state), ("Crypto", crypto_state),
+                                   ("SmCap", smallcap_state), ("ID", intraday_state),
+                                   ("CrypID", crypto_intraday_state), ("ASX", asx_state), ("FTSE", ftse_state)]:
+                    for sym, pos in st.positions.items():
+                        snap[sym] = {**pos, "_type": label, "_live": cfg.live_prices.get(sym)}
+                with open("/home/alphabot/app/positions.json", "w") as _f:
+                    json.dump(snap, _f)
+            except Exception as _e:
+                log.warning(f"[SNAPSHOT] {_e}")
 
             # ── Dynamic limit scaling from live balances ──
             if cfg.account_info:
