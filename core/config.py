@@ -53,7 +53,7 @@ BINANCE_SECRET         = os.environ.get("BINANCE_SECRET", "") or os.environ.get(
 BINANCE_USE_TESTNET    = os.environ.get("BINANCE_TESTNET", "false").lower() == "true"
 
 if BINANCE_USE_TESTNET and BINANCE_KEY:
-    BINANCE_BASE = "https://testnet.binance.vision"
+    BINANCE_BASE = "https://demo-api.binance.vision"
     _BIN_KEY     = BINANCE_KEY
     _BIN_SECRET  = BINANCE_SECRET
     USE_BINANCE  = True
