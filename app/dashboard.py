@@ -499,7 +499,7 @@ def build_dashboard():
                 f'<div class="pos-card-item"><span class="pos-card-label">Stop</span><span class="pos-card-value" style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct2:+.1f}%)</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Position</span><span class="pos-card-value">${pos_val2:,.0f}</span></div>'
                 f'</div>'
-                f'<div class="pos-card-detail" id="card-det-{idx}">'
+                f'<div class="pos-card-detail" id="card-det-{idx}" style="display:block">'
                 f'<div class="pos-card-detail-grid">'
                 f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{held_str2}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Purchased</span><span class="pos-card-value">{purchased2}</span></div>'
@@ -511,7 +511,7 @@ def build_dashboard():
             )
         positions_html = (
             f'<div class="card" style="margin-bottom:16px">'
-            f'<div class="section-title">Open Positions ({len(all_pos)}) <span style="font-size:13px;color:#475569;font-weight:400;font-family:\'JetBrains Mono\'">· tap to expand</span></div>'
+            f'<div class="section-title">CURRENTLY HOLDING ({len(all_pos)}) <span style="font-size:13px;color:#475569;font-weight:400;font-family:\'JetBrains Mono\'">· tap to expand</span></div>'
             f'<div class="pos-table-wrap table-wrap"><table><thead><tr>'
             f'<th>Symbol</th><th>Type</th><th>Held</th><th>Purchased</th>'
             f'<th>Entry $</th><th>Live $</th><th>Stop</th><th>Position $</th><th>P&L</th>'
@@ -1065,7 +1065,7 @@ def build_dashboard():
         f'<div style="margin-bottom:20px">'
         f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
         f'<div class="section-title" style="margin-bottom:0">📡 Market Scanner</div>'
-        f'<div style="font-size:13px;color:#475569">Open markets expanded · top 10 shown · tap to expand/collapse</div>'
+        f'<div style="font-size:13px;color:#475569">Open markets expanded · top 10 shown/collapse</div>'
         f'</div>'
         + build_market_accordion("crypto","Crypto","🪙","#00ff88", True, crypto_scored, True)
         + build_market_accordion("us","US Stocks","📈","#00aaff", market_open, us_scored, market_open)
