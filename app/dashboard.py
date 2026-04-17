@@ -735,8 +735,7 @@ def build_dashboard():
   </td>
 </tr>"""
 
-        scanner_css = """
-<style>
+        scanner_css = """<style>
 @media(min-width:600px){.scan-row-mobile{display:none!important}}
 @media(max-width:599px){.scan-row-desktop{display:none!important}}
 </style>"""
@@ -748,13 +747,13 @@ def build_dashboard():
             f'<span style="color:#475569;margin-left:auto">{len(scored)} scanned</span></div>'
             f'<div style="overflow-x:auto">'
             f'<table><thead>'
-            f'<tr class="scan-row-desktop"><th>Symbol</th><th>Price</th><th>Chg%</th>'
-            f'<th>SCR</th><th>EMA</th><th>RSI</th><th>VOL</th><th>VAP</th><th>SEC</th></tr>'
-            f'<tr class="scan-row-mobile" style="font-size:10px;color:#475569">'
+            f'<tr class="scan-row-desktop"><th style="font-size:13px">Symbol</th><th style="font-size:13px">Price</th><th style="font-size:13px">Chg%</th>'
+            f'<th style="font-size:13px;text-align:center">SCR</th><th style="font-size:13px;text-align:center">EMA</th><th style="font-size:13px;text-align:center">RSI</th><th style="font-size:13px;text-align:center">VOL</th><th style="font-size:13px;text-align:center">VAP</th><th style="font-size:13px;text-align:center">SEC</th></tr>'
+            f'<tr class="scan-row-mobile" style="font-size:11px;color:#8899aa">'
             f'<th>SYM</th><th>PRICE</th><th>CHG</th>'
-            f'<th style="text-align:center">SCR</th><th style="text-align:center">EMA</th>'
-            f'<th style="text-align:center">RSI</th><th style="text-align:center">VOL</th>'
-            f'<th style="text-align:center">VAP</th><th style="text-align:center">SEC</th></tr>'
+            f'<th style="text-align:center">S</th><th style="text-align:center">E</th>'
+            f'<th style="text-align:center">R</th><th style="text-align:center">V</th>'
+            f'<th style="text-align:center">P</th><th style="text-align:center">X</th></tr>'
             f'</thead><tbody>{rows}</tbody></table></div>'
             f'<script>function toggleScan(id){{var d=document.getElementById(id+"_detail");if(d)d.style.display=d.style.display==="none"?"table-row":"none";}}</script>'
         )
@@ -796,18 +795,18 @@ def build_dashboard():
             rsi_c2 = "#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#475569"
             vol_c2 = "#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#475569"
             rows += f"""<div style="margin-bottom:4px">
-<!-- Desktop RTT: dot + value stacked -->
-<div class="rtt-desktop" onclick="toggleRTT('{rid}')" style="display:grid;grid-template-columns:80px 68px 48px repeat(6,1fr);
-  align-items:center;gap:4px;padding:9px 12px;border-radius:8px;{row_border}{row_bg}cursor:pointer">
-  <div style="font-weight:700;color:{color};font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{sym}</div>
-  <div style="font-size:12px;color:#e0e0e0">{price_s}</div>
-  <div style="font-size:11px;color:{cc}">{chg_s}{c["change"]:.1f}%</div>
-  <div style="display:flex;flex-direction:column;align-items:center;gap:1px">{g_scr}<span style="font-size:9px;color:{scr_c}">{v_scr}</span></div>
-  <div style="display:flex;flex-direction:column;align-items:center;gap:1px">{g_ema}<span style="font-size:9px;color:{ema_c2}">{v_ema}</span></div>
-  <div style="display:flex;flex-direction:column;align-items:center;gap:1px">{g_rsi}<span style="font-size:9px;color:{rsi_c2}">{v_rsi}</span></div>
-  <div style="display:flex;flex-direction:column;align-items:center;gap:1px">{g_vol}<span style="font-size:9px;color:{vol_c2}">{v_vol}</span></div>
-  <div style="display:flex;flex-direction:column;align-items:center;gap:1px">{g_vap}<span style="font-size:9px;color:#475569">{v_vap}</span></div>
-  <div style="display:flex;flex-direction:column;align-items:center;gap:1px">{g_sec}<span style="font-size:9px;color:#475569">{v_sec}</span></div>
+<!-- Desktop RTT: dot + value stacked, larger -->
+<div class="rtt-desktop" onclick="toggleRTT('{rid}')" style="display:grid;grid-template-columns:100px 80px 58px repeat(6,1fr);
+  align-items:center;gap:6px;padding:13px 16px;border-radius:10px;{row_border}{row_bg}cursor:pointer">
+  <div style="font-weight:700;color:{color};font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{sym}</div>
+  <div style="font-size:14px;color:#d0d8e0">{price_s}</div>
+  <div style="font-size:13px;font-weight:700;color:{cc}">{chg_s}{c["change"]:.1f}%</div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">{g_scr}<span style="font-size:11px;font-weight:700;color:{scr_c}">{v_scr}</span></div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">{g_ema}<span style="font-size:11px;color:{ema_c2}">{v_ema}</span></div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">{g_rsi}<span style="font-size:11px;color:{rsi_c2}">{v_rsi}</span></div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">{g_vol}<span style="font-size:11px;color:{vol_c2}">{v_vol}</span></div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">{g_vap}<span style="font-size:11px;color:#8899aa">{v_vap}</span></div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">{g_sec}<span style="font-size:11px;color:#8899aa">{v_sec}</span></div>
 </div>
 <!-- Mobile RTT: tight dots only, fits in box -->
 <div class="rtt-mobile" onclick="toggleRTT('{rid}_mob')" style="display:grid;grid-template-columns:60px 56px 40px repeat(6,24px);
@@ -822,22 +821,22 @@ def build_dashboard():
   <div style="text-align:center">{g_vap}</div>
   <div style="text-align:center">{g_sec}</div>
 </div>
-<div id="{rid}_detail" style="display:none;padding:8px 12px 10px;font-size:11px;color:#475569;
-  background:rgba(255,255,255,0.02);border-radius:0 0 8px 8px;
-  border:1px solid rgba(255,255,255,0.05);border-top:none">
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
-    <div><b style="color:#e0e0e0">Score</b><br>{v_scr}</div>
-    <div><b style="color:#e0e0e0">EMA</b><br>{v_ema}</div>
-    <div><b style="color:#e0e0e0">RSI</b><br>{v_rsi}</div>
-    <div><b style="color:#e0e0e0">Volume</b><br>{v_vol}</div>
-    <div><b style="color:#e0e0e0">VWAP</b><br>{v_vap}</div>
-    <div><b style="color:#e0e0e0">Sector</b><br>{v_sec}</div>
+<div id="{rid}_detail" style="display:none;padding:14px 18px 16px;font-size:13px;color:#b0bec5;
+  background:rgba(255,255,255,0.05);border-radius:0 0 10px 10px;
+  border:1px solid rgba(255,255,255,0.08);border-top:none">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+    <div><b style="color:#e8edf2;font-size:12px;text-transform:uppercase;letter-spacing:0.5px">Score</b><br><span style="font-size:15px;font-weight:700;color:#e0e0e0">{v_scr}</span></div>
+    <div><b style="color:#e8edf2;font-size:12px;text-transform:uppercase;letter-spacing:0.5px">EMA</b><br><span style="font-size:15px;font-weight:700;color:#e0e0e0">{v_ema}</span></div>
+    <div><b style="color:#e8edf2;font-size:12px;text-transform:uppercase;letter-spacing:0.5px">RSI</b><br><span style="font-size:15px;font-weight:700;color:#e0e0e0">{v_rsi}</span></div>
+    <div><b style="color:#e8edf2;font-size:12px;text-transform:uppercase;letter-spacing:0.5px">Volume</b><br><span style="font-size:15px;font-weight:700;color:#e0e0e0">{v_vol}</span></div>
+    <div><b style="color:#e8edf2;font-size:12px;text-transform:uppercase;letter-spacing:0.5px">VWAP</b><br><span style="font-size:15px;font-weight:700;color:#e0e0e0">{v_vap}</span></div>
+    <div><b style="color:#e8edf2;font-size:12px;text-transform:uppercase;letter-spacing:0.5px">Sector</b><br><span style="font-size:15px;font-weight:700;color:#e0e0e0">{v_sec}</span></div>
   </div>
-  {"<div style=\"margin-top:6px;color:#00ff88;font-weight:700;font-size:12px\">✅ ALL GATES PASS — bot will execute</div>" if all_pass else "<div style=\"margin-top:6px;color:#ffcc00;font-size:11px\">⚠ Some gates failing — held back</div>"}
+  {"<div style=\"margin-top:10px;color:#00ff88;font-weight:700;font-size:13px\">✅ ALL GATES PASS — bot will execute</div>" if all_pass else "<div style=\"margin-top:10px;color:#ffcc00;font-size:13px\">⚠ Some gates failing — held back</div>"}
 </div>
-<div id="{rid}_mob_detail" style="display:none;padding:6px 10px 8px;font-size:10px;color:#475569;
-  background:rgba(255,255,255,0.02);border-radius:0 0 8px 8px;border:1px solid rgba(255,255,255,0.05);border-top:none">
-  SCR:{v_scr} · EMA:{v_ema} · RSI:{v_rsi} · Vol:{v_vol} · VAP:{v_vap} · Sec:{v_sec}{"<span style=\"color:#00ff88;font-weight:700\"> ✅</span>" if all_pass else ""}
+<div id="{rid}_mob_detail" style="display:none;padding:10px 12px;font-size:12px;color:#b0bec5;
+  background:rgba(255,255,255,0.05);border-radius:0 0 8px 8px;border:1px solid rgba(255,255,255,0.08);border-top:none">
+  SCR:<b style="color:#e0e0e0">{v_scr}</b> · EMA:<b style="color:#e0e0e0">{v_ema}</b> · RSI:<b style="color:#e0e0e0">{v_rsi}</b> · Vol:<b style="color:#e0e0e0">{v_vol}</b> · VAP:<b style="color:#e0e0e0">{v_vap}</b> · Sec:<b style="color:#e0e0e0">{v_sec}</b>{"<span style=\"color:#00ff88;font-weight:700\"> ✅</span>" if all_pass else ""}
 </div>
 </div>"""
         return rows
@@ -858,12 +857,12 @@ def build_dashboard():
             f'<div style="font-size:12px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed</div>'
             f'</div>'
             f'<style>@media(min-width:600px){{.rtt-mobile{{display:none!important}}}}@media(max-width:599px){{.rtt-desktop{{display:none!important}}}}</style>'
-            f'<div class="rtt-desktop" style="display:grid;grid-template-columns:80px 68px 48px repeat(6,1fr);'
-            f'gap:4px;padding:3px 12px 8px;font-size:9px;letter-spacing:0.8px;color:#475569;font-weight:700;text-transform:uppercase">'
+            f'<div class="rtt-desktop" style="display:grid;grid-template-columns:100px 80px 58px repeat(6,1fr);'
+            f'gap:6px;padding:4px 16px 10px;font-size:11px;letter-spacing:1px;color:#8899aa;font-weight:700;text-transform:uppercase">'
             f'<div>Symbol</div><div>Price</div><div>Chg%</div>'
-            f'<div style="text-align:center">Scr</div><div style="text-align:center">EMA</div>'
-            f'<div style="text-align:center">RSI</div><div style="text-align:center">Vol</div>'
-            f'<div style="text-align:center">Vap</div><div style="text-align:center">Sec</div>'
+            f'<div style="text-align:center">SCR</div><div style="text-align:center">EMA</div>'
+            f'<div style="text-align:center">RSI</div><div style="text-align:center">VOL</div>'
+            f'<div style="text-align:center">VAP</div><div style="text-align:center">SEC</div>'
             f'</div>'
             f'<div class="rtt-mobile" style="display:grid;grid-template-columns:60px 56px 40px repeat(6,24px);'
             f'gap:2px;padding:3px 8px 8px;font-size:9px;color:#475569;font-weight:700;text-transform:uppercase">'
@@ -906,56 +905,61 @@ def build_dashboard():
                     cc = "#00ff88" if c["change"]>=0 else "#ff4466"
                     chg_s = "+" if c["change"]>=0 else ""
                     price_s = f"${c['price']:.4f}" if c['price'] < 10 else f"${c['price']:.2f}"
-                    row_glow = "border-left:2px solid #00ff88;background:rgba(0,255,136,0.04);" if all_pass else (
-                               "border-left:2px solid #333;" if sc < MIN_SIGNAL_SCORE-1 else "border-left:2px solid #ffcc00;background:rgba(255,204,0,0.02);")
+                    row_glow = "border-left:3px solid #00ff88;background:rgba(0,255,136,0.05);" if all_pass else (
+                               "border-left:3px solid #1a2a1a;" if sc < MIN_SIGNAL_SCORE-1 else "border-left:3px solid #ffcc00;background:rgba(255,204,0,0.03);")
                     rid = f"sc_{sym}"
-                    scr_c = "#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#475569"
-                    ema_c = "#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#475569"
-                    rsi_c = "#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#475569"
-                    vol_c = "#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#475569"
+                    scr_c = "#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#8899aa"
+                    ema_c = "#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#8899aa"
+                    rsi_c = "#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#8899aa"
+                    vol_c = "#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#8899aa"
                     rows += f"""
 <tr class="scan-row-desktop" onclick="toggleScan('{rid}')" style="cursor:pointer;{row_glow}">
-  <td style="font-weight:700;color:{color};white-space:nowrap">{sym}{bear_badge}</td>
-  <td style="color:#e0e0e0">{price_s}</td>
-  <td style="color:{cc};font-weight:700">{chg_s}{c["change"]:.2f}%</td>
-  <td><span style="display:inline-flex;align-items:center;gap:4px">{g_scr}<span style="font-size:11px;font-weight:700;color:{scr_c}">{v_scr}</span></span></td>
-  <td><span style="display:inline-flex;align-items:center;gap:4px">{g_ema}<span style="font-size:11px;color:{ema_c}">{v_ema}</span></span></td>
-  <td><span style="display:inline-flex;align-items:center;gap:4px">{g_rsi}<span style="font-size:11px;color:{rsi_c}">{v_rsi}</span></span></td>
-  <td><span style="display:inline-flex;align-items:center;gap:4px">{g_vol}<span style="font-size:11px;color:{vol_c}">{v_vol}</span></span></td>
-  <td style="text-align:center">{g_vap}</td>
-  <td style="text-align:center">{g_sec}<span style="font-size:10px;color:#475569;margin-left:2px">{v_sec}</span></td>
+  <td style="font-weight:700;font-size:14px;color:{color};white-space:nowrap;padding:10px 12px">{sym}{bear_badge}</td>
+  <td style="color:#d0d8e0;font-size:13px;padding:10px 8px">{price_s}</td>
+  <td style="color:{cc};font-weight:700;font-size:13px;padding:10px 8px">{chg_s}{c["change"]:.2f}%</td>
+  <td style="text-align:center;padding:10px 6px"><span style="display:inline-flex;align-items:center;gap:5px">{g_scr}<span style="font-size:12px;font-weight:700;color:{scr_c}">{v_scr}</span></span></td>
+  <td style="text-align:center;padding:10px 6px"><span style="display:inline-flex;align-items:center;gap:5px">{g_ema}<span style="font-size:12px;color:{ema_c}">{v_ema}</span></span></td>
+  <td style="text-align:center;padding:10px 6px"><span style="display:inline-flex;align-items:center;gap:5px">{g_rsi}<span style="font-size:12px;color:{rsi_c}">{v_rsi}</span></span></td>
+  <td style="text-align:center;padding:10px 6px"><span style="display:inline-flex;align-items:center;gap:5px">{g_vol}<span style="font-size:12px;color:{vol_c}">{v_vol}</span></span></td>
+  <td style="text-align:center;padding:10px 6px">{g_vap}</td>
+  <td style="text-align:center;padding:10px 6px">{g_sec}<span style="font-size:11px;color:#8899aa;margin-left:3px">{v_sec}</span></td>
 </tr>
-<tr id="{rid}_detail" class="scan-row-desktop" style="display:none;background:rgba(255,255,255,0.02)">
-  <td colspan="9" style="padding:8px 16px;font-size:11px;color:#475569;border-bottom:1px solid rgba(255,255,255,0.04)">
-    Score {v_scr} · EMA {v_ema} · RSI {v_rsi} · Vol {v_vol} · VWAP {v_vap} · Sector {v_sec}{"&nbsp;&nbsp;<span style=\"color:#00ff88;font-weight:700\">✅ ALL GATES PASS</span>" if all_pass else ""}
+<tr id="{rid}_detail" class="scan-row-desktop" style="display:none;background:rgba(255,255,255,0.04)">
+  <td colspan="9" style="padding:12px 18px;font-size:13px;color:#b0bec5;border-bottom:1px solid rgba(255,255,255,0.06)">
+    Score <b style="color:#e0e0e0">{v_scr}</b> · EMA <b style="color:#e0e0e0">{v_ema}</b> · RSI <b style="color:#e0e0e0">{v_rsi}</b> · Vol <b style="color:#e0e0e0">{v_vol}</b> · VWAP <b style="color:#e0e0e0">{v_vap}</b> · Sector <b style="color:#e0e0e0">{v_sec}</b>{"&nbsp;&nbsp;<span style=\"color:#00ff88;font-weight:700\">✅ ALL GATES PASS — bot will execute</span>" if all_pass else ""}
   </td>
 </tr>
 <tr class="scan-row-mobile" onclick="toggleScan('{rid}_mob')" style="cursor:pointer;{row_glow}">
-  <td style="font-weight:700;color:{color};font-size:12px">{sym}</td>
-  <td style="font-size:11px;color:#e0e0e0">{price_s}</td>
-  <td style="font-size:11px;color:{cc}">{chg_s}{c["change"]:.1f}%</td>
-  <td style="text-align:center;padding:0 1px">{g_scr}</td>
-  <td style="text-align:center;padding:0 1px">{g_ema}</td>
-  <td style="text-align:center;padding:0 1px">{g_rsi}</td>
-  <td style="text-align:center;padding:0 1px">{g_vol}</td>
-  <td style="text-align:center;padding:0 1px">{g_vap}</td>
-  <td style="text-align:center;padding:0 1px">{g_sec}</td>
+  <td style="font-weight:700;color:{color};font-size:13px;padding:9px 6px">{sym}</td>
+  <td style="font-size:12px;color:#d0d8e0;padding:9px 4px">{price_s}</td>
+  <td style="font-size:12px;color:{cc};padding:9px 4px">{chg_s}{c["change"]:.1f}%</td>
+  <td style="text-align:center;padding:9px 2px">{g_scr}</td>
+  <td style="text-align:center;padding:9px 2px">{g_ema}</td>
+  <td style="text-align:center;padding:9px 2px">{g_rsi}</td>
+  <td style="text-align:center;padding:9px 2px">{g_vol}</td>
+  <td style="text-align:center;padding:9px 2px">{g_vap}</td>
+  <td style="text-align:center;padding:9px 2px">{g_sec}</td>
 </tr>
-<tr id="{rid}_mob_detail" class="scan-row-mobile" style="display:none;background:rgba(255,255,255,0.02)">
-  <td colspan="9" style="padding:6px 10px;font-size:10px;color:#475569">
-    SCR:{v_scr} · EMA:{v_ema} · RSI:{v_rsi} · Vol:{v_vol} · VAP:{v_vap} · Sec:{v_sec}
+<tr id="{rid}_mob_detail" class="scan-row-mobile" style="display:none;background:rgba(255,255,255,0.04)">
+  <td colspan="9" style="padding:10px 12px;font-size:12px;color:#b0bec5">
+    SCR:<b style="color:#e0e0e0">{v_scr}</b> · EMA:<b style="color:#e0e0e0">{v_ema}</b> · RSI:<b style="color:#e0e0e0">{v_rsi}</b> · Vol:<b style="color:#e0e0e0">{v_vol}</b> · VAP:<b style="color:#e0e0e0">{v_vap}</b> · Sec:<b style="color:#e0e0e0">{v_sec}</b>{"<span style=\"color:#00ff88;font-weight:700\"> ✅</span>" if all_pass else ""}
   </td>
 </tr>"""
                 return rows
 
-            thead = ('<div style="overflow-x:auto"><table class="scan-table"><thead>'
-                     '<tr class="scan-row-desktop"><th>Symbol</th><th>Price</th><th>Chg%</th>'
-                     '<th>SCR</th><th>EMA</th><th>RSI</th><th>VOL</th><th>VAP</th><th>SEC</th></tr>'
-                     '<tr class="scan-row-mobile" style="font-size:10px;color:#475569">'
+            scanner_css_mkt = """<style>
+@media(min-width:600px){.scan-row-mobile{display:none!important}}
+@media(max-width:599px){.scan-row-desktop{display:none!important}}
+</style>"""
+            thead = (scanner_css_mkt +
+                     '<div style="overflow-x:auto"><table class="scan-table"><thead>'
+                     '<tr class="scan-row-desktop"><th style="font-size:13px">Symbol</th><th style="font-size:13px">Price</th><th style="font-size:13px">Chg%</th>'
+                     '<th style="font-size:13px;text-align:center">SCR</th><th style="font-size:13px;text-align:center">EMA</th><th style="font-size:13px;text-align:center">RSI</th><th style="font-size:13px;text-align:center">VOL</th><th style="font-size:13px;text-align:center">VAP</th><th style="font-size:13px;text-align:center">SEC</th></tr>'
+                     '<tr class="scan-row-mobile" style="font-size:11px;color:#8899aa">'
                      '<th>SYM</th><th>PRICE</th><th>CHG</th>'
-                     '<th style="text-align:center">SCR</th><th style="text-align:center">EMA</th>'
-                     '<th style="text-align:center">RSI</th><th style="text-align:center">VOL</th>'
-                     '<th style="text-align:center">VAP</th><th style="text-align:center">SEC</th></tr>'
+                     '<th style="text-align:center">S</th><th style="text-align:center">E</th>'
+                     '<th style="text-align:center">R</th><th style="text-align:center">V</th>'
+                     '<th style="text-align:center">P</th><th style="text-align:center">X</th></tr>'
                      '</thead><tbody>')
             tfoot = '</tbody></table></div><script>function toggleScan(id){var d=document.getElementById(id+"_detail");if(d)d.style.display=d.style.display==="none"?"table-row":"none";}</script>'
             summary = (
