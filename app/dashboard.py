@@ -745,14 +745,29 @@ def build_dashboard():
     )
     if rtt_rows:
         ready_to_trade_html = (
-            f'<div class="card" style="margin-bottom:16px;border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.03)">' 
-            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' 
-            f'<div class="section-title" style="color:#00ff88;margin-bottom:0">🟢 READY TO TRADE</div>' 
-            f'<div style="font-size:13px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed — eligible for immediate execution</div>' 
+            f'<div class="card" style="margin-bottom:16px;border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.03)">'
+            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
+            f'<div class="section-title" style="color:#00ff88;margin-bottom:0">🟢 READY TO TRADE</div>'
+            f'<div style="font-size:13px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed — eligible for immediate execution</div>'
             f'</div>'
-            f'<div class="table-wrap"><table><thead><tr>'
-            f'<th>Symbol</th><th>Market</th><th>Price</th><th>Chg%</th><th>Signal</th><th>EMA Cross</th><th>RSI</th><th>Vol</th>'
-            f'</tr></thead><tbody>{rtt_rows}</tbody></table></div></div>'
+            f'<div style="display:grid;grid-template-columns:80px 70px 58px repeat(6,32px);'
+            f'gap:4px;padding:4px 12px 8px;font-size:10px;color:#475569;letter-spacing:0.5px;font-weight:700">'
+            f'<div>SYMBOL</div><div>PRICE</div><div>CHG%</div>'
+            f'<div style="text-align:center">SCR</div>'
+            f'<div style="text-align:center">EMA</div>'
+            f'<div style="text-align:center">RSI</div>'
+            f'<div style="text-align:center">VOL</div>'
+            f'<div style="text-align:center">VAP</div>'
+            f'<div style="text-align:center">SEC</div>'
+            f'</div>'
+            f'{rtt_rows}'
+            f'<script>'
+            f'function toggleRTT(id){{'
+            f'  var d=document.getElementById(id+"_detail");'
+            f'  d.style.display=d.style.display==="none"?"block":"none";'
+            f'}}'
+            f'</script>'
+            f'</div>'
         )
     else:
         ready_to_trade_html = (
