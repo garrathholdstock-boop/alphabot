@@ -49,7 +49,7 @@ from core.execution import (
     ibkr_get_account, ibkr_get_positions, ibkr_get_open_orders, fetch_bars, fetch_bars_batch,
     fetch_latest_price, fetch_intraday_bars, fetch_intraday_bars_batch,
     place_order,
-    update_exchange_stop, binance_get_top_coins, update_live_prices, update_live_prices,
+    update_exchange_stop, binance_get_top_coins, update_live_prices,
 )
 from core.risk import (
     total_exposure, all_positions_count, all_symbols_held, sectors_held,
@@ -128,7 +128,7 @@ def should_refresh_smallcap():
 def check_intraday_positions(st, crypto=False):
     sl_pct = CRYPTO_INTRADAY_SL if crypto else INTRADAY_STOP_LOSS
     tp_pct = CRYPTO_INTRADAY_TP if crypto else INTRADAY_TAKE_PROFIT
-    now    = datetime.now()
+    now    = datetime.now(ZoneInfo("UTC"))
     for sym, pos in list(st.positions.items()):
         live = fetch_latest_price(sym, crypto=crypto)
         if not live: continue
@@ -148,7 +148,7 @@ def check_intraday_positions(st, crypto=False):
         if reason:
             pnl      = (live - entry) * pos["qty"]
             entry_ts = pos.get("entry_ts")
-            hold_hours = round((now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
+            hold_hours = round((now - datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")) if datetime.fromisoformat(entry_ts).tzinfo is None else now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
             log.info(f"[{st.label}] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
             place_order(sym, "sell", pos["qty"], crypto=crypto)
             del st.positions[sym]
@@ -249,7 +249,7 @@ def run_cycle(watchlist, st, crypto=False):
                 if not held_cand: continue
                 entry_ts = held_pos.get("entry_ts")
                 if not entry_ts: continue
-                hold_mins = (datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 60
+                hold_mins = (datetime.now(ZoneInfo("UTC")) - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 60
                 ep = held_pos.get("entry_price", 0)
                 cp = held_cand["price"]
                 flat_pct = abs((cp - ep) / ep * 100) if ep else 99
@@ -263,7 +263,7 @@ def run_cycle(watchlist, st, crypto=False):
                 ep = stale_pos.get("entry_price", 0)
                 cp = stale_price
                 flat_pct = abs((cp - ep) / ep * 100) if ep else 0
-                hold_mins = (datetime.now() - datetime.fromisoformat(stale_pos.get("entry_ts",""))).total_seconds() / 60 if stale_pos.get("entry_ts") else 0
+                hold_mins = (datetime.now(ZoneInfo("UTC")) - (_ts2 if (_ts2 := datetime.fromisoformat(stale_pos.get("entry_ts","2000-01-01T00:00:00+00:00"))).tzinfo else _ts2.replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 60 if stale_pos.get("entry_ts") else 0
                 log.info(f"[{st.label}] ⏱ STALE EXIT: {stale_sym} flat {flat_pct:.2f}% after {hold_mins:.0f}min → freeing slot for {s['symbol']} (score {sig_score:.1f})")
                 ord_st, st_price = place_order(stale_sym, "sell", stale_pos["qty"], crypto=crypto, estimated_price=stale_price)
                 if ord_st:
@@ -284,7 +284,7 @@ def run_cycle(watchlist, st, crypto=False):
             worst_hold_mins = 0
             if worst_pos and worst_pos.get("entry_ts"):
                 try:
-                    worst_hold_mins = (datetime.now() - datetime.fromisoformat(worst_pos["entry_ts"])).total_seconds() / 60
+                    worst_hold_mins = (datetime.now(ZoneInfo("UTC")) - (_ts3 if (_ts3 := datetime.fromisoformat(worst_pos["entry_ts"])).tzinfo else _ts3.replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 60
                 except:
                     worst_hold_mins = 999
 
@@ -407,7 +407,7 @@ def run_cycle(watchlist, st, crypto=False):
         if s["signal"] != "SELL" or s["symbol"] not in st.positions: continue
         pos = st.positions[s["symbol"]]
         entry_ts   = pos.get("entry_ts")
-        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
+        hold_hours = round((datetime.now(ZoneInfo("UTC")) - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 3600, 1) if entry_ts else None
 
         if not crypto and s["symbol"] in exchange_stops:
             exchange_stops.pop(s["symbol"], None)
@@ -460,7 +460,7 @@ def run_cycle_smallcap(watchlist, st):
     for sym, pos in list(st.positions.items()):
         live = fetch_latest_price(sym)
         if not live: continue
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("UTC"))
         if live > pos.get("highest_price", pos["entry_price"]):
             pos["highest_price"] = live
             new_stop = live * (1 - SMALLCAP_STOP_LOSS / 100)
@@ -474,7 +474,7 @@ def run_cycle_smallcap(watchlist, st):
         if reason:
             pnl      = (live - pos["entry_price"]) * pos["qty"]
             entry_ts = pos.get("entry_ts")
-            hold_hours = round((now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
+            hold_hours = round((now - datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")) if datetime.fromisoformat(entry_ts).tzinfo is None else now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
             log.info(f"[SMALLCAP] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
             place_order(sym, "sell", pos["qty"])
             del st.positions[sym]
@@ -542,7 +542,7 @@ def run_cycle_smallcap(watchlist, st):
         pos = st.positions[s["symbol"]]
         pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
         entry_ts = pos.get("entry_ts")
-        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
+        hold_hours = round((datetime.now(ZoneInfo("UTC")) - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 3600, 1) if entry_ts else None
         log.info(f"[SMALLCAP] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
         place_order(s["symbol"], "sell", pos["qty"])
         del st.positions[s["symbol"]]
@@ -646,7 +646,7 @@ def run_intraday_cycle(watchlist, st):
         pos = st.positions[s["symbol"]]
         pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
         entry_ts   = pos.get("entry_ts")
-        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
+        hold_hours = round((datetime.now(ZoneInfo("UTC")) - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 3600, 2) if entry_ts else None
         log.info(f"[INTRADAY] SELL {s['symbol']} @ ${s['price']:.2f} P&L:${pnl:+.2f}")
         place_order(s["symbol"], "sell", pos["qty"])
         del st.positions[s["symbol"]]
@@ -742,7 +742,7 @@ def run_crypto_intraday_cycle(watchlist, st):
         pos = st.positions[s["symbol"]]
         pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
         entry_ts   = pos.get("entry_ts")
-        hold_hours = round((datetime.now() - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 2) if entry_ts else None
+        hold_hours = round((datetime.now(ZoneInfo("UTC")) - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 3600, 2) if entry_ts else None
         order_sell, sell_price = place_order(s["symbol"], "sell", pos["qty"], crypto=True, estimated_price=s["price"])
         pnl = (sell_price - pos["entry_price"]) * pos["qty"]
         log.info(f"[CRYPTO_ID] SELL {s['symbol']} @ ${sell_price:.4f} P&L:${pnl:+.2f}")
@@ -937,6 +937,57 @@ def main():
                     json.dump(snap, _f)
             except Exception as _e:
                 log.warning(f"[SNAPSHOT] {_e}")
+
+            # Write status snapshot for dashboard (separate process)
+            try:
+                status_snap = {
+                    "cycle": cycle,
+                    "timestamp": datetime.now(ZoneInfo("UTC")).isoformat(),
+                    "account": cfg.account_info or {},
+                    "market_regime": {
+                        "mode": market_regime.get("mode", "BULL"),
+                        "spy_price": market_regime.get("spy_price"),
+                        "spy_ma20": market_regime.get("spy_ma20"),
+                        "vix": market_regime.get("vix"),
+                    },
+                    "crypto_regime": {
+                        "mode": crypto_regime.get("mode", "BULL"),
+                        "btc_price": crypto_regime.get("btc_price"),
+                        "btc_change": crypto_regime.get("btc_change"),
+                    },
+                    "asx_regime": {
+                        "mode": asx_regime.get("mode", "BULL"),
+                        "spy": asx_regime.get("spy"),
+                    },
+                    "ftse_regime": {
+                        "mode": ftse_regime.get("mode", "BULL"),
+                        "spy": ftse_regime.get("spy"),
+                    },
+                    "states": {
+                        "us": {"cycle": state.cycle_count, "pnl": state.daily_pnl, "positions": len(state.positions), "running": state.running, "shutoff": state.shutoff},
+                        "crypto": {"cycle": crypto_state.cycle_count, "pnl": crypto_state.daily_pnl, "positions": len(crypto_state.positions), "running": crypto_state.running, "shutoff": crypto_state.shutoff},
+                        "asx": {"cycle": asx_state.cycle_count, "pnl": asx_state.daily_pnl, "positions": len(asx_state.positions), "running": asx_state.running, "shutoff": asx_state.shutoff},
+                        "ftse": {"cycle": ftse_state.cycle_count, "pnl": ftse_state.daily_pnl, "positions": len(ftse_state.positions), "running": ftse_state.running, "shutoff": ftse_state.shutoff},
+                        "smallcap": {"cycle": smallcap_state.cycle_count, "pnl": smallcap_state.daily_pnl, "positions": len(smallcap_state.positions), "running": smallcap_state.running, "shutoff": smallcap_state.shutoff},
+                        "intraday": {"cycle": intraday_state.cycle_count, "pnl": intraday_state.daily_pnl, "positions": len(intraday_state.positions), "running": intraday_state.running, "shutoff": intraday_state.shutoff},
+                        "crypto_id": {"cycle": crypto_intraday_state.cycle_count, "pnl": crypto_intraday_state.daily_pnl, "positions": len(crypto_intraday_state.positions), "running": crypto_intraday_state.running, "shutoff": crypto_intraday_state.shutoff},
+                    },
+                    "candidates": {
+                        "us": state.candidates[:50],
+                        "crypto": crypto_intraday_state.candidates[:50],
+                        "asx": asx_state.candidates[:50],
+                        "ftse": ftse_state.candidates[:50],
+                        "smallcap": smallcap_state.candidates[:50],
+                    },
+                    "kill_switch": kill_switch,
+                    "circuit_breaker": circuit_breaker,
+                    "global_risk": {k: str(v) if hasattr(v, "strftime") else v for k, v in global_risk.items()},
+                    "perf": {k: v for k, v in perf.items() if k != "sharpe_daily"},
+                }
+                with open("/home/alphabot/app/status.json", "w") as _sf:
+                    json.dump(status_snap, _sf, default=str)
+            except Exception as _se:
+                log.warning(f"[STATUS] {_se}")
 
             # ── Dynamic limit scaling from live balances ──
             if cfg.account_info:
