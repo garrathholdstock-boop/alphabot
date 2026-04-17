@@ -102,6 +102,27 @@ def _db_recent_trades(limit=10):
         return []
 
 
+
+# ═══════════════════════════════════════════════════════════════
+# STATUS SNAPSHOT LOADER (reads from bot process via file)
+# ═══════════════════════════════════════════════════════════════
+_status_cache = {}
+
+def _load_status():
+    """Load status.json written by bot process every cycle."""
+    global _status_cache
+    try:
+        with open("/home/alphabot/app/status.json") as f:
+            _status_cache = json.load(f)
+    except:
+        pass
+    return _status_cache
+
+def _st(market):
+    """Get state dict for a market from status snapshot."""
+    return _load_status().get("states", {}).get(market, {})
+
+
 # ═══════════════════════════════════════════════════════════════
 # SHARED CSS + FONTS
 # ═══════════════════════════════════════════════════════════════
@@ -181,7 +202,21 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 # BUILD DASHBOARD HTML
 # ═══════════════════════════════════════════════════════════════
 def build_dashboard():
-    acc = cfg.account_info
+    # Load live status from bot process (written every cycle via status.json)
+    st_data = _load_status()
+    st_states = st_data.get("states", {})
+    st_regime = st_data.get("market_regime", {})
+    st_crypto_regime = st_data.get("crypto_regime", {})
+    st_asx_regime = st_data.get("asx_regime", {})
+    st_ftse_regime = st_data.get("ftse_regime", {})
+    st_account = st_data.get("account", cfg.account_info or {})
+    st_kill = st_data.get("kill_switch", kill_switch)
+    st_circuit = st_data.get("circuit_breaker", circuit_breaker)
+    st_candidates = st_data.get("candidates", {})
+    st_global_risk = st_data.get("global_risk", global_risk)
+    st_perf = st_data.get("perf", perf)
+
+    acc = st_account
     port_val = float(acc.get("portfolio_value", 1000000)) if acc else 1000000
     portfolio = f"${port_val:,.2f}"
     now_paris = datetime.now(PARIS)
@@ -198,10 +233,10 @@ def build_dashboard():
         diff = cur - prev
         return (f'<span style="color:#00ff88;font-size:11px">▲ {abs(diff):.1f}% vs prior</span>'
                 if diff >= 0 else f'<span style="color:#ff4466;font-size:11px">▼ {abs(diff):.1f}% vs prior</span>')
-    def _dot(st): return "dot-red" if st.shutoff else ("dot-green" if st.running else "dot-gold")
-    def _status(st): return "Shut Off" if st.shutoff else ("Running" if st.running else "Idle")
-    def _pnl(st): return _fmt(st.daily_pnl)
-    def _pnlc(st): return _col(st.daily_pnl)
+    def _dot(st): return "dot-red" if st.get("shutoff") else ("dot-green" if st.get("running") else "dot-gold")
+    def _status(st): return "Shut Off" if st.get("shutoff") else ("Running" if st.get("running") else "Idle")
+    def _pnl(st): return _fmt(st.get("pnl", 0.0))
+    def _pnlc(st): return _col(st.get("pnl", 0.0))
 
     # ── Period P&L ──
     today_str = date.today().isoformat()
@@ -245,7 +280,7 @@ def build_dashboard():
     total_t, total_pnl_db, wins_db, losses_db, avg_sc_db = _db_all_time_stats()
     win_rate = int(wins_db/total_t*100) if total_t else 0
     wr_color = "#00ff88" if win_rate >= 55 else ("#ffcc00" if win_rate >= 45 else "#ff4466")
-    max_dd = round(perf["max_drawdown"], 1)
+    max_dd = round(st_perf.get("max_drawdown", 0.0), 1)
     dd_color = "#00ff88" if max_dd < 5 else ("#ffcc00" if max_dd < 10 else "#ff4466")
     pf = calc_profit_factor()
     pf_str = f"{pf:.2f}" if pf != float("inf") else "∞"
@@ -255,7 +290,7 @@ def build_dashboard():
     sharpe_color = "#00ff88" if (sharpe_v and sharpe_v >= 1.0) else ("#ffcc00" if (sharpe_v and sharpe_v >= 0.5) else "#888")
     loss_streak = global_risk["loss_streak"]
     streak_color = "#ff4466" if loss_streak >= LOSS_STREAK_LIMIT else ("#ffcc00" if loss_streak >= 2 else "#00ff88")
-    vix_v = global_risk.get("vix_level")
+    vix_v = st_global_risk.get("vix_level")
     vix_str_val = f"{vix_v:.1f}" if vix_v else "—"
     vix_color = "#ff4466" if (vix_v and vix_v >= VIX_EXTREME) else ("#ffcc00" if (vix_v and vix_v >= VIX_HIGH_THRESHOLD) else "#00ff88")
     size_mult = round(vol_adjusted_size(1.0), 2)
@@ -264,46 +299,46 @@ def build_dashboard():
     pause_status = pause_until.strftime("%H:%M") if pause_until and datetime.now() < pause_until else "None"
 
     # ── Market regime ──
-    regime = market_regime["mode"]
-    c_regime = crypto_regime["mode"]
+    regime = st_regime.get("mode", "BULL")
+    c_regime = st_crypto_regime.get("mode", "BULL")
     regime_color = "#00ff88" if regime == "BULL" else "#ff4466"
     c_regime_color = "#00ff88" if c_regime == "BULL" else "#ff4466"
-    spy_str = f"${market_regime['spy_price']:.2f}" if market_regime["spy_price"] else "N/A"
-    spy_ma = f"${market_regime['spy_ma20']:.2f}" if market_regime["spy_ma20"] else "N/A"
-    vix_regime = f"{market_regime['vix']:.1f}" if market_regime["vix"] else "N/A"
-    btc_str = f"${crypto_regime['btc_price']:.0f}" if crypto_regime["btc_price"] else "N/A"
-    btc_chg = crypto_regime.get("btc_change")
+    spy_str = f"${st_regime['spy_price']:.2f}" if st_regime.get("spy_price") else "N/A"
+    spy_ma = f"${st_regime['spy_ma20']:.2f}" if st_regime.get("spy_ma20") else "N/A"
+    vix_regime = f"{st_regime['vix']:.1f}" if st_regime.get("vix") else "N/A"
+    btc_str = f"${st_crypto_regime['btc_price']:.0f}" if st_crypto_regime.get("btc_price") else "N/A"
+    btc_chg = st_crypto_regime.get("btc_change")
     btc_chg_str = f"{btc_chg:+.1f}%" if btc_chg is not None else "N/A"
     btc_chg_col = "#ff4466" if btc_chg and btc_chg < -BTC_CRASH_PCT else "#e0e0e0"
 
     from app.main import is_asx_open, is_ftse_open
     asx_open = is_asx_open(); ftse_open = is_ftse_open()
     market_open = is_market_open()
-    asx_mode = asx_regime.get("mode","BULL"); ftse_mode = ftse_regime.get("mode","BULL")
+    asx_mode = st_asx_regime.get("mode","BULL"); ftse_mode = st_ftse_regime.get("mode","BULL")
     asx_col = "#ffaa00" if asx_mode=="BULL" else "#ff4466"
     ftse_col = "#cc88ff" if ftse_mode=="BULL" else "#ff4466"
-    asx_cba = f"${asx_regime['spy']:.2f}" if asx_regime.get("spy") else "N/A"
-    ftse_hsba = f"${ftse_regime['spy']:.2f}" if ftse_regime.get("spy") else "N/A"
+    asx_cba = f"${st_asx_regime['spy']:.2f}" if st_asx_regime.get("spy") else "N/A"
+    ftse_hsba = f"${st_ftse_regime['spy']:.2f}" if st_ftse_regime.get("spy") else "N/A"
 
     # ── Kill/circuit banners ──
     kill_banner = ""
-    if kill_switch["active"]:
+    if st_kill.get("active"):
         kill_banner = (
             f'<div style="background:rgba(255,68,102,0.15);border:2px solid #ff4466;border-radius:12px;'
             f'padding:16px 22px;margin-bottom:16px;display:flex;align-items:center;gap:14px">'
             f'<span style="font-size:28px">🛑</span>'
             f'<div><div style="font-size:17px;font-weight:700;color:#ff4466">KILL SWITCH ACTIVE — All bots stopped</div>'
-            f'<div style="font-size:13px;color:#888;margin-top:3px">{kill_switch["reason"]} · {kill_switch["activated_at"]}</div>'
+            f'<div style="font-size:13px;color:#888;margin-top:3px">{st_kill.get("reason","")} · {st_kill.get("activated_at","")}</div>'
             f'</div></div>'
         )
     circuit_banner = ""
-    if circuit_breaker["active"]:
+    if st_circuit.get("active"):
         circuit_banner = (
             f'<div style="background:rgba(255,68,102,0.12);border:2px solid #ff4466;border-radius:12px;'
             f'padding:16px 22px;margin-bottom:16px;display:flex;align-items:center;gap:14px">'
             f'<span style="font-size:28px">🚨</span>'
             f'<div><div style="font-size:17px;font-weight:700;color:#ff4466">CIRCUIT BREAKER — All buys paused</div>'
-            f'<div style="font-size:13px;color:#888;margin-top:3px">{circuit_breaker["reason"]}</div>'
+            f'<div style="font-size:13px;color:#888;margin-top:3px">{st_circuit.get("reason","")}</div>'
             f'</div></div>'
         )
 
@@ -527,11 +562,11 @@ def build_dashboard():
         out.sort(key=lambda x: -x[0])
         return out
 
-    us_scored     = score_candidates(state.candidates)
-    crypto_scored = score_candidates(crypto_intraday_state.candidates)
-    asx_scored    = score_candidates(asx_state.candidates)
-    ftse_scored   = score_candidates(ftse_state.candidates)
-    sc_scored     = score_candidates(smallcap_state.candidates)
+    us_scored     = score_candidates(st_candidates.get("us", []))
+    crypto_scored = score_candidates(st_candidates.get("crypto", []))
+    asx_scored    = score_candidates(st_candidates.get("asx", []))
+    ftse_scored   = score_candidates(st_candidates.get("ftse", []))
+    sc_scored     = score_candidates(st_candidates.get("smallcap", []))
 
     # ── READY TO TRADE screener — signals that qualify RIGHT NOW ──
     def ready_to_trade_rows(scored, color, label):
@@ -752,17 +787,18 @@ def build_dashboard():
   <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
     <div style="text-align:right">
       <div style="font-size:11px;color:#00aaff;letter-spacing:1px">US P&L</div>
-      <div style="font-size:15px;font-weight:700;color:{_col(state.daily_pnl)}">{_pnl(state)}</div>
+      <div style="font-size:15px;font-weight:700;color:{_col(st_states.get('us',{}).get('pnl',0))}">{_fmt(st_states.get('us',{}).get('pnl',0))}</div>
     </div>
     <div style="text-align:right">
       <div style="font-size:11px;color:#00ff88;letter-spacing:1px">Crypto P&L</div>
-      <div style="font-size:15px;font-weight:700;color:{_col(crypto_state.daily_pnl)}">{_pnl(crypto_state)}</div>
+      <div style="font-size:15px;font-weight:700;color:{_col(st_states.get('crypto',{}).get('pnl',0))}">{_fmt(st_states.get('crypto',{}).get('pnl',0))}</div>
     </div>
     <div style="text-align:right">
       <div style="font-size:11px;color:#475569;letter-spacing:1px">Portfolio</div>
       <div style="font-size:15px;font-weight:700;color:#00aaff">{portfolio}</div>
     </div>
     <a href="/analytics" style="padding:8px 16px;border-radius:8px;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">🧠 ANALYTICS</a>
+    <div style="font-size:12px;color:#475569">Cycle #{st_data.get('cycle', 0)}</div>
     <div style="font-size:12px;color:#475569" id="refresh-timer">↻ 60s</div>
   </div>
 </div>
@@ -888,11 +924,11 @@ function pinCmd(path,label){{
       <div style="font-size:18px;font-weight:700;color:{regime_color}">{'🐂' if regime=='BULL' else '🐻'} {regime}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot {_dot(state)}"></span>{_status(state)}</div>
+      <div><span style="color:#475569">Status </span><span class="dot {_dot(st_states.get('us',{}))}"></span>{_status(st_states.get('us',{}))}</div>
       <div><span style="color:#475569">SPY </span><b>{spy_str}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{state.cycle_count}</div>
+      <div><span style="color:#475569">Cycle </span>#{st_states.get('us',{}).get('cycle',0)}</div>
       <div><span style="color:#475569">MA20 </span><span style="color:#777">{spy_ma}</span></div>
-      <div><span style="color:#475569">Positions </span><b>{len(state.positions)}</b></div>
+      <div><span style="color:#475569">Positions </span><b>{st_states.get('us',{}).get('positions',0)}</b></div>
       <div><span style="color:#475569">VIX </span><span style="color:{vix_color}">{vix_regime}</span></div>
     </div>
   </div>
@@ -902,11 +938,11 @@ function pinCmd(path,label){{
       <div style="font-size:18px;font-weight:700;color:{c_regime_color}">{'🐂' if c_regime=='BULL' else '🐻'} {c_regime}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot {_dot(crypto_state)}"></span>{_status(crypto_state)}</div>
+      <div><span style="color:#475569">Status </span><span class="dot {_dot(st_states.get('crypto',{}))}"></span>{_status(st_states.get('crypto',{}))}</div>
       <div><span style="color:#475569">BTC </span><b>{btc_str}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{crypto_state.cycle_count}</div>
+      <div><span style="color:#475569">Cycle </span>#{st_states.get('crypto',{}).get('cycle',0)}</div>
       <div><span style="color:#475569">Chg </span><span style="color:{btc_chg_col}">{btc_chg_str}</span></div>
-      <div><span style="color:#475569">Positions </span><b>{len(crypto_state.positions)}</b></div>
+      <div><span style="color:#475569">Positions </span><b>{st_states.get('crypto',{}).get('positions',0)}</b></div>
       <div><span style="color:#475569">Testnet </span><span style="color:#ffcc00">{'YES' if BINANCE_USE_TESTNET else 'LIVE'}</span></div>
     </div>
   </div>
@@ -918,8 +954,8 @@ function pinCmd(path,label){{
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
       <div><span style="color:#475569">Market </span><span style="color:{'#ffaa00' if asx_open else '#475569'};font-weight:700">{'OPEN' if asx_open else 'CLOSED'}</span></div>
       <div><span style="color:#475569">CBA </span><b>{asx_cba}</b></div>
-      <div><span style="color:#475569">Positions </span><b>{len(asx_state.positions)}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{asx_state.cycle_count}</div>
+      <div><span style="color:#475569">Positions </span><b>{st_states.get('asx',{}).get('positions',0)}</b></div>
+      <div><span style="color:#475569">Cycle </span>#{st_states.get('asx',{}).get('cycle',0)}</div>
     </div>
   </div>
   <div class="card" style="border-color:rgba(204,136,255,0.25)">
@@ -930,8 +966,8 @@ function pinCmd(path,label){{
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
       <div><span style="color:#475569">Market </span><span style="color:{'#cc88ff' if ftse_open else '#475569'};font-weight:700">{'OPEN' if ftse_open else 'CLOSED'}</span></div>
       <div><span style="color:#475569">HSBA </span><b>{ftse_hsba}</b></div>
-      <div><span style="color:#475569">Positions </span><b>{len(ftse_state.positions)}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{ftse_state.cycle_count}</div>
+      <div><span style="color:#475569">Positions </span><b>{st_states.get('ftse',{}).get('positions',0)}</b></div>
+      <div><span style="color:#475569">Cycle </span>#{st_states.get('ftse',{}).get('cycle',0)}</div>
     </div>
   </div>
 </div>
@@ -941,19 +977,19 @@ function pinCmd(path,label){{
   <div class="card" style="border-color:rgba(255,204,0,0.2)">
     <div style="font-size:16px;font-weight:700;color:#ffcc00;margin-bottom:10px">📊 Small Cap</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot {_dot(smallcap_state)}"></span>{_status(smallcap_state)}</div>
-      <div><span style="color:#475569">Pool </span>{len(smallcap_pool.get("symbols",[]))}</div>
-      <div><span style="color:#475569">Positions </span><b>{len(smallcap_state.positions)}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{smallcap_state.cycle_count}</div>
+      <div><span style="color:#475569">Status </span><span class="dot {_dot(st_states.get('smallcap',{}))}"></span>{_status(st_states.get('smallcap',{}))}</div>
+      <div><span style="color:#475569">Pool </span>{len(smallcap_pool.get('symbols',[]))}</div>
+      <div><span style="color:#475569">Positions </span><b>{st_states.get('smallcap',{}).get('positions',0)}</b></div>
+      <div><span style="color:#475569">Cycle </span>#{st_states.get('smallcap',{}).get('cycle',0)}</div>
     </div>
   </div>
   <div class="card" style="border-color:rgba(170,136,255,0.2)">
     <div style="font-size:16px;font-weight:700;color:#aa88ff;margin-bottom:10px">⚡ Intraday</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Stocks </span><span class="dot {_dot(intraday_state)}"></span>{_status(intraday_state)}</div>
-      <div><span style="color:#475569">ID Cycle </span>#{intraday_state.cycle_count}</div>
-      <div><span style="color:#475569">ID Pos </span>{len(intraday_state.positions)}</div>
-      <div><span style="color:#475569">Crypto </span><span class="dot {_dot(crypto_intraday_state)}"></span>{_status(crypto_intraday_state)}</div>
+      <div><span style="color:#475569">Stocks </span><span class="dot {_dot(st_states.get('intraday',{}))}"></span>{_status(st_states.get('intraday',{}))}</div>
+      <div><span style="color:#475569">ID Cycle </span>#{st_states.get('intraday',{}).get('cycle',0)}</div>
+      <div><span style="color:#475569">ID Pos </span>{st_states.get('intraday',{}).get('positions',0)}</div>
+      <div><span style="color:#475569">Crypto </span><span class="dot {_dot(st_states.get('crypto_id',{}))}"></span>{_status(st_states.get('crypto_id',{}))}</div>
     </div>
   </div>
 </div>
