@@ -392,6 +392,55 @@ BINANCE_HEADERS = {"X-MBX-APIKEY": _BIN_KEY}
 
 # ── Database path ─────────────────────────────────────────────
 DB_PATH = "/home/alphabot/app/alphabot.db"
+CONFIG_JSON_PATH = "/home/alphabot/app/trading_config.json"
+
+# ── Hot-reload trading params from config.json ────────────────
+# Called at the start of each main cycle — changes apply within 60s
+import json as _json
+
+def load_trading_config():
+    """Read trading_config.json and apply values to module globals.
+    Called every main cycle so dashboard changes take effect without restart."""
+    global MIN_SIGNAL_SCORE, MAX_POSITIONS, MAX_TOTAL_POSITIONS, MAX_TRADES_PER_DAY
+    global CYCLE_SECONDS, STOP_LOSS_PCT, TRAILING_STOP_PCT, TAKE_PROFIT_PCT
+    global MAX_HOLD_DAYS, CRYPTO_STOP_PCT, INTRADAY_STOP_LOSS, INTRADAY_TAKE_PROFIT
+    global INTRADAY_MAX_POSITIONS, CRYPTO_INTRADAY_MAX_POS, CRYPTO_INTRADAY_SL, CRYPTO_INTRADAY_TP
+    global MAX_DAILY_LOSS_PCT, MAX_DAILY_SPEND_PCT, MAX_EXPOSURE_PCT, DAILY_PROFIT_TARGET_PCT
+    global MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT, MAX_SECTOR_POSITIONS
+    global LOSS_STREAK_LIMIT, VIX_HIGH_THRESHOLD, VIX_EXTREME
+    try:
+        with open(CONFIG_JSON_PATH) as f:
+            c = _json.load(f)
+        MIN_SIGNAL_SCORE          = int(c.get("MIN_SIGNAL_SCORE", MIN_SIGNAL_SCORE))
+        MAX_POSITIONS             = int(c.get("MAX_POSITIONS", MAX_POSITIONS))
+        MAX_TOTAL_POSITIONS       = int(c.get("MAX_TOTAL_POSITIONS", MAX_TOTAL_POSITIONS))
+        MAX_TRADES_PER_DAY        = int(c.get("MAX_TRADES_PER_DAY", MAX_TRADES_PER_DAY))
+        CYCLE_SECONDS             = int(c.get("CYCLE_SECONDS", CYCLE_SECONDS))
+        STOP_LOSS_PCT             = float(c.get("STOP_LOSS_PCT", STOP_LOSS_PCT))
+        TRAILING_STOP_PCT         = float(c.get("TRAILING_STOP_PCT", TRAILING_STOP_PCT))
+        TAKE_PROFIT_PCT           = float(c.get("TAKE_PROFIT_PCT", TAKE_PROFIT_PCT))
+        MAX_HOLD_DAYS             = int(c.get("MAX_HOLD_DAYS", MAX_HOLD_DAYS))
+        CRYPTO_STOP_PCT           = float(c.get("CRYPTO_STOP_PCT", CRYPTO_STOP_PCT))
+        INTRADAY_STOP_LOSS        = float(c.get("INTRADAY_STOP_LOSS", INTRADAY_STOP_LOSS))
+        INTRADAY_TAKE_PROFIT      = float(c.get("INTRADAY_TAKE_PROFIT", INTRADAY_TAKE_PROFIT))
+        INTRADAY_MAX_POSITIONS    = int(c.get("INTRADAY_MAX_POSITIONS", INTRADAY_MAX_POSITIONS))
+        CRYPTO_INTRADAY_MAX_POS   = int(c.get("CRYPTO_INTRADAY_MAX_POS", CRYPTO_INTRADAY_MAX_POS))
+        CRYPTO_INTRADAY_SL        = float(c.get("CRYPTO_INTRADAY_SL", CRYPTO_INTRADAY_SL))
+        CRYPTO_INTRADAY_TP        = float(c.get("CRYPTO_INTRADAY_TP", CRYPTO_INTRADAY_TP))
+        MAX_DAILY_LOSS_PCT        = float(c.get("MAX_DAILY_LOSS_PCT", MAX_DAILY_LOSS_PCT))
+        MAX_DAILY_SPEND_PCT       = float(c.get("MAX_DAILY_SPEND_PCT", MAX_DAILY_SPEND_PCT))
+        MAX_EXPOSURE_PCT          = float(c.get("MAX_EXPOSURE_PCT", MAX_EXPOSURE_PCT))
+        DAILY_PROFIT_TARGET_PCT   = float(c.get("DAILY_PROFIT_TARGET_PCT", DAILY_PROFIT_TARGET_PCT))
+        MAX_TRADE_PCT             = float(c.get("MAX_TRADE_PCT", MAX_TRADE_PCT))
+        CRYPTO_EXPOSURE_PCT       = float(c.get("CRYPTO_EXPOSURE_PCT", CRYPTO_EXPOSURE_PCT))
+        MAX_SECTOR_POSITIONS      = int(c.get("MAX_SECTOR_POSITIONS", MAX_SECTOR_POSITIONS))
+        LOSS_STREAK_LIMIT         = int(c.get("LOSS_STREAK_LIMIT", LOSS_STREAK_LIMIT))
+        VIX_HIGH_THRESHOLD        = float(c.get("VIX_HIGH_THRESHOLD", VIX_HIGH_THRESHOLD))
+        VIX_EXTREME               = float(c.get("VIX_EXTREME", VIX_EXTREME))
+    except FileNotFoundError:
+        pass  # config.json not yet created — use defaults
+    except Exception as e:
+        log.warning(f"[CONFIG] Failed to load trading_config.json: {e}")
 
 # ── Binance interval map ──────────────────────────────────────
 BINANCE_INTERVAL_MAP = {
