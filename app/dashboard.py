@@ -356,7 +356,7 @@ def build_dashboard():
     if all_pos:
         pos_rows = ""
         for idx,(sym,pos,cat_col,cat) in enumerate(all_pos):
-            live = cfg.live_prices.get(sym) or pos.get("highest_price", pos["entry_price"])
+            live = pos.get("_live") or pos.get("highest_price", pos["entry_price"])
             entry = pos["entry_price"]; qty = pos["qty"]
             pnl = (live-entry)*qty; pnl_pct = ((live-entry)/entry)*100
             pos_val = live*qty; pnl_c = "#00ff88" if pnl>=0 else "#ff4466"
