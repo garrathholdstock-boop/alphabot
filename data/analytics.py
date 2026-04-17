@@ -550,12 +550,12 @@ def fetch_near_miss_ohlc(symbol, from_date, days=5, crypto=False):
             return [{"o": float(k[1]), "h": float(k[2]),
                      "l": float(k[3]), "c": float(k[4])} for k in data]
         else:
-            from core.execution import alpaca_get
-            start_str = from_dt.strftime("%Y-%m-%dT00:00:00Z")
-            end_str   = end_dt.strftime("%Y-%m-%dT00:00:00Z")
-            resp = alpaca_get(f"/v2/stocks/{symbol}/bars?timeframe=1Day&start={start_str}&end={end_str}&limit={days+3}&feed=iex")
-            if resp and resp.get("bars"):
-                return [{"o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"]} for b in resp["bars"]]
+            # Use IBKR fetch_bars for US stock near-miss OHLC simulation
+            from core.execution import fetch_bars
+            bars = fetch_bars(symbol, crypto=False)
+            if bars and len(bars) >= 2:
+                return [{"o": b.get("o", b["c"]), "h": b.get("h", b["c"]),
+                         "l": b.get("l", b["c"]), "c": b["c"]} for b in bars[-days:]]
         return []
     except Exception as e:
         log.debug(f"[NEAR MISS SIM] Failed to fetch OHLC for {symbol}: {e}")
