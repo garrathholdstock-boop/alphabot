@@ -257,7 +257,7 @@ def run_cycle(watchlist, st, crypto=False):
                     stale_price = cp
                     break
 
-            if stale_sym and not (worst_sym and score_gap >= 1.5 and worst_pct > 0.1):
+            if stale_sym and not (worst_sym and score_gap >= 1.5):
                 ep = stale_pos.get("entry_price", 0)
                 cp = stale_price
                 flat_pct = abs((cp - ep) / ep * 100) if ep else 0
