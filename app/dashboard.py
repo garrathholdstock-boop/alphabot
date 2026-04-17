@@ -190,7 +190,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 .controls-bar{background:#0d1117;border-bottom:1px solid rgba(255,255,255,0.06);padding:10px 28px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:73px;z-index:99}
 .ctrl-btn{padding:8px 18px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px}
 .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-@media(max-width:900px){
+@media(max-width:1024px){
   .grid5{grid-template-columns:1fr 1fr}
   .grid3{grid-template-columns:1fr}
   .grid2{grid-template-columns:1fr}
@@ -199,7 +199,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   table{min-width:500px;font-size:13px}
   th,td{padding:8px 10px}
 }
-@media(max-width:500px){
+@media(max-width:768px){
   .big{font-size:20px}
   .grid5{grid-template-columns:1fr 1fr}
   .grid2{grid-template-columns:1fr}
