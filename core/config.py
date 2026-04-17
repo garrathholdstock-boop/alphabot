@@ -265,7 +265,7 @@ SECTOR_MAP = {
     "TDOC":"BIOTECH","SDGR":"BIOTECH","RXRX":"BIOTECH","BEAM":"BIOTECH",
     "BTC/USD":"BTC","ETH/USD":"ETH","BTCUSDT":"BTC","ETHUSDT":"ETH",
 }
-MAX_SECTOR_POSITIONS = 1
+MAX_SECTOR_POSITIONS = 2
 
 # ── Shared bot state ──────────────────────────────────────────
 class BotState:
