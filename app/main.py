@@ -154,6 +154,9 @@ def check_intraday_positions(st, crypto=False):
             st.trades.insert(0, {"symbol": sym, "side": "SELL", "qty": pos["qty"],
                 "price": live, "pnl": pnl, "reason": f"[ID]{reason}",
                 "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
+            db_record_trade(sym, "SELL", pos["qty"], live, pnl,
+                pos.get("signal_score"), None, None, hold_hours,
+                f"[ID]{reason}", "", "crypto" if crypto else "stock")
             if st.daily_pnl <= -MAX_DAILY_LOSS:
                 st.shutoff = True
 
@@ -477,6 +480,8 @@ def run_cycle_smallcap(watchlist, st):
             st.trades.insert(0, {"symbol": sym, "side": "SELL", "qty": pos["qty"],
                 "price": live, "pnl": pnl, "reason": reason,
                 "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
+            db_record_trade(sym, "SELL", pos["qty"], live, pnl,
+                pos.get("signal_score"), None, None, hold_hours, reason, "", "stock")
             if st.daily_pnl <= -MAX_DAILY_LOSS: st.shutoff = True; break
     if st.shutoff: st.running = False; return
 
@@ -543,6 +548,8 @@ def run_cycle_smallcap(watchlist, st):
         st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
             "price": s["price"], "pnl": pnl, "reason": "Signal",
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+        db_record_trade(s["symbol"], "SELL", pos["qty"], s["price"], pnl,
+            pos.get("signal_score"), None, None, hold_hours, "Signal", "", "stock")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -645,6 +652,8 @@ def run_intraday_cycle(watchlist, st):
         st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
             "price": s["price"], "pnl": pnl, "reason": "[ID]Signal",
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+        db_record_trade(s["symbol"], "SELL", pos["qty"], s["price"], pnl,
+            pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "stock")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -740,6 +749,8 @@ def run_crypto_intraday_cycle(watchlist, st):
         st.trades.insert(0, {"symbol": s["symbol"], "side": "SELL", "qty": pos["qty"],
             "price": s["price"], "pnl": pnl, "reason": "[ID]Signal",
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+        db_record_trade(s["symbol"], "SELL", pos["qty"], sell_price, pnl,
+            pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "crypto")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
