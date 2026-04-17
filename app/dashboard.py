@@ -781,14 +781,11 @@ def build_dashboard():
         [(sym, pos, "purple","FTSE")    for sym, pos in ftse_state.positions.items()]
     )
     if all_pos:
-        from core.execution import fetch_latest_price
         rows = ""
         for idx, (sym, pos, color, category) in enumerate(all_pos):
             is_crypto = category in ("Crypto", "CrypID")
-            try:
-                live = fetch_latest_price(sym, crypto=is_crypto) or pos.get("highest_price", pos["entry_price"])
-            except:
-                live = pos.get("highest_price", pos["entry_price"])
+            # Use highest_price from state (updated by IBKR portfolio push) — no market data subscription needed
+            live = pos.get("highest_price", pos["entry_price"])
             entry      = pos["entry_price"]
             qty        = pos["qty"]
             total_val  = qty * live
