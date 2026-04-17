@@ -683,4 +683,21 @@ def place_order(symbol, side, qty, crypto=False, estimated_price=None, order_typ
         return result, fill_price
 
     except Exception as e:
+        log.error(f"[IBKR] place_order error: {e}")
+        record_api_failure("ibkr")
+        return None, estimated_price or 0
   
+
+def update_live_prices():
+    """Read current portfolio from IBKR and populate cfg.live_prices."""
+    ib = get_ib()
+    if not ib:
+        return
+    try:
+        for item in ib.portfolio():
+            sym = item.contract.symbol
+            price = item.marketPrice
+            if price and price > 0:
+                cfg.live_prices[sym] = float(price)
+    except Exception as e:
+        log.debug(f"[LIVE PRICES] update failed: {e}")
