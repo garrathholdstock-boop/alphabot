@@ -1369,11 +1369,15 @@ function showThinking() {{
   Auto-refreshes every 60s · <a href="http://178.104.170.58:8080" style="color:#1e1e2e;">Dashboard →</a>
 </div>
 <script>
-var _t=60;
-setInterval(function(){{
-  _t--;
-  if(_t<=0){{ window.location.reload(); }}
-}},1000);
+// Only auto-refresh on home page, not on result pages
+var _isResult = window.location.pathname.startsWith('/r/');
+if (!_isResult) {{
+  var _t=60;
+  setInterval(function(){{
+    _t--;
+    if(_t<=0){{ window.location.reload(); }}
+  }},1000);
+}}
 </script>
 </body>
 </html>"""
