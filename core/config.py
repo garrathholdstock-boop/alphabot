@@ -8,7 +8,8 @@ import time
 import logging
 import hashlib as _hashlib
 from datetime import datetime
-from dotenv import load_dotenv load_dotenv()
+from dotenv import load_dotenv 
+load_dotenv()
 
 try:
     from zoneinfo import ZoneInfo
