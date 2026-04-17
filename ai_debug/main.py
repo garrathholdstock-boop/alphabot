@@ -1048,33 +1048,44 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
             bg = {"P1":"rgba(239,68,68,0.06)","P2":"rgba(245,158,11,0.06)","P3":"rgba(255,255,255,0.02)"}.get(p,"")
             icon = {"P1":"🔴","P2":"🟡","P3":"🔵"}.get(p,"⚪")
             action = e.get("action_taken","")
-            action_html = f'<span style="color:#00ff88;font-size:9px;margin-left:6px;">→ {html.escape(action[:40])}</span>' if action else ""
+            action_html = f'<div style="color:#00ff88;font-size:11px;margin-top:2px;">→ {html.escape(action[:60])}</div>' if action else ""
             ts = e.get("created_at","")[:16].replace("T"," ")
+            ev_type = e.get("event_type","unknown")
             feed_rows += f'''
-            <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:{bg};border-left:2px solid {pc};margin-bottom:2px;border-radius:0 4px 4px 0;">
-              <span style="font-size:11px;flex-shrink:0;margin-top:1px;">{icon}</span>
-              <div style="flex:1;min-width:0;">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                  <span style="font-size:14px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:60])}</span>
-                  <span style="font-size:12px;color:#475569;white-space:nowrap;">{ts}</span>
+            <form method="POST" action="/event/investigate" style="margin:0;display:block;">
+              <input type="hidden" name="event_type" value="{ev_type}">
+              <input type="hidden" name="message" value="{html.escape(e.get('message',''))}">
+              <input type="hidden" name="detail" value="{html.escape(action)}">
+              <button type="submit" style="width:100%;background:none;border:none;padding:0;cursor:pointer;text-align:left;display:block;">
+                <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:{bg};border-left:3px solid {pc};margin-bottom:3px;border-radius:0 6px 6px 0;" onmouseover="this.style.opacity='0.75'" onmouseout="this.style.opacity='1'">
+                  <span style="font-size:16px;flex-shrink:0;">{icon}</span>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                      <span style="font-size:14px;color:#e2e8f0;font-weight:600;">{html.escape(e.get("message","")[:65])}</span>
+                      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                        <span style="font-size:11px;color:#475569;">{ts}</span>
+                        <span style="font-size:12px;color:{pc};font-weight:700;">→ Tap to investigate</span>
+                      </div>
+                    </div>
+                    {action_html}
+                  </div>
                 </div>
-                {action_html}
-              </div>
-            </div>'''
+              </button>
+            </form>'''
     else:
-        feed_rows = '<div style="text-align:center;padding:20px;color:#475569;font-size:11px;">No events logged yet — monitor running every 5 mins</div>'
+        feed_rows = '<div style="text-align:center;padding:24px;color:#475569;font-size:13px;">No events yet — monitor checks every 5 mins</div>'
 
     events_html = f"""
     <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">📡 Live Event Feed</div>
-        <div style="display:flex;gap:10px;font-size:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">📡 Live Event Feed <span style="font-size:11px;font-weight:400;color:#475569;text-transform:none;letter-spacing:0;">· tap any row to investigate</span></div>
+        <div style="display:flex;gap:12px;font-size:11px;">
           <span style="color:#ef4444;font-weight:700;">🔴 P1 Safety</span>
           <span style="color:#f59e0b;font-weight:700;">🟡 P2 Efficiency</span>
           <span style="color:#475569;font-weight:700;">🔵 P3 Bug</span>
         </div>
       </div>
-      <div style="max-height:240px;overflow-y:auto;">{feed_rows}</div>
+      <div style="max-height:320px;overflow-y:auto;">{feed_rows}</div>
     </div>"""
 
     # ── Trades table ──────────────────────────────────────────
@@ -1489,6 +1500,33 @@ async def queue_dismiss(item_id: str = Form("")):
                 item["status"] = "dismissed"
                 break
     return RedirectResponse("/", status_code=303)
+
+
+@app.post("/event/investigate")
+async def event_investigate(event_type: str = Form(""), message: str = Form(""), detail: str = Form("")):
+    """Launch a Claude debug session directly from a live event feed tap."""
+    q_map = {
+        "bot_down":           "Bot is down or was down recently. Diagnose and fix — check screen session and restart if needed.",
+        "binance_failing":    "Binance orders failing with -2010 (insufficient balance) or -1013 (lot size). Check BINANCE_SECRET in .env and diagnose the exact failure.",
+        "no_trades_90min":    "No trades in 90+ mins despite markets being open. Find the execution blocker — check regime, MIN_SIGNAL_SCORE, VWAP filter, position caps.",
+        "zero_scans":         "A market is open but showing 0 qualified signals every cycle. Diagnose why no stocks are qualifying — check signal scoring and market hours logic.",
+        "execution_block":    "Order execution is failing. Diagnose the place_order error — check IBKR connection and order parameters.",
+        "stop_not_firing":    "Position P&L suggests stop-loss may not be firing correctly. Check stop logic in main.py.",
+        "no_trades_90min":    "Markets open but no trades for 90+ minutes. Check: regime mode, MIN_SIGNAL_SCORE threshold, VWAP filter, position caps all full?",
+    }
+    question = q_map.get(event_type, f"Investigate this event: {message}. Detail: {detail}")
+    log, screen, db = get_bot_context()
+    context = load_context()
+    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nEVENT TRIGGERED: {message}\n\nPROBLEM: {question}"}]
+    response_text = call_claude(messages)
+    status, analysis, command, reason, ctx_update = parse_response(response_text)
+    steps = messages + [{"role": "assistant", "content": response_text}]
+    complete = status == "COMPLETE"
+    if complete and ctx_update:
+        update_context(ctx_update)
+    return store(dict(analysis=analysis, command=command, reason=reason, status=status,
+                      question=question, history=enc(steps), complete=complete, step_count=1,
+                      ctx_updated=bool(ctx_update and complete)))
 
 
 @app.post("/file")
