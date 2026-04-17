@@ -93,7 +93,7 @@ def _db_recent_trades(limit=10):
     try:
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute(
-            "SELECT symbol, pnl, side, created_at, score FROM trades "
+            "SELECT symbol, pnl, side, created_at, score, qty, price, hold_hours, market FROM trades "
             "WHERE side='SELL' ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         conn.close()
@@ -159,9 +159,20 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   th,td{padding:8px 10px}
 }
 @media(max-width:500px){
-  .big{font-size:22px}
+  .big{font-size:20px}
   .grid5{grid-template-columns:1fr 1fr}
-  table{font-size:12px}
+  .grid2{grid-template-columns:1fr}
+  .container{padding:8px}
+  .header{padding:10px 12px;gap:8px}
+  .logo{font-size:20px}
+  .controls-bar{padding:8px 12px;gap:8px;top:60px}
+  .ctrl-btn{padding:6px 12px;font-size:11px}
+  table{min-width:420px;font-size:12px}
+  th,td{padding:6px 8px}
+  .section-title{font-size:15px}
+  .card{padding:14px 14px}
+  .tab{padding:10px 12px;font-size:11px}
+  .lbl{font-size:10px}
 }
 </style>"""
 
@@ -296,16 +307,17 @@ def build_dashboard():
             f'</div></div>'
         )
 
-    # ── Positions table ──
-    all_pos = (
-        [(sym,pos,"#00aaff","Stock")     for sym,pos in state.positions.items()] +
-        [(sym,pos,"#00ff88","Crypto")    for sym,pos in crypto_state.positions.items()] +
-        [(sym,pos,"#ffcc00","SmCap")     for sym,pos in smallcap_state.positions.items()] +
-        [(sym,pos,"#aa88ff","ID")        for sym,pos in intraday_state.positions.items()] +
-        [(sym,pos,"#00ff88","CrypID")    for sym,pos in crypto_intraday_state.positions.items()] +
-        [(sym,pos,"#ffaa00","ASX")       for sym,pos in asx_state.positions.items()] +
-        [(sym,pos,"#cc88ff","FTSE")      for sym,pos in ftse_state.positions.items()]
-    )
+    # ── Positions table — read from snapshot file (bot is separate process) ──
+    _type_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00",
+                    "ID":"#aa88ff","CrypID":"#00ff88","ASX":"#ffaa00","FTSE":"#cc88ff"}
+    try:
+        import json as _json
+        with open("/home/alphabot/app/positions.json") as _pf:
+            _snap = _json.load(_pf)
+        all_pos = [(sym, pos, _type_colors.get(pos.get("_type","Stock"),"#00aaff"), pos.get("_type","Stock"))
+                   for sym, pos in _snap.items()]
+    except Exception:
+        all_pos = []
     if all_pos:
         pos_rows = ""
         for idx,(sym,pos,cat_col,cat) in enumerate(all_pos):
@@ -372,20 +384,49 @@ def build_dashboard():
     db_trades = _db_recent_trades(10)
     if db_trades:
         trade_rows = ""
-        for sym,pnl,side,ts,score in db_trades:
+        for row in db_trades:
+            sym,pnl,side,ts,score = row[0],row[1],row[2],row[3],row[4]
+            qty    = row[5] if len(row) > 5 else None
+            price  = row[6] if len(row) > 6 else None
+            hold_h = row[7] if len(row) > 7 else None
+            market = row[8] if len(row) > 8 else "—"
             pc = "#00ff88" if pnl>=0 else "#ff4466"; sign = "+" if pnl>=0 else ""
-            ts_fmt = ts[:16] if ts else "—"
+            # Date + time
+            try:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None: dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                dt_p = dt.astimezone(PARIS)
+                date_s = dt_p.strftime("%d %b")
+                time_s = dt_p.strftime("%H:%M")
+            except:
+                date_s = ts[:10] if ts else "—"; time_s = ts[11:16] if ts and len(ts)>15 else "—"
+            qty_s   = f"{int(qty):,}" if qty else "—"
+            price_s = f"${price:.4f}" if price else "—"
+            total_s = f"${price*qty:,.0f}" if price and qty else "—"
+            hold_s  = f"{hold_h:.1f}h" if hold_h else "—"
+            mkt_col = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market,"#475569")
             trade_rows += (
-                f'<tr><td>{"✅" if pnl>0 else "❌"}</td>'
+                f'<tr>'
+                f'<td>{"✅" if pnl>0 else "❌"}</td>'
                 f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
-                f'<td style="color:#475569">{ts_fmt}</td>'
+                f'<td style="color:{mkt_col};font-size:11px;font-weight:700">{market}</td>'
+                f'<td style="color:#475569">{date_s}</td>'
+                f'<td style="color:#475569">{time_s}</td>'
+                f'<td style="color:#777">{price_s}</td>'
+                f'<td style="color:#aaa">{qty_s}</td>'
+                f'<td style="color:#aaa">{total_s}</td>'
+                f'<td style="color:#475569">{hold_s}</td>'
                 f'<td style="color:{pc};font-weight:700">{sign}${pnl:.2f}</td>'
-                f'<td style="color:#475569">{score or "—"}</td></tr>'
+                f'<td style="color:#475569">{score or "—"}</td>'
+                f'</tr>'
             )
         trades_html = (
             f'<div class="card" style="margin-bottom:16px">'
             f'<div class="section-title">Recent Trades <span style="font-size:12px;color:#475569;font-weight:400">DB-backed · survives restarts</span></div>'
-            f'<div class="table-wrap"><table><thead><tr><th></th><th>Symbol</th><th>Time</th><th>P&L</th><th>Score</th></tr></thead>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th></th><th>Symbol</th><th>Mkt</th><th>Date</th><th>Time</th>'
+            f'<th>Entry $</th><th>Qty</th><th>Total $</th><th>Held</th><th>P&L</th><th>Score</th>'
+            f'</tr></thead>'
             f'<tbody>{trade_rows}</tbody></table>'
             f'<div style="margin-top:10px;font-size:13px;color:#475569">Total: {total_t} trades · '
             f'<span style="color:{_col(total_pnl_db)}">{_fmt(total_pnl_db)}</span> all-time · '
