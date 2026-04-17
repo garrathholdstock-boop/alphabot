@@ -436,17 +436,29 @@ def build_dashboard():
                 f'<td>${pos_val:,.0f}</td>'
                 f'<td style="color:{pnl_c};font-weight:700">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</td>'
                 f'</tr>'
-                f'<tr id="det-{idx}" style="display:none;background:rgba(255,255,255,0.02)">'
-                f'<td colspan="9" style="padding:14px 18px">'
-                f'<div style="display:flex;flex-wrap:wrap;gap:18px;font-size:13px;color:#aaa">'
-                f'<span><span style="color:#475569">Score </span><b style="color:#ffcc00">{score}/10</b></span>'
-                f'<span><span style="color:#475569">Qty </span><b>{qty:,}</b></span>'
-                f'<span><span style="color:#475569">Entry </span><b>${entry:.4f}</b></span>'
-                f'<span><span style="color:#475569">Live </span><b style="color:#00aaff">${live:.4f}</b></span>'
-                f'<span><span style="color:#475569">Stop </span><b style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct:+.1f}%)</b></span>'
-                f'<span><span style="color:#475569">Target </span><b style="color:#00ff88">${tp_price:.4f} (+{target_pct:.1f}%)</b></span>'
-                f'<span><span style="color:#475569">P&L </span><b style="color:{pnl_c}">{sign}${pnl:.2f} ({sign}{pnl_pct:.1f}%)</b></span>'
-                f'</div>{bd_html}</td></tr>'
+                f'<tr id="det-{idx}" style="display:none;background:rgba(255,255,255,0.04)">'
+                f'<td colspan="9" style="padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.05)">'
+                f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 20px;font-size:13px;margin-bottom:12px">'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Score</span><br><b style="color:#ffcc00;font-size:16px">{score}/10</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Qty</span><br><b style="font-size:15px">{qty:,}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Entry</span><br><b style="font-size:15px">${entry:.4f}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Live</span><br><b style="color:#00aaff;font-size:15px">${live:.4f}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Stop</span><br><b style="color:#ff4466;font-size:15px">${pos["stop_price"]:.4f}</b> <span style="color:#ff4466;font-size:12px">({stop_pct:+.1f}%)</span></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Target</span><br><b style="color:#00ff88;font-size:15px">${tp_price:.4f}</b> <span style="color:#00ff88;font-size:12px">(+{target_pct:.1f}%)</span></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">P&amp;L</span><br><b style="color:{pnl_c};font-size:15px">{sign}${pnl:.2f}</b> <span style="color:{pnl_c};font-size:12px">({sign}{pnl_pct:.1f}%)</span></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Held</span><br><b style="font-size:15px">{entry_dt}</b></div>'
+                f'</div>'
+            )
+            if bd_html:
+                pos_rows += (
+                    f'<tr id="det-{idx}-bd" style="display:none;background:rgba(255,255,255,0.04)">'
+                    f'<td colspan="9" style="padding:0 20px 16px">'
+                    f'<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:12px">'
+                    f'<span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Why Bought</span><br>'
+                    f'<div style="font-size:12px;color:#b0bec5;margin-top:6px;white-space:pre-wrap">{bd_html}</div>'
+                    f'</div></td></tr>'
+                )
+            pos_rows += (f'</td></tr>'
             )
         # Build iPhone card HTML for positions
         iphone_pos_cards = ""
@@ -539,8 +551,24 @@ def build_dashboard():
             total_s = f"${price*qty:,.0f}" if price and qty else "—"
             hold_s  = f"{hold_h:.1f}h" if hold_h else "—"
             mkt_col = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market,"#475569")
+            t_idx = len([x for x in trade_rows.split('trade-det-') if x]) - 1
+            if pnl < 0:
+                sell_reason = "🛑 Stop loss triggered"
+                sell_col = "#ff4466"
+            elif hold_h and hold_h > 96:
+                sell_reason = "⏱ Max hold reached — stale exit"
+                sell_col = "#ffcc00"
+            elif hold_h and hold_h < 0.5:
+                sell_reason = "⚡ Quick scalp"
+                sell_col = "#00ff88"
+            elif pnl > 0:
+                sell_reason = "🎯 Take profit hit"
+                sell_col = "#00ff88"
+            else:
+                sell_reason = "— Position closed"
+                sell_col = "#475569"
             trade_rows += (
-                f'<tr>'
+                f'<tr onclick="toggleTrade({t_idx})" style="cursor:pointer">'
                 f'<td>{"✅" if pnl>0 else "❌"}</td>'
                 f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
                 f'<td style="color:{mkt_col};font-size:11px;font-weight:700">{market}</td>'
@@ -553,6 +581,23 @@ def build_dashboard():
                 f'<td style="color:{pc};font-weight:700">{sign}${pnl:.2f}</td>'
                 f'<td style="color:#475569">{score or "—"}</td>'
                 f'</tr>'
+                f'<tr id="trade-det-{t_idx}" style="display:none;background:rgba(255,255,255,0.04)">'
+                f'<td colspan="11" style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05)">'
+                f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 20px;font-size:13px;margin-bottom:12px">'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Exit Price</span><br><b style="font-size:15px">{price_s}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Qty</span><br><b style="font-size:15px">{qty_s}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Total Value</span><br><b style="font-size:15px">{total_s}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Held</span><br><b style="font-size:15px">{hold_s}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Score</span><br><b style="color:#ffcc00;font-size:15px">{score or "—"}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">P&amp;L</span><br><b style="color:{pc};font-size:15px">{sign}${pnl:.2f}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Market</span><br><b style="color:{mkt_col};font-size:15px">{market}</b></div>'
+                f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Closed</span><br><b style="font-size:15px">{date_s} {time_s}</b></div>'
+                f'</div>'
+                f'<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:10px">'
+                f'<span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Exit Reason</span><br>'
+                f'<b style="color:{sell_col};font-size:14px">{sell_reason}</b>'
+                f'</div>'
+                f'</td></tr>'
             )
         # Build iPhone trade cards
         iphone_trade_cards = ""
@@ -598,7 +643,7 @@ def build_dashboard():
             )
         trades_html = (
             f'<div class="card" style="margin-bottom:16px">'
-            f'<div class="section-title">Recent Trades <span style="font-size:12px;color:#475569;font-weight:400">DB-backed · survives restarts</span></div>'
+            f'<div class="section-title" style="text-transform:uppercase;letter-spacing:1px">RECENT TRADES <span style="font-size:12px;color:#475569;font-weight:400;text-transform:none">DB-backed · survives restarts</span></div>'
             f'<div class="trades-table-wrap table-wrap"><table><thead><tr>'
             f'<th></th><th>Symbol</th><th>Mkt</th><th>Date</th><th>Time</th>'
             f'<th>Entry $</th><th>Qty</th><th>Total $</th><th>Held</th><th>P&L</th><th>Score</th>'
@@ -607,7 +652,9 @@ def build_dashboard():
             f'<div class="trades-cards">{iphone_trade_cards}</div>'
             f'<div style="margin-top:10px;font-size:13px;color:#475569">Total: {total_t} trades · '
             f'<span style="color:{_col(total_pnl_db)}">{_fmt(total_pnl_db)}</span> all-time · '
-            f'{win_rate}% win rate</div></div>'
+            f'{win_rate}% win rate</div>'
+            f'<script>function toggleTrade(i){{var r=document.getElementById("trade-det-"+i);if(r)r.style.display=r.style.display==="none"?"table-row":"none";}}</script>'
+            f'</div>'
         )
     else:
         trades_html = f'<div class="card" style="margin-bottom:16px"><div class="empty">No completed trades yet — tracking starts when first position closes</div></div>'
@@ -1269,8 +1316,8 @@ function pinCmd(path,label){{
 </div>
 
 {positions_html}
-{trades_html}
 {ready_to_trade_html}
+{trades_html}
 
 <!-- Market Scanner — vertical accordion, open markets first -->
 {market_scanner_html}
@@ -1767,99 +1814,4 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
       {row("Cycle Seconds", "CYCLE_SECONDS", 60, step="5", note="Main loop interval (seconds)")}
       {row("Loss Streak Pause Limit", "LOSS_STREAK_LIMIT", 3, step="1")}
       {row("VIX High Threshold", "VIX_HIGH_THRESHOLD", 25.0, step="1.0")}
-      {row("VIX Extreme Threshold", "VIX_EXTREME", 35.0, step="1.0")}
-    </div>
-
-    <div style="text-align:center;padding:10px 0 30px">
-      <button type="button" onclick="showPin()"
-        style="background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.4);border-radius:10px;
-               color:#ffcc00;font-family:\'JetBrains Mono\',monospace;font-size:15px;font-weight:700;
-               padding:16px 48px;cursor:pointer;letter-spacing:1px">
-        🔒 SAVE SETTINGS
-      </button>
-    </div>
-  </form>
-</div>
-
-<!-- PIN overlay -->
-<div id="pin-overlay" onclick="if(event.target===this)hidePin()">
-  <div class="pin-box">
-    <div style="font-size:20px;font-weight:700;color:#ffcc00;margin-bottom:8px">🔒 Enter PIN</div>
-    <div style="font-size:13px;color:#475569;margin-bottom:20px">Required to save settings</div>
-    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
-      style="background:#111;border:1px solid rgba(255,204,0,0.3);border-radius:8px;color:#ffcc00;
-             font-family:\'JetBrains Mono\',monospace;font-size:22px;font-weight:700;padding:12px;
-             width:100%;text-align:center;letter-spacing:4px;margin-bottom:16px"
-      onkeydown="if(event.key===\'Enter\')submitSettings()">
-    <div style="display:flex;gap:10px">
-      <button onclick="hidePin()"
-        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#475569;
-               padding:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;font-size:13px">
-        Cancel
-      </button>
-      <button onclick="submitSettings()"
-        style="flex:2;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.4);border-radius:8px;
-               color:#ffcc00;padding:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;
-               font-size:13px;font-weight:700">
-        Save Settings
-      </button>
-    </div>
-    <div id="pin-error" style="color:#ff4466;font-size:12px;margin-top:10px;display:none">Wrong PIN</div>
-  </div>
-</div>
-
-<script>
-function showPin(){{document.getElementById(\'pin-overlay\').classList.add(\'visible\');document.getElementById(\'pin-input\').focus();}}
-function hidePin(){{document.getElementById(\'pin-overlay\').classList.remove(\'visible\');document.getElementById(\'pin-error\').style.display=\'none\';}}
-function submitSettings(){{
-  var pin=document.getElementById(\'pin-input\').value;
-  var form=document.getElementById(\'settings-form\');
-  var inputs=form.querySelectorAll(\'input[name]\');
-  var data={{}};
-  inputs.forEach(function(i){{data[i.name]=i.type===\'number\'?parseFloat(i.value):i.value;}});
-  fetch(\'/settings\',{{method:\'POST\',headers:{{\'Content-Type\':\'application/json\'}},body:JSON.stringify({{pin:pin,settings:data}})  }})
-  .then(r=>r.json()).then(d=>{{
-    if(d.status===\'ok\'){{hidePin();window.location.href=\'/settings?msg=saved\'}}
-    else if(d.status===\'wrong_pin\'){{document.getElementById(\'pin-error\').style.display=\'block\'}}
-    else{{alert(\'Error: \'+JSON.stringify(d))}}
-  }});
-}}
-</script>
-</body></html>'''
-
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_get(request: Request, msg: str = None):
-    msg_text = "Settings saved — changes apply within 60 seconds." if msg == "saved" else None
-    return HTMLResponse(_build_settings_page(msg_text))
-
-@app.post("/settings")
-async def settings_post(request: Request):
-    try:
-        body = await request.json()
-        if body.get("pin") != KILL_PIN:
-            return JSONResponse({"status": "wrong_pin"})
-        updates = body.get("settings", {})
-        # Type-cast all values
-        int_keys = {"MIN_SIGNAL_SCORE","MAX_POSITIONS","MAX_TOTAL_POSITIONS","MAX_TRADES_PER_DAY",
-                    "CYCLE_SECONDS","MAX_HOLD_DAYS","INTRADAY_MAX_POSITIONS","CRYPTO_INTRADAY_MAX_POS",
-                    "MAX_SECTOR_POSITIONS","LOSS_STREAK_LIMIT"}
-        clean = {}
-        for k, v in updates.items():
-            if k.startswith("_"): continue
-            try:
-                clean[k] = int(float(v)) if k in int_keys else float(v)
-            except: pass
-        if _save_tcfg(clean):
-            log.info(f"[SETTINGS] Updated: {clean}")
-            return JSONResponse({"status": "ok", "updated": len(clean)})
-        return JSONResponse({"status": "error", "msg": "Failed to write config"})
-    except Exception as e:
-        log.error(f"[SETTINGS] POST error: {e}")
-        return JSONResponse({"status": "error", "msg": str(e)})
-
-# ═══════════════════════════════════════════════════════════════
-# KEEP start_dashboard() for backwards compat with main.py
-# ═══════════════════════════════════════════════════════════════
-def start_dashboard():
-    """Legacy stub — dashboard now runs as standalone uvicorn service."""
-    log.info("[DASHBOARD] FastAPI dashboard — run via uvicorn in separate screen session")
+      {row("VIX Extreme Threshold", "VIX_EXTRE
