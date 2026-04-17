@@ -1083,5 +1083,38 @@ def main():
             time.sleep(30)
 
 
+def run_ibkr_startup_recovery():
+    """Recover open positions from IBKR on startup."""
+    try:
+        ibkr_positions = ibkr_get_positions() or []
+        open_orders = ibkr_get_open_orders() or []
+        stop_map = {o["symbol"]: o for o in open_orders if o.get("order_type") == "STP"}
+        recovered = 0
+        for p in ibkr_positions:
+            sym = p.get("symbol")
+            qty = float(p.get("qty", 0) or 0)
+            avg = float(p.get("avg_entry_price", 0) or p.get("avg_cost", 0) or 0)
+            if not sym or qty <= 0:
+                continue
+            stop = stop_map.get(sym, {}).get("stop_price", avg * (1 - STOP_LOSS_PCT / 100))
+            state.positions[sym] = {
+                "qty": qty,
+                "entry_price": avg,
+                "stop_price": stop,
+                "take_profit_price": avg * (1 + TAKE_PROFIT_PCT / 100),
+                "entry_ts": datetime.now(ZoneInfo("UTC")).isoformat(),
+                "entry_date": datetime.now(ZoneInfo("Europe/Paris")).strftime("%d %b %H:%M"),
+                "signal_score": "—",
+                "entry_breakdown": "",
+            }
+            log.info(f"[RECOVERY] Restored position: {sym} x{qty} @ ${avg:.2f}")
+            if sym not in stop_map:
+                log.warning(f"[RECOVERY] {sym} has no stop on IBKR — software stop-loss active @ ${stop:.2f}")
+            recovered += 1
+        log.info(f"=== Recovered {recovered} open position(s) ===\n")
+    except Exception as e:
+        log.error(f"[RECOVERY] Failed: {e}")
+
+
 if __name__ == "__main__":
     main()
