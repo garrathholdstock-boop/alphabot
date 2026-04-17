@@ -235,7 +235,7 @@ def run_cycle(watchlist, st, crypto=False):
                     worst_pos        = held_pos
                     worst_price      = curr_price
 
-            score_gap = sig_score - worst_curr_score
+            score_gap = s["score"] - worst_curr_score
 
             # ── Logic 2: Stale capital exit ───────────────────
             stale_sym = None
@@ -828,6 +828,8 @@ def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
             if order:
                 st.positions[sym] = {"qty": qty, "entry_price": fill, "stop_price": fill*(1-STOP_LOSS_PCT/100), "highest_price": fill, "take_profit_price": fill*(1+TAKE_PROFIT_PCT/100), "entry_date": datetime.now().date().isoformat(), "entry_ts": datetime.now().isoformat(), "days_held": 0}
                 log.info(f"[{label}] BUY {sym} qty={qty} @ ${fill:.2f} score={s['score']}")
+            else:
+                log.warning(f"[{label}] ORDER FAILED {sym} qty={qty} @ ~${s['price']:.2f} score={s['score']} — check IBKR margin/currency")
         except Exception as e:
             log.warning(f"[{label}] place_order {sym}: {e}")
     for sym in list(st.positions.keys()):
@@ -933,12 +935,15 @@ def main():
                     ibkr_orders = ibkr_get_open_orders() or []
                     stop_syms = {o.get("symbol") for o in ibkr_orders if o.get("order_type") == "STP"}
                     broker_positions = ibkr_get_positions() or []
-                    broker_syms = {p.get("symbol") for p in broker_positions}
-                    local_syms  = set(state.positions.keys())
-                    phantom = local_syms - broker_syms
-                    for sym in phantom:
-                        log.warning(f"[RECONCILE] {sym} in local state but NOT on IBKR — removing phantom")
-                        del state.positions[sym]
+                    if not broker_positions:
+                        log.warning("[RECONCILE] IBKR returned empty positions — skipping reconciliation to avoid phantom wipe")
+                    else:
+                        broker_syms = {p.get("symbol") for p in broker_positions}
+                        local_syms  = set(state.positions.keys())
+                        phantom = local_syms - broker_syms
+                        for sym in phantom:
+                            log.warning(f"[RECONCILE] {sym} in local state but NOT on IBKR — removing phantom")
+                            del state.positions[sym]
                 except Exception as e:
                     log.warning(f"[WATCHDOG] Reconciliation failed: {e}")
 
