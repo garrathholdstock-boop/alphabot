@@ -1111,13 +1111,11 @@ def main():
             if et.hour == 12 and et.minute < 2:
                 threading.Thread(target=run_near_miss_simulations, daemon=True).start()
 
-            # Intraday sub-cycles
-            intraday_cycles = CYCLE_SECONDS // INTRADAY_CYCLE_SECONDS
-            for _ in range(intraday_cycles):
-                run_intraday_cycle(US_WATCHLIST, intraday_state)
-                if not (USE_BINANCE and time.time() < (cfg._binance_ban_until + 300)):
-                    run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
-                time.sleep(INTRADAY_CYCLE_SECONDS)
+            # Intraday cycles run in main loop directly
+            run_intraday_cycle(US_WATCHLIST, intraday_state)
+            if not (USE_BINANCE and time.time() < (cfg._binance_ban_until + 300)):
+                run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
+            time.sleep(CYCLE_SECONDS)
 
         except KeyboardInterrupt:
             log.info("Stopped")
