@@ -634,6 +634,9 @@ def build_dashboard():
             except:
                 date_t = ts_t[:10] if ts_t else "—"; time_t = ""
             mkt_col_t = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market_t,"#475569")
+            disc_t = row[9] if len(row)>9 else "swing"
+            _dm = {"crypto_intraday":("⚡","#aa88ff"),"stock_intraday":("⚡","#00aaff"),"crypto_swing":("🔄","#00ff88"),"stock_swing":("📈","#00aaff"),"swing":("📈","#00aaff")}
+            disc_icon_t, disc_col_t = _dm.get(disc_t, ("•","#475569"))
             qty_s_t = f"{int(qty_t):,}" if qty_t else "—"
             price_s_t = f"${price_t:.4f}" if price_t else "—"
             total_s_t = f"${price_t*qty_t:,.0f}" if price_t and qty_t else "—"

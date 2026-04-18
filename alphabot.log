@@ -17939,3 +17939,53 @@ NameError: name 'disc_col_t' is not defined
 2026-04-18 07:32:44 [ERROR] [IBKR] Thread 'ASX' connection failed (clientId=5): 
 2026-04-18 07:32:51 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
 2026-04-18 07:33:11 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:33:29 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:33:29 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:33:31 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:33:49 [ERROR] [DASHBOARD] Error: name 'disc_col_t' is not defined
+Traceback (most recent call last):
+  File "/home/alphabot/app/app/dashboard.py", line 1638, in index
+    html = build_dashboard()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/alphabot/app/app/dashboard.py", line 646, in build_dashboard
+    f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
+                                                                                          ^^^^^^^^^^
+NameError: name 'disc_col_t' is not defined
+
+2026-04-18 07:33:51 [ERROR] [DASHBOARD] Error: name 'disc_col_t' is not defined
+Traceback (most recent call last):
+  File "/home/alphabot/app/app/dashboard.py", line 1638, in index
+    html = build_dashboard()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/alphabot/app/app/dashboard.py", line 646, in build_dashboard
+    f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
+                                                                                          ^^^^^^^^^^
+NameError: name 'disc_col_t' is not defined
+
+2026-04-18 07:33:51 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:33:51 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 07:33:52 [ERROR] [DASHBOARD] Error: name 'disc_col_t' is not defined
+Traceback (most recent call last):
+  File "/home/alphabot/app/app/dashboard.py", line 1638, in index
+    html = build_dashboard()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/alphabot/app/app/dashboard.py", line 646, in build_dashboard
+    f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
+                                                                                          ^^^^^^^^^^
+NameError: name 'disc_col_t' is not defined
+
+2026-04-18 07:33:59 [ERROR] [DASHBOARD] Error: name 'disc_col_t' is not defined
+Traceback (most recent call last):
+  File "/home/alphabot/app/app/dashboard.py", line 1638, in index
+    html = build_dashboard()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/alphabot/app/app/dashboard.py", line 646, in build_dashboard
+    f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
+                                                                                          ^^^^^^^^^^
+NameError: name 'disc_col_t' is not defined
+
+2026-04-18 07:34:02 [ERROR] [IBKR] Thread 'FTSE' connection failed (clientId=4): 
+2026-04-18 07:34:04 [ERROR] [IBKR] Thread 'ASX' connection failed (clientId=5): 
+2026-04-18 07:34:11 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:34:44 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:34:44 [INFO] [DB] Trading Intelligence Database ready
