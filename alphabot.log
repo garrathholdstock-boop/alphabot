@@ -23337,3 +23337,5 @@ TypeError: unsupported format string passed to NoneType.__format__
 2026-04-18 09:04:50 [INFO] [REGIME] BULL | SPY: $710.14 MA20: $666.617 | VIX: 15.920099999999998
 2026-04-18 09:04:51 [INFO] [CRYPTO REGIME] BULL | BTC: $76658 MA20: $72981 | Daily: -0.5%
 2026-04-18 09:04:51 [INFO] [CRYPTO_ID] Cycle 42 | P&L: $+0.00
+2026-04-18 09:15:51 [INFO] [BINANCE] Using TESTNET
+2026-04-18 09:15:51 [INFO] [DB] Trading Intelligence Database ready
