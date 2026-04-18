@@ -1234,7 +1234,7 @@ function pinCmd(path,label){{
       <div style="font-size:18px;font-weight:700;color:{regime_color}">{'🐂' if regime=='BULL' else '🐻'} {regime}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot {_dot(st_states.get('us',{}))}"></span>{_status(st_states.get('us',{}))}</div>
+      <div><span style="color:#475569">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('us',{}).get('running') else ('#ff4466' if st_states.get('us',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('us',{}))}</div>
       <div><span style="color:#475569">SPY </span><b>{spy_str}</b></div>
       <div><span style="color:#475569">Cycle </span>#{st_states.get('us',{}).get('cycle',0)}</div>
       <div><span style="color:#475569">MA20 </span><span style="color:#777">{spy_ma}</span></div>
@@ -1248,8 +1248,9 @@ function pinCmd(path,label){{
       <div style="font-size:18px;font-weight:700;color:{c_regime_color}">{'🐂' if c_regime=='BULL' else '🐻'} {c_regime}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot {_dot(st_states.get('crypto',{}))}"></span>{_status(st_states.get('crypto',{}))}</div>
+      <div><span style="color:#475569">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('crypto',{}).get('running') else ('#ff4466' if st_states.get('crypto',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('crypto',{}))}</div>
       <div><span style="color:#475569">BTC </span><b>{btc_str}</b></div>
+      <div><span style="color:#475569">MA14 </span><span style="color:#888">${st_crypto_regime.get('btc_ma20',0):.0f}</span></div>
       <div><span style="color:#475569">Cycle </span>#{st_states.get('crypto',{}).get('cycle',0)}</div>
       <div><span style="color:#475569">Chg </span><span style="color:{btc_chg_col}">{btc_chg_str}</span></div>
       <div><span style="color:#475569">Positions </span><b>{st_states.get('crypto',{}).get('positions',0)}</b></div>
@@ -1287,7 +1288,7 @@ function pinCmd(path,label){{
   <div class="card" style="border-color:rgba(255,204,0,0.2)">
     <div style="font-size:16px;font-weight:700;color:#ffcc00;margin-bottom:10px">📊 Small Cap</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot {_dot(st_states.get('smallcap',{}))}"></span>{_status(st_states.get('smallcap',{}))}</div>
+      <div><span style="color:#475569">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('smallcap',{}).get('running') else ('#ff4466' if st_states.get('smallcap',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('smallcap',{}))}</div>
       <div><span style="color:#475569">Pool </span>{len(smallcap_pool.get('symbols',[]))}</div>
       <div><span style="color:#475569">Positions </span><b>{st_states.get('smallcap',{}).get('positions',0)}</b></div>
       <div><span style="color:#475569">Cycle </span>#{st_states.get('smallcap',{}).get('cycle',0)}</div>
@@ -1296,7 +1297,7 @@ function pinCmd(path,label){{
   <div class="card" style="border-color:rgba(170,136,255,0.2)">
     <div style="font-size:16px;font-weight:700;color:#aa88ff;margin-bottom:10px">⚡ Intraday</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Stocks </span><span class="dot {_dot(st_states.get('intraday',{}))}"></span>{_status(st_states.get('intraday',{}))}</div>
+      <div><span style="color:#475569">Stocks </span><span class="dot" style="background:{'#00ff88' if st_states.get('intraday',{}).get('running') else ('#ff4466' if st_states.get('intraday',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('intraday',{}))}</div>
       <div><span style="color:#475569">ID Cycle </span>#{st_states.get('intraday',{}).get('cycle',0)}</div>
       <div><span style="color:#475569">ID Pos </span>{st_states.get('intraday',{}).get('positions',0)}</div>
       <div><span style="color:#475569">Crypto </span><span class="dot {_dot(st_states.get('crypto_id',{}))}"></span>{_status(st_states.get('crypto_id',{}))}</div>
