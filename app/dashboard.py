@@ -223,9 +223,9 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   .scan-table th:nth-child(8),.scan-table td:nth-child(8){display:none}
   .scan-table td:nth-child(4),.scan-table td:nth-child(5){white-space:nowrap}
 }
-.pos-cards{display:none}
+.pos-cards{display:block}
 .trades-cards{display:none}
-.pos-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px;margin-bottom:10px}
+.pos-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:rgba(0,255,136,0.1);user-select:none;-webkit-user-select:none}
 .pos-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .pos-card-sym{font-size:17px;font-weight:700;font-family:'Syne',sans-serif}
 .pos-card-pnl{font-size:15px;font-weight:700;text-align:right;line-height:1.3}
@@ -499,22 +499,26 @@ def build_dashboard():
             bd2 = pos.get("entry_breakdown","")
             bd_html2 = f'<div style="font-size:11px;color:#888;margin-top:8px;white-space:pre-wrap">{bd2}</div>' if bd2 else ""
             iphone_pos_cards += (
-                f'<div class="pos-card" style="border-color:{cat_col}22">'
-                f'<div class="pos-card-header">'
-                f'<div><span class="pos-card-sym" style="color:{cat_col}">{sym}</span>'
-                f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
-                f'<div class="pos-card-pnl" style="color:{pnl_c2};text-align:right">{sign2}${pnl2:.2f}<br><span style="font-size:11px;opacity:0.8">({sign2}{pnl_pct2:.1f}%)</span></div>'
+                f'<div onclick="toggleCard({idx})" style="background:rgba(255,255,255,0.03);border:1px solid {cat_col}33;border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<div><span style="font-size:16px;font-weight:700;color:{cat_col};font-family:Syne,sans-serif">{sym}</span>'
+                f'<span style="font-size:10px;color:{cat_col};margin-left:6px;opacity:0.7">{cat}</span>'
+                f'<span style="font-size:10px;color:#475569;margin-left:8px">{held_str2}</span></div>'
+                f'<span style="font-size:15px;font-weight:700;color:{pnl_c2}">{sign2}${pnl2:.2f} <span style="font-size:11px">({sign2}{pnl_pct2:.1f}%)</span></span>'
                 f'</div>'
-                f'<div class="pos-card-row">'
-                f'<div class="pos-card-item"><span class="pos-card-label">Entry</span><span class="pos-card-value">${entry2:.4f}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Live</span><span class="pos-card-value" style="color:#00aaff">${live2:.4f}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Stop</span><span class="pos-card-value" style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct2:+.1f}%)</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Position</span><span class="pos-card-value">${pos_val2:,.0f}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{held_str2}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Purchased</span><span class="pos-card-value">{purchased2}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Target</span><span class="pos-card-value" style="color:#00ff88">${tp2:.4f}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Qty</span><span class="pos-card-value">{qty2:,}</span></div>'
+                f'<div style="display:flex;justify-content:space-between;margin-top:4px;font-size:12px;color:#8899aa">'
+                f'<span>Entry <b style="color:#e0e0e0">${entry2:.2f}</b></span>'
+                f'<span>Live <b style="color:#00aaff">${live2:.2f}</b></span>'
+                f'<span>Stop <b style="color:#ff4466">${pos["stop_price"]:.2f}</b></span>'
+                f'<span>Pos <b style="color:#e0e0e0">${pos_val2:,.0f}</b></span>'
                 f'</div>'
+                f'<div id="card-det-{idx}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);display:none">'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">'
+                f'<div><span style="color:#475569">Target</span> <b style="color:#00ff88">${tp2:.2f}</b></div>'
+                f'<div><span style="color:#475569">Qty</span> <b>{qty2:,}</b></div>'
+                f'<div><span style="color:#475569">Bought</span> <b>{purchased2}</b></div>'
+                f'<div><span style="color:#475569">Score</span> <b style="color:#ffcc00">{score2}</b></div>'
+                f'</div></div>'
                 f'</div>'
             )
         positions_html = (
@@ -638,22 +642,16 @@ def build_dashboard():
             total_s_t = f"${price_t*qty_t:,.0f}" if price_t and qty_t else "—"
             hold_s_t = f"{hold_t:.1f}h" if hold_t else "—"
             iphone_trade_cards += (
-                f'<div class="trade-card">'
-                f'<div class="trade-card-header">'
-                f'<div style="display:flex;align-items:center;gap:8px">'  
-                f'<span style="font-size:16px">{"✅" if pnl_t>0 else "❌"}</span>'
-                f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
-                f'<span style="font-size:10px;color:{mkt_col_t};margin-left:6px;font-weight:700">{market_t}</span></div>'
-                f'</div>'
-                f'<span class="trade-card-pnl" style="color:{pc_t}">{sign_t}${pnl_t:.2f}</span>'
-                f'</div>'
-                f'<div class="trade-card-row">'
-                f'<div class="pos-card-item"><span class="pos-card-label">Date</span><span class="pos-card-value">{date_t} {time_t}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Price</span><span class="pos-card-value">{price_s_t}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Qty</span><span class="pos-card-value">{qty_s_t}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Total</span><span class="pos-card-value">{total_s_t}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{hold_s_t}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Score</span><span class="pos-card-value" style="color:#ffcc00">{score_t or "—"}</span></div>'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'
+                f'<div style="display:flex;align-items:center;gap:8px">'
+                f'<span style="font-size:13px">{"✅" if pnl_t>0 else "❌"}</span>'
+                f'<div>'
+                f'<div style="font-size:14px;font-weight:700;color:{mkt_col_t};font-family:Syne,sans-serif">{sym_t} <span style="font-size:10px;color:{disc_col_t};font-weight:700">{disc_icon_t}</span></div>'
+                f'<div style="font-size:11px;color:#475569">{date_t} {time_t} · {hold_s_t}</div>'
+                f'</div></div>'
+                f'<div style="text-align:right">'
+                f'<div style="font-size:14px;font-weight:700;color:{pc_t}">{sign_t}${pnl_t:.2f}</div>'
+                f'<div style="font-size:11px;color:#475569">{price_s_t} · {qty_s_t}</div>'
                 f'</div></div>'
             )
         trades_html = (
