@@ -655,7 +655,11 @@ def build_dashboard():
                 date_full_t = _dtp.strftime("%a %d %b · %H:%M")
             except:
                 date_full_t = ts_t[:16] if ts_t else "—"
-            score_disp_t = f"{score_t:.1f}" if isinstance(score_t, (int, float)) else (str(score_t) if score_t else "—")
+            # Score — integer when whole, one decimal otherwise
+            if isinstance(score_t, (int, float)) and score_t:
+                score_disp_t = f"{int(score_t)}" if float(score_t).is_integer() else f"{score_t:.1f}"
+            else:
+                score_disp_t = "—"
             # Entry (buy) reason — inferred from score band (no separate column in DB)
             if isinstance(score_t, (int, float)):
                 if score_t >= 8:
@@ -708,7 +712,7 @@ def build_dashboard():
                 f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.06)">'
                 f'<div>'
                 f'<div style="font-size:13px;font-weight:600;color:#e0e0e0">{date_full_t}</div>'
-                f'<div style="font-size:11px;color:#475569;margin-top:3px">Score <b style="color:#ffcc00;font-size:12px">{score_disp_t}</b></div>'
+                f'<div style="font-size:11px;color:#475569;margin-top:3px">Score <b style="color:#ffcc00;font-size:13px;margin-left:2px">{score_disp_t}</b></div>'
                 f'</div>'
                 f'<div style="text-align:right;max-width:55%">'
                 f'<div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px">Entry Reason</div>'
