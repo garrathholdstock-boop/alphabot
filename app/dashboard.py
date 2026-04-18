@@ -535,7 +535,7 @@ def build_dashboard():
             f'</div>'
             f'<script>'
             f'function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}'
-            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);var open=d.style.display==="block";d.style.display=open?"none":"block";var card=d.parentElement;var hint=card.querySelector(".tap-hint");if(hint)hint.textContent=open?"tap for more ▾":"tap to close ▴";}}'
+            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);var open=d.style.display!=="none";d.style.display=open?"none":"block";var card=d.parentElement;var hint=card.querySelector(".tap-hint");if(hint)hint.textContent=open?"tap for more ▾":"tap to close ▴";}}'
             f'</script>'
         )
     else:
