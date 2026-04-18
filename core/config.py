@@ -174,7 +174,7 @@ MACRO_KEYWORDS      = [
 ]
 
 # ── Crypto regime ─────────────────────────────────────────────
-BTC_MA_PERIOD       = 20
+BTC_MA_PERIOD       = 14
 BTC_CRASH_PCT       = 5.0
 
 # ── Intraday scanner settings ─────────────────────────────────
