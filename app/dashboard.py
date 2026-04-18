@@ -321,6 +321,21 @@ def build_dashboard():
     last_month = (now_paris.replace(day=1) - timedelta(days=1)).strftime("%B")
     this_week_lbl = f"Wk {now_paris.strftime('%d %b')} →"
 
+    # ── Daily cards: Today, Yesterday, Day before ──
+    def _day_stats(days_ago):
+        d = date.today() - timedelta(days=days_ago)
+        d_next = d + timedelta(days=1)
+        t, pnl, w = _db_pnl_for_period(d.isoformat(), d_next.isoformat())
+        avg = pnl / t if t else 0.0
+        pct = _pct(pnl, port_val)
+        wr = int(w/t*100) if t else 0
+        name = d.strftime("%A")  # Monday, Tuesday etc
+        return {"name": name, "short": d.strftime("%a %d %b"), "t": t, "pnl": pnl, "w": w, "avg": avg, "pct": pct, "wr": wr}
+
+    d0 = _day_stats(0)  # Today
+    d1 = _day_stats(1)  # Yesterday
+    d2 = _day_stats(2)  # Day before yesterday
+
     # ── Stats from DB ──
     total_t, total_pnl_db, wins_db, losses_db, avg_sc_db = _db_all_time_stats()
     win_rate = int(wins_db/total_t*100) if total_t else 0
@@ -1154,7 +1169,7 @@ function pinCmd(path,label){{
 {kill_banner}{circuit_banner}
 
 <!-- Portfolio strip -->
-<div class="grid5" style="margin-bottom:14px">
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px">
   <div class="card">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <div>
@@ -1174,26 +1189,34 @@ function pinCmd(path,label){{
     </div>
   </div>
   <div class="card">
-    <div class="lbl" style="color:#00aaff">{this_month}</div>
-    <div style="font-size:22px;font-weight:700;color:{_col(tm_pnl)};margin:6px 0">{_fmt(tm_pnl)}</div>
-    <div style="font-size:12px;color:#475569">{tm_t} trades · {_wr(tm_t,tm_w)}</div>
-    <div style="margin-top:4px">{_vs(tm_pct,lm_pct)}</div>
+    <div class="lbl" style="color:#00aaff">TODAY · {d0["name"]}</div>
+    <div style="font-size:22px;font-weight:700;color:{_col(d0["pnl"])};margin:6px 0">{_fmt(d0["pnl"])}</div>
+    <div style="font-size:12px;color:#475569;margin-top:3px">{d0["t"]} trades · {d0["wr"]}% win</div>
+    <div style="font-size:12px;color:#475569">avg {_fmt(d0["avg"])} · <span style="color:{_col(d0["pnl"])}">{d0["pct"]:+.2f}%</span></div>
   </div>
   <div class="card">
-    <div class="lbl">{last_month}</div>
-    <div style="font-size:22px;font-weight:700;color:{_col(lm_pnl)};margin:6px 0">{_fmt(lm_pnl)}</div>
-    <div style="font-size:12px;color:#475569">{lm_t} trades · {_wr(lm_t,lm_w)}</div>
+    <div class="lbl">{d1["name"]}</div>
+    <div style="font-size:22px;font-weight:700;color:{_col(d1["pnl"])};margin:6px 0">{_fmt(d1["pnl"])}</div>
+    <div style="font-size:12px;color:#475569;margin-top:3px">{d1["t"]} trades · {d1["wr"]}% win</div>
+    <div style="font-size:12px;color:#475569">avg {_fmt(d1["avg"])} · <span style="color:{_col(d1["pnl"])}">{d1["pct"]:+.2f}%</span></div>
   </div>
   <div class="card">
-    <div class="lbl" style="color:#00aaff">{this_week_lbl}</div>
-    <div style="font-size:22px;font-weight:700;color:{_col(tw_pnl)};margin:6px 0">{_fmt(tw_pnl)}</div>
-    <div style="font-size:12px;color:#475569">{tw_t} trades · {_wr(tw_t,tw_w)}</div>
-    <div style="margin-top:4px">{_vs(tw_pct,lw_pct)}</div>
+    <div class="lbl">{d2["name"]}</div>
+    <div style="font-size:22px;font-weight:700;color:{_col(d2["pnl"])};margin:6px 0">{_fmt(d2["pnl"])}</div>
+    <div style="font-size:12px;color:#475569;margin-top:3px">{d2["t"]} trades · {d2["wr"]}% win</div>
+    <div style="font-size:12px;color:#475569">avg {_fmt(d2["avg"])} · <span style="color:{_col(d2["pnl"])}">{d2["pct"]:+.2f}%</span></div>
   </div>
   <div class="card">
-    <div class="lbl">Last Week</div>
-    <div style="font-size:22px;font-weight:700;color:{_col(lw_pnl)};margin:6px 0">{_fmt(lw_pnl)}</div>
-    <div style="font-size:12px;color:#475569">{lw_t} trades · {_wr(lw_t,lw_w)}</div>
+    <div class="lbl" style="color:#00aaff">LAST 7 DAYS</div>
+    <div style="font-size:22px;font-weight:700;color:{_col(week_pnl)};margin:6px 0">{_fmt(week_pnl)}</div>
+    <div style="font-size:12px;color:#475569;margin-top:3px">{week_t} trades · {week_wr}% win</div>
+    <div style="font-size:12px;color:#475569">best <span style="color:#00ff88">{week_best}</span> · worst <span style="color:#ff4466">{week_worst}</span></div>
+  </div>
+  <div class="card">
+    <div class="lbl">ALL TIME</div>
+    <div style="font-size:22px;font-weight:700;color:{_col(total_pnl_db)};margin:6px 0">{_fmt(total_pnl_db)}</div>
+    <div style="font-size:12px;color:#475569;margin-top:3px">{total_t} trades · {win_rate}% win</div>
+    <div style="font-size:12px;color:#475569">avg score {avg_sc_db:.1f}</div>
   </div>
 </div>
 
