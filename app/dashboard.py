@@ -57,6 +57,10 @@ from data.analytics import score_signal
 from data.database import (
     db_get_leaderboard, db_search_symbol, db_get_skip_reason_breakdown,
     db_get_reports, db_get_report_by_id,
+    db_missed_profit_total, db_missed_profit_summary,
+    db_capacity_skips, db_threshold_sensitivity,
+    db_edge_by_discipline_and_score, db_performance_by_regime,
+    db_entry_gate_attribution, db_rotation_summary, db_exit_category_breakdown,
 )
 
 try:
@@ -1434,33 +1438,36 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
     leaders      = db_get_leaderboard(limit=20, period_days=period_days)
     medals       = ["🥇","🥈","🥉"]
 
+    # ── Leaderboard ───────────────────────────────────────────
     lb_rows = ""
-    for i,row in enumerate(leaders):
-        sym,trades,wins,losses,total_pnl,best,worst,avg_sc = row[:8]
-        wr = int(wins/trades*100) if trades else 0
-        pc = "#00ff88" if total_pnl>=0 else "#ff4466"
+    for i, row in enumerate(leaders):
+        sym, trades, wins, losses, total_pnl, best, worst, avg_sc = row[:8]
+        wr    = int(wins / trades * 100) if trades else 0
+        pc    = "#00ff88" if total_pnl >= 0 else "#ff4466"
         medal = medals[i] if i < 3 else f"#{i+1}"
+        wr_col = "#00ff88" if wr >= 55 else "#ffcc00" if wr >= 45 else "#ff4466"
         lb_rows += (
             f'<tr>'
             f'<td style="color:#475569">{medal}</td>'
-            f'<td style="font-weight:700;color:#00aaff">{sym} <span title="{disc_label}" style="font-size:10px;background:rgba(255,255,255,0.06);color:{disc_col};border:1px solid {disc_col}44;border-radius:4px;padding:1px 5px;margin-left:3px;font-weight:700">{disc_icon}</span></td>'
+            f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
             f'<td>{trades}</td><td style="color:#00ff88">{wins}</td><td style="color:#ff4466">{losses}</td>'
-            f'<td style="font-weight:700;color:{"#00ff88" if wr>=55 else "#ffcc00" if wr>=45 else "#ff4466"}">{wr}%</td>'
+            f'<td style="font-weight:700;color:{wr_col}">{wr}%</td>'
             f'<td style="color:{pc};font-weight:700">${total_pnl:+.2f}</td>'
             f'<td style="color:#00ff88">${best:.2f}</td><td style="color:#ff4466">${worst:.2f}</td>'
             f'<td style="color:#ffcc00">{avg_sc:.1f}</td></tr>'
         )
     if not lb_rows:
-        lb_rows = '<tr><td colspan="10" style="text-align:center;color:#475569;padding:24px">No trades yet — data populates as trades close</td></tr>'
+        lb_rows = '<tr><td colspan="10" style="text-align:center;color:#475569;padding:24px">No trades yet</td></tr>'
 
+    # ── Symbol search ─────────────────────────────────────────
     search_html = ""
     if search_sym:
-        res = db_search_symbol(search_sym)
+        res   = db_search_symbol(search_sym)
         stats = res["stats"]
         if stats:
-            sym2,total_t,wins2,losses2,total_pnl2,best2,worst2,avg_sc2,nm_count,last_t,first_t,_ = stats
-            wr2 = int(wins2/total_t*100) if total_t>0 else 0
-            pc2 = "#00ff88" if total_pnl2>=0 else "#ff4466"
+            sym2, total_t, wins2, losses2, total_pnl2, best2, worst2, avg_sc2, nm_count, last_t, first_t, _ = stats
+            wr2 = int(wins2 / total_t * 100) if total_t > 0 else 0
+            pc2 = "#00ff88" if total_pnl2 >= 0 else "#ff4466"
             search_html = (
                 f'<div style="background:#0d1117;border:1px solid rgba(0,170,255,0.2);border-radius:12px;padding:22px;margin-bottom:20px">'
                 f'<div style="font-size:22px;font-weight:700;color:#00aaff;margin-bottom:14px;font-family:\'Syne\',sans-serif">{sym2}</div>'
@@ -1474,104 +1481,420 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         else:
             search_html = f'<div style="color:#475569;padding:20px;text-align:center;font-size:15px">No data for <b style="color:#00aaff">{search_sym}</b> yet</div>'
 
-    # Skip reasons
-    skip_reasons = db_get_skip_reason_breakdown()
-    skip_html = ""
-    if skip_reasons:
-        rows = "".join(f'<tr><td style="color:#ffcc00">{r[0]}</td><td>{r[1]}</td><td style="color:#00aaff">{r[2]:.1f}</td></tr>' for r in skip_reasons)
-        skip_html = (
-            f'<div class="card" style="margin-bottom:20px">'
-            f'<div class="section-title">📋 Skip Reason Breakdown</div>'
-            f'<table><thead><tr><th>Reason</th><th>Count</th><th>Avg Score</th></tr></thead><tbody>{rows}</tbody></table></div>'
-        )
-
-    # DB stats
+    # ── DB overview stats ─────────────────────────────────────
     total_t_db, total_pnl_db, wins_db, losses_db, avg_sc_db = _db_all_time_stats()
+    pnl_col_db = "#00ff88" if total_pnl_db >= 0 else "#ff4466"
     try:
         conn = sqlite3.connect(DB_PATH)
         unique_syms  = conn.execute("SELECT COUNT(DISTINCT symbol) FROM trades").fetchone()[0] or 0
         total_misses = conn.execute("SELECT COUNT(*) FROM near_misses").fetchone()[0] or 0
+        score_misses = conn.execute("SELECT COUNT(*) FROM near_misses WHERE skip_reason='SCORE'").fetchone()[0] or 0
+        cap_misses   = conn.execute("SELECT COUNT(*) FROM near_misses WHERE skip_reason!='SCORE'").fetchone()[0] or 0
         nm_rows = conn.execute(
-            "SELECT symbol, score, skip_reason, created_at, pct_move, NULL, triggered "
-            "FROM near_misses ORDER BY created_at DESC LIMIT 30"
+            "SELECT symbol, score, skip_reason, created_at, pct_move, NULL, triggered, "
+            "simulated_pnl_pct, mfe_pct, mae_pct "
+            "FROM near_misses ORDER BY created_at DESC LIMIT 40"
         ).fetchall()
         conn.close()
-    except:
-        unique_syms=total_misses=0; nm_rows=[]
+    except Exception:
+        unique_syms = total_misses = score_misses = cap_misses = 0
+        nm_rows = []
 
-    pnl_col_db = "#00ff88" if total_pnl_db>=0 else "#ff4466"
+    # ── Phase 2 new data ──────────────────────────────────────
+    missed_usd, missed_count, missed_winners = db_missed_profit_total(days=period_days)
+    missed_disc  = db_missed_profit_summary(days=period_days)
+    cap_skips    = db_capacity_skips(days=30)
+    thresh_data  = db_threshold_sensitivity()
+    edge_data    = db_edge_by_discipline_and_score()
+    regime_data  = db_performance_by_regime()
+    gate_data    = db_entry_gate_attribution()
+    rot_data     = db_rotation_summary(days=30)
+    exit_data    = db_exit_category_breakdown(days=30)
+    skip_reasons = db_get_skip_reason_breakdown()
 
-    # Near misses
+    # ── HEADLINE STATS STRIP (6 cards now) ───────────────────
+    win_rate_db = int(wins_db / total_t_db * 100) if total_t_db else 0
+    missed_col  = "#ff8800" if missed_usd < 0 else "#00ff88"
+
+    stats_strip = f"""
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:22px">
+      <div class="card" style="text-align:center">
+        <div style="font-size:22px;font-weight:700;color:{pnl_col_db}">${total_pnl_db:+.2f}</div>
+        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Realised P&L</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#00aaff">{total_t_db}</div>
+        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Trades</div>
+        <div style="font-size:11px;color:#888;margin-top:2px">{win_rate_db}% win</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#ffcc00">{avg_sc_db:.1f}</div>
+        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Avg Score</div>
+      </div>
+      <div class="card" style="text-align:center;border-color:rgba(255,136,0,0.25)">
+        <div style="font-size:22px;font-weight:700;color:#ff8800">{total_misses}</div>
+        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Near Misses</div>
+        <div style="font-size:11px;color:#888;margin-top:2px">{cap_misses} capacity</div>
+      </div>
+      <div class="card" style="text-align:center;border-color:rgba(255,136,0,0.25)">
+        <div style="font-size:22px;font-weight:700;color:{missed_col}">${missed_usd:+.2f}</div>
+        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Missed Profit</div>
+        <div style="font-size:11px;color:#888;margin-top:2px">{missed_count} sims run</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#00ff88">{unique_syms}</div>
+        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Symbols</div>
+      </div>
+    </div>"""
+
+    # ── MISSED PROFIT by discipline ───────────────────────────
+    disc_map = {
+        "stock_swing":    ("📈 Stock Swing",    "#00aaff"),
+        "crypto_swing":   ("🔄 Crypto Swing",   "#00ff88"),
+        "stock_intraday": ("⚡ Stock ID",        "#ffcc00"),
+        "crypto_intraday":("⚡ Crypto ID",       "#aa88ff"),
+        "swing":          ("📈 Swing",           "#00aaff"),
+    }
+    if missed_disc:
+        disc_rows = ""
+        for disc, cnt, total_usd, avg_pct, winners in missed_disc:
+            label, col = disc_map.get(disc, (disc, "#475569"))
+            usd_col = "#00ff88" if (total_usd or 0) >= 0 else "#ff4466"
+            disc_rows += (
+                f'<tr>'
+                f'<td style="color:{col};font-weight:700">{label}</td>'
+                f'<td>{cnt}</td>'
+                f'<td style="color:{usd_col};font-weight:700">${total_usd:+.2f}</td>'
+                f'<td style="color:#888">{avg_pct:+.2f}%</td>'
+                f'<td style="color:#00ff88">{int(winners)}</td>'
+                f'</tr>'
+            )
+        missed_profit_html = (
+            f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
+            f'<div class="section-title" style="color:#ff8800">💸 Missed Profit Analysis</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Simulated P&L if near-miss trades had been taken, using real stop/trail/TP rules.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Discipline</th><th>Near Misses</th><th>Simulated P&L</th><th>Avg %</th><th>Would Win</th>'
+            f'</tr></thead><tbody>{disc_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        missed_profit_html = (
+            '<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
+            '<div class="section-title" style="color:#ff8800">💸 Missed Profit Analysis</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates once near-miss simulations have run (daily at noon ET).</div></div>'
+        )
+
+    # ── CAPACITY SKIP BREAKDOWN ───────────────────────────────
+    skip_reason_labels = {
+        "SCORE":               ("📊 Score below threshold", "#475569"),
+        "SECTOR_CAP":          ("🏗 Sector full",           "#ffcc00"),
+        "MAX_TOTAL_POSITIONS": ("📦 Global pos cap",        "#ffcc00"),
+        "MAX_DAILY_SPEND":     ("💰 Daily spend limit",     "#ff8800"),
+        "CHOPPY_MARKET":       ("〰 Choppy market",         "#888"),
+        "MAX_TRADES_DAY":      ("🔄 Max trades/day",        "#ff8800"),
+        "DAILY_TARGET_HIT":    ("🎯 Profit target hit",     "#00ff88"),
+        "MAX_EXPOSURE":        ("⚠ Exposure limit",         "#ff4466"),
+        "ORDER_FAILED":        ("❌ Order failed",           "#ff4466"),
+    }
+    if cap_skips:
+        cap_rows = ""
+        for reason, cnt, avg_sc in cap_skips:
+            label, col = skip_reason_labels.get(reason, (reason, "#888"))
+            cap_rows += (
+                f'<tr>'
+                f'<td style="color:{col};font-weight:700">{label}</td>'
+                f'<td style="font-size:15px;font-weight:700">{cnt}</td>'
+                f'<td style="color:#ffcc00">{avg_sc:.1f}</td>'
+                f'</tr>'
+            )
+        capacity_html = (
+            f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
+            f'<div class="section-title" style="color:#ffcc00">🚧 Capacity Skips — Last 30 Days</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Strong signals blocked by capacity or regime limits — not score. High counts here mean raise position limits or regime thresholds.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Reason</th><th>Count</th><th>Avg Score</th>'
+            f'</tr></thead><tbody>{cap_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        capacity_html = (
+            '<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
+            '<div class="section-title" style="color:#ffcc00">🚧 Capacity Skips</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">No capacity skips yet — populates as signals get blocked by position/spend/regime limits.</div></div>'
+        )
+
+    # ── NEAR MISS TABLE (enhanced) ────────────────────────────
     if nm_rows:
         nr = ""
         for row in nm_rows:
-            sym2,sc2,reason2,ts2,pct2,days2,checked2 = row
-            ts_s = ts2[:10] if ts2 else "—"
-            pct_s = f"+{pct2:.1f}%" if pct2 and pct2>=0 else (f"{pct2:.1f}%" if pct2 else "Pending")
-            pct_c = "#00ff88" if pct2 and pct2>0 else ("#ff4466" if pct2 and pct2<0 else "#475569")
+            sym2, sc2, reason2, ts2, pct2, _, checked2, sim_pct, mfe, mae = row
+            ts_s    = ts2[:10] if ts2 else "—"
+            pct_s   = f"{pct2:+.1f}%" if pct2 is not None else "Tracking…"
+            pct_c   = "#00ff88" if pct2 and pct2 > 0 else ("#ff4466" if pct2 and pct2 < 0 else "#475569")
+            sim_s   = f"{sim_pct:+.1f}%" if sim_pct is not None else "—"
+            sim_c   = "#00ff88" if sim_pct and sim_pct > 0 else ("#ff4466" if sim_pct and sim_pct < 0 else "#475569")
+            mfe_s   = f"+{mfe:.1f}%" if mfe is not None else "—"
+            reason_label, reason_col = skip_reason_labels.get(reason2 or "SCORE", (reason2 or "SCORE", "#888"))
             nr += (
-                f'<tr><td style="font-weight:700;color:#ffcc00">{sym2}</td>'
+                f'<tr>'
+                f'<td style="font-weight:700;color:#ffcc00">{sym2}</td>'
                 f'<td style="color:#ffcc00">{sc2}/10</td>'
-                f'<td style="color:#888">{reason2 or "SCORE"}</td>'
+                f'<td style="color:{reason_col};font-size:11px">{reason_label}</td>'
                 f'<td style="color:#475569">{ts_s}</td>'
                 f'<td style="color:{pct_c};font-weight:700">{pct_s}</td>'
-                f'<td>{"✅" if checked2 else "⏳"}</td></tr>'
+                f'<td style="color:{sim_c};font-weight:700">{sim_s}</td>'
+                f'<td style="color:#888">{mfe_s}</td>'
+                f'<td>{"✅" if checked2 else "⏳"}</td>'
+                f'</tr>'
             )
         near_miss_html = (
             f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
             f'<div class="section-title" style="color:#ff8800">🎯 Near-Miss Intelligence ({len(nm_rows)} tracked)</div>'
             f'<div class="table-wrap"><table><thead><tr>'
-            f'<th>Symbol</th><th>Score</th><th>Skip Reason</th><th>Date</th><th>Outcome</th><th>Checked</th>'
+            f'<th>Symbol</th><th>Score</th><th>Skip Reason</th><th>Date</th>'
+            f'<th>Actual %</th><th>Sim P&L</th><th>MFE</th><th>Fired</th>'
             f'</tr></thead><tbody>{nr}</tbody></table></div>'
-            f'<div style="font-size:13px;color:#475569;margin-top:12px">Stocks just below threshold — tracked 5 days to see what they did.</div></div>'
-        )
-        # Threshold chart
-        thresholds = [3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0]
-        bars_html = ""
-        for thr in thresholds:
-            q = [r for r in nm_rows if r[1]>=thr and r[4] is not None]
-            if q:
-                avg_pct = sum(r[4] for r in q)/len(q)
-                bc = "#00ff88" if avg_pct>0 else "#ff4466"
-                bh = min(80,max(4,abs(avg_pct)*8))
-                bars_html += (
-                    f'<div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1">'
-                    f'<div style="font-size:11px;color:{bc};font-weight:700">{avg_pct:+.1f}%</div>'
-                    f'<div style="width:100%;height:{bh}px;background:{bc};border-radius:4px 4px 0 0;opacity:0.8"></div>'
-                    f'<div style="font-size:10px;color:#475569;text-align:center">{thr}<br>{len(q)}n</div></div>'
-                )
-            else:
-                bars_html += (
-                    f'<div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1">'
-                    f'<div style="font-size:11px;color:#333">—</div>'
-                    f'<div style="width:100%;height:4px;background:#222;border-radius:4px 4px 0 0"></div>'
-                    f'<div style="font-size:10px;color:#333;text-align:center">{thr}<br>0n</div></div>'
-                )
-        threshold_html = (
-            f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
-            f'<div class="section-title" style="color:#ffcc00">📈 Threshold Sensitivity — Avg Outcome by Min Score</div>'
-            f'<div style="display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 8px;border-bottom:1px solid #222;margin-bottom:10px">{bars_html}</div>'
-            f'<div style="font-size:13px;color:#475569">Use this to calibrate your minimum signal score before going live.</div></div>'
+            f'<div style="font-size:13px;color:#475569;margin-top:12px">'
+            f'Actual % = price move since miss. Sim P&L = what we\'d have made with real stops. MFE = best it got.</div></div>'
         )
     else:
         near_miss_html = (
             '<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
             '<div class="section-title" style="color:#ff8800">🎯 Near-Miss Intelligence</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">No near-misses tracked yet — populates as signals approach threshold.</div></div>'
-        )
-        threshold_html = (
-            '<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
-            '<div class="section-title" style="color:#ffcc00">📈 Threshold Sensitivity Chart</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Chart populates once near-miss data is available.</div></div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">No near-misses tracked yet.</div></div>'
         )
 
-    # Reports
+    # ── THRESHOLD SENSITIVITY (now DB-backed) ────────────────
+    if thresh_data:
+        bars_html = ""
+        for bucket, cnt, avg_pct, winners in thresh_data:
+            if avg_pct is None: continue
+            bc = "#00ff88" if avg_pct > 0 else "#ff4466"
+            bh = min(80, max(4, abs(avg_pct) * 8))
+            bars_html += (
+                f'<div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1">'
+                f'<div style="font-size:11px;color:{bc};font-weight:700">{avg_pct:+.1f}%</div>'
+                f'<div style="width:100%;height:{bh}px;background:{bc};border-radius:4px 4px 0 0;opacity:0.8"></div>'
+                f'<div style="font-size:10px;color:#475569;text-align:center">{bucket}<br>{cnt}n</div></div>'
+            )
+        threshold_html = (
+            f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
+            f'<div class="section-title" style="color:#ffcc00">📈 Threshold Sensitivity — Avg Outcome by Score</div>'
+            f'<div style="display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 8px;border-bottom:1px solid #222;margin-bottom:10px">{bars_html}</div>'
+            f'<div style="font-size:13px;color:#475569">Use this to calibrate MIN_SIGNAL_SCORE before going live. Data is DB-backed and survives restarts.</div></div>'
+        )
+    else:
+        threshold_html = (
+            '<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
+            '<div class="section-title" style="color:#ffcc00">📈 Threshold Sensitivity</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates once near-miss price follow-up data is available.</div></div>'
+        )
+
+    # ── EDGE BY DISCIPLINE + SCORE ────────────────────────────
+    if edge_data:
+        edge_rows = ""
+        for disc, sb, cnt, wins, losses, total_pnl in edge_data:
+            if not cnt: continue
+            wr   = int(wins / cnt * 100)
+            pc   = "#00ff88" if total_pnl >= 0 else "#ff4466"
+            wr_c = "#00ff88" if wr >= 55 else "#ffcc00" if wr >= 45 else "#ff4466"
+            label, col = disc_map.get(disc, (disc, "#888"))
+            edge_rows += (
+                f'<tr>'
+                f'<td style="color:{col}">{label}</td>'
+                f'<td style="color:#ffcc00;font-weight:700">{sb}+</td>'
+                f'<td>{cnt}</td>'
+                f'<td style="color:{wr_c};font-weight:700">{wr}%</td>'
+                f'<td style="color:{pc};font-weight:700">${total_pnl:+.2f}</td>'
+                f'</tr>'
+            )
+        edge_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">🔬 Edge by Discipline + Score</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Win rate and P&L per score band per discipline — tells you which score thresholds to raise or lower per market.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Discipline</th><th>Score Band</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th>'
+            f'</tr></thead><tbody>{edge_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        edge_html = (
+            '<div class="card" style="margin-bottom:20px">'
+            '<div class="section-title">🔬 Edge by Discipline + Score</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as closed trades accumulate.</div></div>'
+        )
+
+    # ── REGIME PERFORMANCE ────────────────────────────────────
+    if regime_data:
+        reg_rows = ""
+        for regime, cnt, wins, losses, total_pnl, avg_pnl in regime_data:
+            if not cnt: continue
+            wr   = int(wins / cnt * 100)
+            pc   = "#00ff88" if total_pnl >= 0 else "#ff4466"
+            wr_c = "#00ff88" if wr >= 55 else "#ffcc00" if wr >= 45 else "#ff4466"
+            reg_col = {"BULL": "#00ff88", "BEAR": "#ff4466", "CHOPPY": "#ffcc00"}.get(regime, "#888")
+            reg_rows += (
+                f'<tr>'
+                f'<td style="font-weight:700;color:{reg_col}">{regime}</td>'
+                f'<td>{cnt}</td>'
+                f'<td style="color:{wr_c};font-weight:700">{wr}%</td>'
+                f'<td style="color:{pc};font-weight:700">${total_pnl:+.2f}</td>'
+                f'<td style="color:#888">${avg_pnl:+.2f}</td>'
+                f'</tr>'
+            )
+        regime_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">🌍 Performance by Market Regime</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Are we only profitable in bull markets? This answers that.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Regime</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th><th>Avg P&L</th>'
+            f'</tr></thead><tbody>{reg_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        regime_html = (
+            '<div class="card" style="margin-bottom:20px">'
+            '<div class="section-title">🌍 Performance by Regime</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as trades close with regime context captured.</div></div>'
+        )
+
+    # ── EXIT CATEGORY BREAKDOWN ───────────────────────────────
+    exit_cat_labels = {
+        "STOP":    ("🛑 Stop Loss",        "#ff4466"),
+        "TP":      ("🎯 Take Profit",      "#00ff88"),
+        "TRAIL":   ("📐 Trailing Stop",    "#00aaff"),
+        "SIGNAL":  ("📊 Signal Exit",      "#888"),
+        "MAXHOLD": ("⏱ Max Hold",          "#ffcc00"),
+        "EOD":     ("🌙 End of Day",        "#888"),
+        "ROTATE":  ("🔄 Rotated Out",      "#aa88ff"),
+        "STALE":   ("💤 Stale Capital",    "#475569"),
+        "UNKNOWN": ("— Unknown",            "#333"),
+    }
+    if exit_data:
+        exit_rows = ""
+        for cat, cnt, wins, total_pnl, avg_pnl in exit_data:
+            label, col = exit_cat_labels.get(cat, (cat, "#888"))
+            wr   = int(wins / cnt * 100) if cnt else 0
+            pc   = "#00ff88" if total_pnl >= 0 else "#ff4466"
+            exit_rows += (
+                f'<tr>'
+                f'<td style="font-weight:700;color:{col}">{label}</td>'
+                f'<td>{cnt}</td>'
+                f'<td style="color:#888">{wr}%</td>'
+                f'<td style="color:{pc};font-weight:700">${total_pnl:+.2f}</td>'
+                f'<td style="color:#888">${avg_pnl:+.2f}</td>'
+                f'</tr>'
+            )
+        exit_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">🚪 Exit Category Breakdown — Last 30 Days</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">How positions are closing. Too many stops = tighten entry. Too many signals = trust the bot more.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Exit Type</th><th>Count</th><th>Win Rate</th><th>Total P&L</th><th>Avg P&L</th>'
+            f'</tr></thead><tbody>{exit_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        exit_html = (
+            '<div class="card" style="margin-bottom:20px">'
+            '<div class="section-title">🚪 Exit Category Breakdown</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as trades close.</div></div>'
+        )
+
+    # ── ROTATION AUDIT ────────────────────────────────────────
+    if rot_data:
+        rot_rows = ""
+        for rtype, verdict, cnt, avg_sold_pct, avg_bought_pct in rot_data:
+            v_col  = {"GOOD": "#00ff88", "BAD": "#ff4466", "NEUTRAL": "#ffcc00"}.get(verdict, "#888")
+            r_label = "🔄 Score Rotate" if rtype == "SCORE_ROTATE" else "💤 Stale Exit"
+            rot_rows += (
+                f'<tr>'
+                f'<td style="color:#888">{r_label}</td>'
+                f'<td style="font-weight:700;color:{v_col}">{verdict}</td>'
+                f'<td>{cnt}</td>'
+                f'<td style="color:#ff4466">{avg_sold_pct:+.1f}%</td>'
+                f'<td style="color:#00ff88">{avg_bought_pct:+.1f}%</td>'
+                f'</tr>'
+            )
+        rotation_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">🔄 Rotation Audit — Last 30 Days</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">GOOD = new position outperformed old by >1% over 24h. BAD = we sold a winner too early.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Type</th><th>Verdict</th><th>Count</th><th>Sold % After</th><th>Bought % After</th>'
+            f'</tr></thead><tbody>{rot_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        rotation_html = (
+            '<div class="card" style="margin-bottom:20px">'
+            '<div class="section-title">🔄 Rotation Audit</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates 24h after first rotation or stale exit fires.</div></div>'
+        )
+
+    # ── ENTRY GATE ATTRIBUTION ────────────────────────────────
+    gate_rows = ""
+    for gate_name, rows in gate_data.items():
+        for val, cnt, wins, total_pnl in rows:
+            if not cnt: continue
+            wr   = int(wins / cnt * 100)
+            pc   = "#00ff88" if total_pnl >= 0 else "#ff4466"
+            wr_c = "#00ff88" if wr >= 55 else "#ffcc00" if wr >= 45 else "#ff4466"
+            gate_label = {
+                "breakout":    ("🚀 Breakout",    "1" if val else "0"),
+                "macd_bullish":("📊 MACD Bull",   "Yes" if val else "No"),
+                "adx":         ("📐 ADX",          str(val)),
+            }.get(gate_name, (gate_name, str(val)))
+            gate_rows += (
+                f'<tr>'
+                f'<td style="color:#888">{gate_label[0]}</td>'
+                f'<td style="color:#ffcc00">{gate_label[1]}</td>'
+                f'<td>{cnt}</td>'
+                f'<td style="color:{wr_c};font-weight:700">{wr}%</td>'
+                f'<td style="color:{pc};font-weight:700">${total_pnl:+.2f}</td>'
+                f'</tr>'
+            )
+    if gate_rows:
+        gate_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">🔭 Entry Gate Attribution</div>'
+            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Win rate when each entry gate was active vs not. Shows which gates actually predict winners.</div>'
+            f'<div class="table-wrap"><table><thead><tr>'
+            f'<th>Gate</th><th>Value</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th>'
+            f'</tr></thead><tbody>{gate_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        gate_html = (
+            '<div class="card" style="margin-bottom:20px">'
+            '<div class="section-title">🔭 Entry Gate Attribution</div>'
+            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as trades close with structured entry context.</div></div>'
+        )
+
+    # ── SKIP REASON SUMMARY (all) ─────────────────────────────
+    if skip_reasons:
+        skip_rows = "".join(
+            f'<tr><td style="color:#ffcc00">{r[0]}</td><td>{r[1]}</td><td style="color:#00aaff">{r[2]:.1f}</td></tr>'
+            for r in skip_reasons
+        )
+        skip_html = (
+            f'<div class="card" style="margin-bottom:20px">'
+            f'<div class="section-title">📋 All Skip Reasons</div>'
+            f'<div class="table-wrap"><table><thead><tr><th>Reason</th><th>Count</th><th>Avg Score</th></tr></thead>'
+            f'<tbody>{skip_rows}</tbody></table></div>'
+            f'</div>'
+        )
+    else:
+        skip_html = ""
+
+    # ── REPORTS ───────────────────────────────────────────────
     reports = db_get_reports(limit=30)
     report_rows = ""
     for r in reports:
-        rid,rtype,rdate,subject = r
-        icon = "📊" if rtype=="daily" else "📈" if rtype=="weekly" else "☀️"
-        tc = "#00aaff" if rtype=="daily" else "#00ff88" if rtype=="weekly" else "#ffcc00"
+        rid, rtype, rdate, subject = r
+        icon = "📊" if rtype == "daily" else "📈" if rtype == "weekly" else "☀️"
+        tc = "#00aaff" if rtype == "daily" else "#00ff88" if rtype == "weekly" else "#ffcc00"
         report_rows += (
             f'<tr onclick="loadReport({rid})" style="cursor:pointer">'
             f'<td style="color:{tc}">{icon} {rtype.title()}</td>'
@@ -1585,7 +1908,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
     if report_id:
         rep = db_get_report_by_id(int(report_id))
         if rep:
-            _,rtype,rdate,subject,body_html,body_text,_ = rep
+            _, rtype, rdate, subject, body_html_r, body_text, _ = rep
             report_viewer = (
                 f'<div style="background:#0d1117;border:1px solid rgba(0,170,255,0.2);border-radius:12px;padding:22px;margin-bottom:20px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
@@ -1606,6 +1929,9 @@ input{{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12)
 input:focus{{border-color:#00aaff}}
 .period-btn{{padding:8px 16px;border-radius:7px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:#475569;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;font-family:'JetBrains Mono',monospace}}
 .period-btn.active{{background:rgba(0,170,255,0.15);border-color:rgba(0,170,255,0.3);color:#00aaff}}
+@media(max-width:820px){{
+  .analytics-strip{{grid-template-columns:1fr 1fr 1fr !important}}
+}}
 </style>
 </head>
 <body>
@@ -1616,29 +1942,7 @@ input:focus{{border-color:#00aaff}}
 </div>
 <div class="container">
 
-  <!-- Stats strip -->
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:22px">
-    <div class="card" style="text-align:center">
-      <div style="font-size:26px;font-weight:700;color:{pnl_col_db}">${total_pnl_db:+.2f}</div>
-      <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Total P&L</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:26px;font-weight:700;color:#00aaff">{total_t_db}</div>
-      <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Total Trades</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:26px;font-weight:700;color:#00ff88">{unique_syms}</div>
-      <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Symbols Traded</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:26px;font-weight:700;color:#ffcc00">{avg_sc_db:.1f}</div>
-      <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Avg Score</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:26px;font-weight:700;color:#ff8800">{total_misses}</div>
-      <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Near Misses</div>
-    </div>
-  </div>
+  {stats_strip}
 
   <!-- Search -->
   <div class="card" style="margin-bottom:20px">
@@ -1668,9 +1972,16 @@ input:focus{{border-color:#00aaff}}
     </div>
   </div>
 
-  {skip_html}
+  {missed_profit_html}
+  {capacity_html}
   {near_miss_html}
   {threshold_html}
+  {edge_html}
+  {regime_html}
+  {exit_html}
+  {rotation_html}
+  {gate_html}
+  {skip_html}
 
   <!-- Reports -->
   <div class="card" style="margin-bottom:20px">
