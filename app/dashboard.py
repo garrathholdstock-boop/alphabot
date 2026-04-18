@@ -500,7 +500,7 @@ def build_dashboard():
             bd_html2 = f'<div style="font-size:11px;color:#888;margin-top:8px;white-space:pre-wrap">{bd2}</div>' if bd2 else ""
             iphone_pos_cards += (
                 f'<div class="pos-card" onclick="toggleCard({idx})" style="border-color:{cat_col}22;cursor:pointer;-webkit-tap-highlight-color:transparent">'
-                f'<div class="pos-card-header" style="pointer-events:none">'
+                f'<div class="pos-card-header">'
                 f'<div><span class="pos-card-sym" style="color:{cat_col}">{sym}</span>'
                 f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
                 f'<div style="text-align:right">'
