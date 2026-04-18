@@ -64,6 +64,7 @@ from data.database import (
     db_get_pending_recommendations, db_get_recommendation_history,
     db_apply_recommendation, db_dismiss_recommendation, db_snooze_recommendation,
     db_get_latest_intelligence_run, db_get_intelligence_runs,
+    db_ev_by_discipline, db_discipline_detail,
 )
 
 try:
@@ -1223,7 +1224,6 @@ def build_dashboard():
 
 <div class="controls-bar">
   <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
-  <a href="/intelligence" class="tab" style="text-decoration:none">🧠 Intelligence</a>
   <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
   <span style="font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:1px">Controls:</span>
   <button class="ctrl-btn" onclick="pinCmd('/kill','🛑 Kill all bots?')" style="border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466">🛑 KILL ALL BOTS</button>
@@ -1515,6 +1515,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
     rot_data     = db_rotation_summary(days=30)
     exit_data    = db_exit_category_breakdown(days=30)
     skip_reasons = db_get_skip_reason_breakdown()
+    ev_data      = db_ev_by_discipline(days=period_days)
 
     # ── HEADLINE STATS STRIP (6 cards now) ───────────────────
     win_rate_db = int(wins_db / total_t_db * 100) if total_t_db else 0
@@ -1892,6 +1893,129 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
     else:
         skip_html = ""
 
+    # ── EV BY DISCIPLINE ──────────────────────────────────────
+    # Expected Value = (win_rate * avg_win) - (loss_rate * avg_loss)
+    # The single number that tells you if a discipline is worth running.
+    DISC_META = {
+        "stock_swing":     ("📈 Stock Swing",     "#00aaff"),
+        "crypto_swing":    ("🔄 Crypto Swing",    "#00ff88"),
+        "stock_intraday":  ("⚡ Stock Intraday",  "#ffcc00"),
+        "crypto_intraday": ("⚡ Crypto Intraday", "#aa88ff"),
+        "swing":           ("📈 Swing",            "#00aaff"),
+        "asx_swing":       ("🇦🇺 ASX Swing",      "#ffaa00"),
+        "ftse_swing":      ("🇬🇧 FTSE Swing",     "#cc88ff"),
+    }
+
+    def _ev_verdict(ev, trades):
+        if trades < 10:
+            return ("⏳ Need more data", "#475569", "Insufficient sample (n<10)")
+        if ev > 5:
+            return ("✅ Positive Edge", "#00ff88", "This discipline is making money per trade")
+        if ev > 0:
+            return ("🟡 Marginal Edge", "#ffcc00", "Positive but thin — watch closely")
+        if ev > -5:
+            return ("⚠️ Marginal Loss", "#ff8800", "Losing slightly per trade — review threshold")
+        return ("❌ Negative Edge", "#ff4466", "Losing consistently — consider pausing or raising score")
+
+    if ev_data:
+        ev_cards = ""
+        for row in ev_data:
+            disc, trades, wins, losses, win_rate, avg_win, avg_loss, ev, total_pnl, avg_score, avg_hold = row
+            label, col = DISC_META.get(disc, (disc, "#888"))
+            verdict, verdict_col, verdict_note = _ev_verdict(ev, trades)
+            pnl_col = "#00ff88" if total_pnl >= 0 else "#ff4466"
+            ev_col  = "#00ff88" if ev > 0 else "#ff4466"
+
+            # Fetch per-discipline detail for exit category mini-breakdown
+            detail = db_discipline_detail(disc, days=period_days)
+            exit_mini = ""
+            if detail.get("exit_cats"):
+                _exit_cols = {"STOP":"#ff4466","TP":"#00ff88","SIGNAL":"#888",
+                              "ROTATE":"#aa88ff","STALE":"#475569","EOD":"#888","MAXHOLD":"#ffcc00"}
+                cats = detail["exit_cats"][:3]
+                exit_mini = " · ".join(
+                    f'<span style="color:{_exit_cols.get(c[0], "#888")}">{c[0]} {c[1]}</span>'
+                    for c in cats
+                )
+
+            # Score bucket mini bar
+            score_mini = ""
+            if detail.get("score_buckets"):
+                for sb, cnt, sb_wins, sb_pnl in detail["score_buckets"]:
+                    sb_wr = int(sb_wins / cnt * 100) if cnt else 0
+                    sb_col = "#00ff88" if sb_wr >= 55 else "#ffcc00" if sb_wr >= 40 else "#ff4466"
+                    score_mini += (
+                        f'<span style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);'
+                        f'border-radius:4px;padding:2px 7px;font-size:11px;margin-right:4px;color:{sb_col}">'
+                        f'Score {sb}: {sb_wr}% ({cnt}n)</span>'
+                    )
+
+            ev_cards += f"""
+            <div style="background:rgba(255,255,255,0.025);border:1px solid {col}33;
+                        border-left:3px solid {col};border-radius:12px;padding:18px 20px;margin-bottom:12px">
+              <!-- Header -->
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+                <div style="font-size:16px;font-weight:700;color:{col};font-family:'Syne',sans-serif">{label}</div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:11px;color:#475569">{trades} trades · avg score {avg_score:.1f} · avg hold {avg_hold:.1f}h</span>
+                  <span style="font-size:12px;font-weight:700;color:{verdict_col};background:rgba(255,255,255,0.04);
+                               border:1px solid {verdict_col}44;border-radius:6px;padding:3px 10px">{verdict}</span>
+                </div>
+              </div>
+              <!-- EV + key metrics -->
+              <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px">
+                <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px;border:1px solid {ev_col}44">
+                  <div style="font-size:20px;font-weight:700;color:{ev_col}">${ev:+.2f}</div>
+                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">EV / Trade</div>
+                </div>
+                <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
+                  <div style="font-size:20px;font-weight:700;color:{'#00ff88' if win_rate>=55 else '#ffcc00' if win_rate>=40 else '#ff4466'}">{win_rate:.0f}%</div>
+                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Win Rate</div>
+                </div>
+                <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
+                  <div style="font-size:20px;font-weight:700;color:#00ff88">${avg_win:.2f}</div>
+                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Avg Win</div>
+                </div>
+                <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
+                  <div style="font-size:20px;font-weight:700;color:#ff4466">${avg_loss:.2f}</div>
+                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Avg Loss</div>
+                </div>
+                <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
+                  <div style="font-size:20px;font-weight:700;color:{'#00ff88' if avg_win>avg_loss else '#ff4466'}">{f"{avg_win/avg_loss:.1f}×" if avg_loss else "∞"}</div>
+                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Reward/Risk</div>
+                </div>
+                <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
+                  <div style="font-size:20px;font-weight:700;color:{pnl_col}">${total_pnl:+.2f}</div>
+                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Total P&L</div>
+                </div>
+              </div>
+              <!-- Verdict note -->
+              <div style="font-size:12px;color:{verdict_col};margin-bottom:10px;padding:6px 10px;
+                          background:{verdict_col}11;border-radius:6px">{verdict_note}</div>
+              <!-- Score buckets -->
+              {f'<div style="margin-bottom:8px;flex-wrap:wrap;display:flex;gap:4px">{score_mini}</div>' if score_mini else ''}
+              <!-- Exit mini breakdown -->
+              {f'<div style="font-size:11px;color:#475569">Exits: {exit_mini}</div>' if exit_mini else ''}
+            </div>"""
+
+        ev_section = f"""
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.15)">
+          <div class="section-title" style="color:#00aaff">⚡ Expected Value by Discipline</div>
+          <div style="font-size:13px;color:#475569;margin-bottom:16px">
+            EV = (Win Rate × Avg Win) − (Loss Rate × Avg Loss). The single number that tells you
+            if a discipline is worth running. Positive = edge exists. Negative = losing per trade
+            regardless of win rate. Reward/Risk should be >1.0 — means winners are bigger than losers.
+          </div>
+          {ev_cards}
+        </div>"""
+    else:
+        ev_section = (
+            '<div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.15)">'
+            '<div class="section-title" style="color:#00aaff">⚡ Expected Value by Discipline</div>'
+            '<div style="color:#475569;font-size:14px;padding:20px 0">Populates once each discipline has 2+ closed trades.</div>'
+            '</div>'
+        )
+
     # ── REPORTS ───────────────────────────────────────────────
     reports = db_get_reports(limit=30)
     report_rows = ""
@@ -1976,6 +2100,7 @@ input:focus{{border-color:#00aaff}}
     </div>
   </div>
 
+  {ev_section}
   {missed_profit_html}
   {capacity_html}
   {near_miss_html}
@@ -2097,508 +2222,6 @@ async def settings_save(request: Request):
     if _save_tcfg(body.get("settings", {})):
         return JSONResponse({"status": "ok"})
     return JSONResponse({"status": "error"})
-
-
-
-
-# ═══════════════════════════════════════════════════════════════
-# INTELLIGENCE PAGE
-# ═══════════════════════════════════════════════════════════════
-def _build_intelligence_page(run_triggered=False, run_error=None):
-    """Build the /intelligence page — recommendations, history, report archive."""
-
-    # ── Load data ──────────────────────────────────────────────
-    pending      = db_get_pending_recommendations()
-    history      = db_get_recommendation_history(limit=20)
-    latest_run   = db_get_latest_intelligence_run()
-    past_runs    = db_get_intelligence_runs(limit=8)
-
-    # ── Confidence colours ────────────────────────────────────
-    conf_col = {"HIGH": "#00ff88", "MEDIUM": "#ffcc00", "LOW": "#ff8800"}
-    cat_col  = {
-        "THRESHOLD":       "#00aaff",
-        "POSITION_LIMITS": "#aa88ff",
-        "STOP_LOSS":       "#ff4466",
-        "REGIME_GATE":     "#ffcc00",
-        "WATCHLIST":       "#00ff88",
-        "OBSERVATION":     "#475569",
-    }
-    cat_icon = {
-        "THRESHOLD":       "🎯",
-        "POSITION_LIMITS": "📦",
-        "STOP_LOSS":       "🛑",
-        "REGIME_GATE":     "🌍",
-        "WATCHLIST":       "📋",
-        "OBSERVATION":     "👁",
-    }
-    action_col = {"RAISE":"#00ff88","LOWER":"#ff4466","ADD":"#00ff88",
-                  "REMOVE":"#ff4466","MONITOR":"#ffcc00","NONE":"#475569"}
-
-    # ── Header strip ──────────────────────────────────────────
-    if latest_run:
-        run_id_h, narrative_h, rec_count_h, run_ts_h, triggered_by_h = latest_run
-        try:
-            from zoneinfo import ZoneInfo
-            run_dt = datetime.fromisoformat(run_ts_h).astimezone(ZoneInfo("Europe/Paris"))
-            run_ts_fmt = run_dt.strftime("%a %d %b %Y · %H:%M Paris")
-        except Exception:
-            run_ts_fmt = run_ts_h[:16] if run_ts_h else "—"
-        last_run_html = (
-            f'<div style="font-size:13px;color:#475569">Last run: '
-            f'<span style="color:#e0e0e0">{run_ts_fmt}</span> '
-            f'· {rec_count_h} recommendations '
-            f'· <span style="color:#888">{triggered_by_h}</span></div>'
-        )
-    else:
-        last_run_html = '<div style="font-size:13px;color:#475569">No analysis run yet — first run Sunday 7pm ET or trigger manually below.</div>'
-
-    pending_count = len(pending)
-    badge = (f'<span style="background:#ff4466;color:#fff;border-radius:10px;padding:2px 8px;'
-             f'font-size:11px;font-weight:700;margin-left:6px">{pending_count}</span>'
-             if pending_count else '')
-
-    run_status_html = ""
-    if run_triggered:
-        run_status_html = '<div style="background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#00ff88;font-weight:700">✅ Intelligence run triggered — refresh in 60 seconds to see recommendations.</div>'
-    elif run_error:
-        run_status_html = f'<div style="background:rgba(255,68,102,0.08);border:1px solid rgba(255,68,102,0.3);border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#ff4466;font-weight:700">❌ Run failed: {run_error}</div>'
-
-    # ── Pending recommendations ───────────────────────────────
-    if pending:
-        rec_cards = ""
-        for row in pending:
-            (rec_id, run_id_r, category, action, parameter,
-             discipline, current_val, rec_val, evidence,
-             confidence, sample_size, created_at) = row
-
-            is_obs    = category == "OBSERVATION"
-            cat_c     = cat_col.get(category, "#888")
-            cat_ic    = cat_icon.get(category, "•")
-            conf_c    = conf_col.get(confidence, "#888")
-            act_c     = action_col.get(action, "#888")
-
-            # Action summary line
-            if not is_obs and parameter and rec_val:
-                action_line = (
-                    f'<div style="font-size:16px;font-weight:700;color:#e0e0e0;margin:12px 0 8px">'
-                    f'<span style="color:{act_c}">{action}</span> '
-                    f'<span style="color:{cat_c}">{parameter}</span>'
-                    f'{f" ({discipline})" if discipline and discipline != "all" else ""}'
-                    f': <span style="color:#475569;font-size:14px;text-decoration:line-through">{current_val}</span>'
-                    f' → <span style="color:#00ff88;font-size:16px">{rec_val}</span>'
-                    f'</div>'
-                )
-            elif not is_obs and parameter:
-                action_line = (
-                    f'<div style="font-size:16px;font-weight:700;color:#e0e0e0;margin:12px 0 8px">'
-                    f'<span style="color:{act_c}">{action}</span> '
-                    f'<span style="color:{cat_c}">{parameter}</span>'
-                    f'</div>'
-                )
-            else:
-                action_line = ""
-
-            # Sample size + confidence badges
-            sample_html = (
-                f'<span style="font-size:11px;color:#475569;margin-left:8px">n={sample_size}</span>'
-                if sample_size else ""
-            )
-
-            # Action buttons (OBSERVATION = dismiss only)
-            if not is_obs and parameter and rec_val:
-                btn_apply = (
-                    f'<button onclick="applyRec({rec_id},\'{parameter}\',\'{rec_val}\')" '
-                    f'style="padding:10px 20px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);'
-                    f'border-radius:8px;color:#00ff88;font-family:\'JetBrains Mono\',monospace;font-size:13px;'
-                    f'font-weight:700;cursor:pointer;margin-right:8px">✅ Apply</button>'
-                )
-            else:
-                btn_apply = ""
-
-            btn_snooze = (
-                f'<button onclick="snoozeRec({rec_id})" '
-                f'style="padding:10px 16px;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.25);'
-                f'border-radius:8px;color:#ffcc00;font-family:\'JetBrains Mono\',monospace;font-size:13px;'
-                f'cursor:pointer;margin-right:8px">⏸ Snooze 7d</button>'
-            ) if not is_obs else ""
-
-            btn_dismiss = (
-                f'<button onclick="dismissRec({rec_id})" '
-                f'style="padding:10px 16px;background:rgba(255,68,102,0.08);border:1px solid rgba(255,68,102,0.25);'
-                f'border-radius:8px;color:#ff4466;font-family:\'JetBrains Mono\',monospace;font-size:13px;'
-                f'cursor:pointer">❌ Dismiss</button>'
-            )
-
-            rec_cards += f"""
-            <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);
-                        border-left:3px solid {cat_c};border-radius:12px;padding:20px 24px;margin-bottom:14px">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <span style="font-size:18px">{cat_ic}</span>
-                  <span style="font-size:12px;font-weight:700;color:{cat_c};text-transform:uppercase;
-                               letter-spacing:1px;background:rgba(255,255,255,0.05);
-                               border:1px solid {cat_c}44;border-radius:4px;padding:2px 8px">{category}</span>
-                  <span style="font-size:11px;font-weight:700;color:{conf_c};text-transform:uppercase;
-                               letter-spacing:1px">● {confidence}</span>
-                  {sample_html}
-                </div>
-                <div style="font-size:11px;color:#333">{created_at[:10] if created_at else ""}</div>
-              </div>
-              {action_line}
-              <div style="font-size:13px;color:#aaa;line-height:1.6;margin-bottom:16px;
-                          border-left:2px solid rgba(255,255,255,0.06);padding-left:12px;margin-top:8px">
-                {evidence}
-              </div>
-              <div style="display:flex;flex-wrap:wrap;gap:8px">
-                {btn_apply}{btn_snooze}{btn_dismiss}
-              </div>
-            </div>"""
-
-        pending_section = f"""
-        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
-          <div class="section-title" style="color:#00aaff">
-            📬 Pending Recommendations{badge}
-          </div>
-          <div style="font-size:13px;color:#475569;margin-bottom:16px">
-            Review each recommendation and apply, snooze for 7 days, or dismiss permanently.
-            Applied changes take effect within 60 seconds — no restart needed.
-          </div>
-          {rec_cards}
-        </div>"""
-    else:
-        pending_section = """
-        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
-          <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
-          <div style="color:#475569;font-size:14px;padding:20px 0;text-align:center">
-            No pending recommendations — runs Sunday 7pm ET or trigger manually above.
-          </div>
-        </div>"""
-
-    # ── Latest narrative ──────────────────────────────────────
-    if latest_run and latest_run[1]:
-        narrative_html = f"""
-        <div class="card" style="margin-bottom:20px;border-color:rgba(0,255,136,0.1)">
-          <div class="section-title" style="color:#00ff88">📝 Latest Analysis Narrative</div>
-          <div style="font-size:14px;color:#ccc;line-height:1.8;white-space:pre-wrap">{latest_run[1]}</div>
-        </div>"""
-    else:
-        narrative_html = ""
-
-    # ── History table ─────────────────────────────────────────
-    if history:
-        hist_rows = ""
-        for row in history:
-            (hid, cat, action, param, disc, cur, rec,
-             conf, status, applied_at, dismissed_at, outcome, created_at) = row
-            cat_c  = cat_col.get(cat, "#888")
-            cat_ic = cat_icon.get(cat, "•")
-            st_col = {"APPLIED":"#00ff88","DISMISSED":"#ff4466","SNOOZED":"#ffcc00"}.get(status,"#888")
-            ts     = (applied_at or dismissed_at or created_at or "")[:10]
-            change = f"{param}: {cur} → {rec}" if param and rec else (param or cat)
-            hist_rows += (
-                f'<tr>'
-                f'<td style="color:{cat_c}">{cat_ic} {cat}</td>'
-                f'<td style="color:#e0e0e0;font-size:12px">{change}</td>'
-                f'<td style="color:#888;font-size:11px">{disc or "all"}</td>'
-                f'<td style="font-weight:700;color:{st_col}">{status}</td>'
-                f'<td style="color:#475569">{ts}</td>'
-                f'</tr>'
-            )
-        history_section = f"""
-        <div class="card" style="margin-bottom:20px">
-          <div class="section-title">📜 Decision History</div>
-          <div class="table-wrap">
-            <table><thead><tr>
-              <th>Category</th><th>Change</th><th>Discipline</th><th>Status</th><th>Date</th>
-            </tr></thead><tbody>{hist_rows}</tbody></table>
-          </div>
-        </div>"""
-    else:
-        history_section = ""
-
-    # ── Past runs archive ─────────────────────────────────────
-    if past_runs:
-        run_rows = ""
-        for row in past_runs:
-            run_id_p, trig, cnt, narr, ts = row
-            ts_fmt = ts[:16] if ts else "—"
-            trig_col = "#00aaff" if trig == "scheduled" else "#ffcc00"
-            preview = (narr[:120] + "…") if narr and len(narr) > 120 else (narr or "—")
-            run_rows += (
-                f'<tr>'
-                f'<td style="color:#475569;font-size:11px">{ts_fmt}</td>'
-                f'<td style="color:{trig_col};font-size:11px">{trig}</td>'
-                f'<td style="color:#ffcc00">{cnt}</td>'
-                f'<td style="color:#888;font-size:12px">{preview}</td>'
-                f'</tr>'
-            )
-        runs_section = f"""
-        <div class="card" style="margin-bottom:20px">
-          <div class="section-title">🗂 Intelligence Run Archive</div>
-          <div class="table-wrap">
-            <table><thead><tr>
-              <th>Time</th><th>Trigger</th><th>Recs</th><th>Summary</th>
-            </tr></thead><tbody>{run_rows}</tbody></table>
-          </div>
-        </div>"""
-    else:
-        runs_section = ""
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AlphaBot Intelligence</title>
-{BASE_CSS}
-<style>
-.rec-card{{transition:box-shadow 0.2s}}
-.rec-card:hover{{box-shadow:0 0 0 1px rgba(0,170,255,0.2)}}
-#pin-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center}}
-#pin-overlay.visible{{display:flex}}
-.pin-box{{background:#0d1117;border:1px solid rgba(0,255,136,0.3);border-radius:16px;padding:36px 40px;text-align:center;max-width:380px;width:90%}}
-</style>
-</head>
-<body>
-<div style="background:#0d1117;border-bottom:1px solid #1a1a1a;padding:18px 28px;
-            display:flex;align-items:center;justify-content:space-between;
-            position:sticky;top:0;z-index:100;flex-wrap:wrap;gap:12px">
-  <div style="display:flex;align-items:center;gap:14px">
-    <a href="/" style="color:#475569;text-decoration:none;font-size:14px;
-                       font-family:'JetBrains Mono',monospace">← Dashboard</a>
-    <span style="color:#333">|</span>
-    <span style="font-size:20px;font-weight:700;color:#00aaff;
-                 font-family:'Syne',sans-serif">🧠 Intelligence</span>
-    {badge}
-  </div>
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    {last_run_html}
-    <button onclick="triggerRun()"
-      style="padding:9px 18px;background:rgba(0,170,255,0.12);border:1px solid rgba(0,170,255,0.35);
-             border-radius:8px;color:#00aaff;font-family:'JetBrains Mono',monospace;
-             font-size:12px;font-weight:700;cursor:pointer;letter-spacing:0.5px">
-      ⚡ Run Now
-    </button>
-  </div>
-</div>
-
-<div class="controls-bar">
-  <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
-  <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
-  <a href="/intelligence" class="tab" style="text-decoration:none;color:#00aaff;
-     border-bottom:2px solid #00aaff">🧠 Intelligence</a>
-  <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
-</div>
-
-<div class="container">
-  {run_status_html}
-  {pending_section}
-  {narrative_html}
-  {history_section}
-  {runs_section}
-</div>
-
-<!-- PIN overlay for Apply -->
-<div id="pin-overlay" onclick="if(event.target===this)closePin()">
-  <div class="pin-box">
-    <div style="font-size:20px;font-weight:700;color:#00ff88;margin-bottom:8px">🔒 Confirm Apply</div>
-    <div id="pin-action-label" style="font-size:13px;color:#e0e0e0;margin-bottom:6px"></div>
-    <div style="font-size:12px;color:#475569;margin-bottom:20px">
-      Change takes effect within 60 seconds — no restart needed.
-    </div>
-    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
-      style="background:#111;border:1px solid rgba(0,255,136,0.3);border-radius:8px;
-             color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:22px;
-             font-weight:700;padding:12px;width:100%;text-align:center;
-             letter-spacing:4px;margin-bottom:16px"
-      onkeydown="if(event.key==='Enter')submitApply()">
-    <div style="display:flex;gap:10px">
-      <button onclick="closePin()"
-        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;
-               color:#475569;padding:12px;cursor:pointer;
-               font-family:'JetBrains Mono',monospace;font-size:13px">Cancel</button>
-      <button onclick="submitApply()"
-        style="flex:2;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);
-               border-radius:8px;color:#00ff88;padding:12px;cursor:pointer;
-               font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700">
-        Apply Change</button>
-    </div>
-    <div id="pin-error" style="color:#ff4466;font-size:12px;margin-top:10px;display:none">
-      Wrong PIN</div>
-  </div>
-</div>
-
-<script>
-var _pendingRec = null;
-
-function applyRec(id, param, val) {{
-  _pendingRec = {{id: id, param: param, val: val}};
-  document.getElementById('pin-action-label').textContent =
-    'Apply: ' + param + ' → ' + val;
-  document.getElementById('pin-error').style.display = 'none';
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-overlay').classList.add('visible');
-  document.getElementById('pin-input').focus();
-}}
-
-function closePin() {{
-  document.getElementById('pin-overlay').classList.remove('visible');
-  _pendingRec = null;
-}}
-
-function submitApply() {{
-  if (!_pendingRec) return;
-  var pin = document.getElementById('pin-input').value;
-  fetch('/intelligence/apply', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{pin: pin, rec_id: _pendingRec.id,
-                           parameter: _pendingRec.param, value: _pendingRec.val}})
-  }})
-  .then(r => r.json())
-  .then(d => {{
-    if (d.status === 'ok') {{ closePin(); location.reload(); }}
-    else if (d.status === 'wrong_pin') {{
-      document.getElementById('pin-error').style.display = 'block';
-    }}
-    else {{ alert('Error: ' + JSON.stringify(d)); }}
-  }});
-}}
-
-function dismissRec(id) {{
-  if (!confirm('Dismiss this recommendation permanently?')) return;
-  fetch('/intelligence/dismiss', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{rec_id: id}})
-  }}).then(() => location.reload());
-}}
-
-function snoozeRec(id) {{
-  fetch('/intelligence/snooze', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{rec_id: id}})
-  }}).then(() => location.reload());
-}}
-
-function triggerRun() {{
-  var pin = prompt('PIN to trigger intelligence run:');
-  if (pin === null) return;
-  fetch('/intelligence/run', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{pin: pin}})
-  }})
-  .then(r => r.json())
-  .then(d => {{
-    if (d.status === 'ok') location.href = '/intelligence?triggered=1';
-    else if (d.status === 'wrong_pin') alert('Wrong PIN');
-    else alert('Error: ' + JSON.stringify(d));
-  }});
-}}
-</script>
-</body></html>"""
-
-
-# ── Intelligence routes ───────────────────────────────────────
-@app.get("/intelligence", response_class=HTMLResponse)
-async def intelligence_page(request: Request, triggered: str = None, error: str = None):
-    try:
-        html = _build_intelligence_page(
-            run_triggered=triggered == "1",
-            run_error=error,
-        )
-        return HTMLResponse(html)
-    except Exception as e:
-        log.error(f"[INTELLIGENCE PAGE] Error: {e}")
-        return HTMLResponse(f"<pre>Error: {e}</pre>", status_code=500)
-
-
-@app.post("/intelligence/apply")
-async def intelligence_apply(request: Request):
-    """Apply a recommendation — PIN-gated, writes to trading_config.json."""
-    try:
-        body = await request.json()
-        if body.get("pin") != KILL_PIN:
-            return JSONResponse({"status": "wrong_pin"})
-
-        rec_id    = int(body.get("rec_id", 0))
-        parameter = body.get("parameter", "")
-        value     = body.get("value")
-
-        if not parameter or value is None:
-            return JSONResponse({"status": "error", "detail": "missing parameter or value"})
-
-        # Convert value to correct type
-        try:
-            numeric = float(value)
-            # Use int if it's a whole number
-            cfg_value = int(numeric) if numeric == int(numeric) else numeric
-        except (ValueError, TypeError):
-            cfg_value = value  # keep as string
-
-        # Write to trading_config.json
-        if not _save_tcfg({parameter: cfg_value}):
-            return JSONResponse({"status": "error", "detail": "config write failed"})
-
-        # Mark as applied in DB
-        db_apply_recommendation(rec_id)
-        log.info(f"[INTELLIGENCE] Applied rec {rec_id}: {parameter} = {cfg_value}")
-        return JSONResponse({"status": "ok", "parameter": parameter, "value": cfg_value})
-
-    except Exception as e:
-        log.error(f"[INTELLIGENCE APPLY] {e}")
-        return JSONResponse({"status": "error", "detail": str(e)})
-
-
-@app.post("/intelligence/dismiss")
-async def intelligence_dismiss(request: Request):
-    """Dismiss a recommendation — no PIN needed, non-destructive."""
-    try:
-        body   = await request.json()
-        rec_id = int(body.get("rec_id", 0))
-        db_dismiss_recommendation(rec_id)
-        log.info(f"[INTELLIGENCE] Dismissed rec {rec_id}")
-        return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "error", "detail": str(e)})
-
-
-@app.post("/intelligence/snooze")
-async def intelligence_snooze(request: Request):
-    """Snooze a recommendation for 7 days — no PIN needed."""
-    try:
-        body   = await request.json()
-        rec_id = int(body.get("rec_id", 0))
-        db_snooze_recommendation(rec_id, days=7)
-        log.info(f"[INTELLIGENCE] Snoozed rec {rec_id} for 7 days")
-        return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "error", "detail": str(e)})
-
-
-@app.post("/intelligence/run")
-async def intelligence_run(request: Request):
-    """Trigger an immediate intelligence run — PIN-gated."""
-    try:
-        body = await request.json()
-        if body.get("pin") != KILL_PIN:
-            return JSONResponse({"status": "wrong_pin"})
-
-        # Fire in background thread — returns immediately
-        import threading
-        def _bg():
-            try:
-                from data.intelligence import run_intelligence_analysis
-                run_id, cnt, narrative = run_intelligence_analysis(triggered_by="manual")
-                log.info(f"[INTELLIGENCE] Manual run complete — {cnt} recs, run_id={run_id}")
-            except Exception as e:
-                log.error(f"[INTELLIGENCE] Manual run failed: {e}")
-        threading.Thread(target=_bg, daemon=True).start()
-
-        return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "error", "detail": str(e)})
 
 
 # ═══════════════════════════════════════════════════════════════
