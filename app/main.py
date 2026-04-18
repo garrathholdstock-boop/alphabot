@@ -74,6 +74,12 @@ from data.database import (
     db_record_trade, db_record_near_miss, db_record_report,
     db_record_rotation, db_get_pending_rotations, db_update_rotation_followup,
 )
+try:
+    from data.intelligence import run_intelligence_analysis
+    _INTELLIGENCE_AVAILABLE = True
+except Exception as _ie:
+    log.warning(f"[INTELLIGENCE] Module unavailable: {_ie}")
+    _INTELLIGENCE_AVAILABLE = False
 from app.notifications import (
     tg, tg_trade_buy, tg_trade_sell, tg_hot_miss, tg_critical,
     run_morning_news_scan, send_daily_summary, send_weekly_near_miss_email,
@@ -1301,6 +1307,20 @@ def main():
             if et.weekday() == 6 and et.hour == 18 and et.minute < 2:
                 log.info("[WEEKLY] Generating near-miss analysis report...")
                 threading.Thread(target=send_weekly_near_miss_email, daemon=True).start()
+
+            # Weekly intelligence analysis — Sunday 7pm ET
+            if et.weekday() == 6 and et.hour == 19 and et.minute < 2 and _INTELLIGENCE_AVAILABLE:
+                log.info("[INTELLIGENCE] Starting weekly intelligence run...")
+                def _run_intelligence():
+                    try:
+                        run_id, rec_count, narrative = run_intelligence_analysis(triggered_by="scheduled")
+                        if run_id:
+                            log.info(f"[INTELLIGENCE] Weekly run complete — {rec_count} recommendations generated")
+                        else:
+                            log.warning(f"[INTELLIGENCE] Weekly run failed: {narrative}")
+                    except Exception as e:
+                        log.error(f"[INTELLIGENCE] Weekly run exception: {e}")
+                threading.Thread(target=_run_intelligence, daemon=True).start()
 
             # Daily near-miss simulations — noon ET
             if et.hour == 12 and et.minute < 2:
