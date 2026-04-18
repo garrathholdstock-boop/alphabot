@@ -551,6 +551,9 @@ def build_dashboard():
             price  = row[6] if len(row) > 6 else None
             hold_h = row[7] if len(row) > 7 else None
             market = row[8] if len(row) > 8 else "—"
+            discipline = row[9] if len(row) > 9 else "swing"
+            _disc_map = {"crypto_intraday":("⚡","#aa88ff","Crypto ID"),"stock_intraday":("⚡","#00aaff","Stock ID"),"crypto_swing":("🔄","#00ff88","Crypto Swing"),"stock_swing":("📈","#00aaff","Stock Swing"),"swing":("📈","#00aaff","Swing")}
+            disc_icon, disc_col, disc_label = _disc_map.get(discipline, ("•","#475569", discipline))
             pc = "#00ff88" if pnl>=0 else "#ff4466"; sign = "+" if pnl>=0 else ""
             # Date + time
             try:
@@ -585,7 +588,7 @@ def build_dashboard():
             trade_rows += (
                 f'<tr onclick="toggleTrade({t_idx})" style="cursor:pointer">'
                 f'<td>{"✅" if pnl>0 else "❌"}</td>'
-                f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
+                f'<td style="font-weight:700;color:#00aaff">{sym} <span title="{disc_label}" style="font-size:10px;background:rgba(255,255,255,0.06);color:{disc_col};border:1px solid {disc_col}44;border-radius:4px;padding:1px 5px;margin-left:3px;font-weight:700">{disc_icon}</span></td>'
                 f'<td style="color:{mkt_col};font-size:11px;font-weight:700">{market}</td>'
                 f'<td style="color:#475569">{date_s}</td>'
                 f'<td style="color:#475569">{time_s}</td>'
@@ -1369,7 +1372,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         lb_rows += (
             f'<tr>'
             f'<td style="color:#475569">{medal}</td>'
-            f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
+            f'<td style="font-weight:700;color:#00aaff">{sym} <span title="{disc_label}" style="font-size:10px;background:rgba(255,255,255,0.06);color:{disc_col};border:1px solid {disc_col}44;border-radius:4px;padding:1px 5px;margin-left:3px;font-weight:700">{disc_icon}</span></td>'
             f'<td>{trades}</td><td style="color:#00ff88">{wins}</td><td style="color:#ff4466">{losses}</td>'
             f'<td style="font-weight:700;color:{"#00ff88" if wr>=55 else "#ffcc00" if wr>=45 else "#ff4466"}">{wr}%</td>'
             f'<td style="color:{pc};font-weight:700">${total_pnl:+.2f}</td>'
