@@ -1337,14 +1337,15 @@ def main():
                 send_daily_summary()
                 last_email_day = et.date()
 
-            # Weekly near-miss report — Sunday 6pm ET
-            if et.weekday() == 6 and et.hour == 18 and et.minute < 2:
+            # Weekly near-miss report — Saturday 6am Paris / midnight ET
+            if et.weekday() == 5 and et.hour == 0 and et.minute < 2:
                 log.info("[WEEKLY] Generating near-miss analysis report...")
                 threading.Thread(target=send_weekly_near_miss_email, daemon=True).start()
 
-            # Weekly intelligence analysis — Sunday 7pm ET
-            if et.weekday() == 6 and et.hour == 19 and et.minute < 2:
-                log.info("[INTELLIGENCE] Starting weekly intelligence run...")
+            # Weekly intelligence analysis — Saturday 7am Paris / 1am ET
+            # Runs Saturday morning so Garrath has the full weekend to review + tune before Monday open
+            if et.weekday() == 5 and et.hour == 1 and et.minute < 2:
+                log.info("[INTELLIGENCE] Starting weekly intelligence run (Saturday 7am Paris)...")
                 def _run_intel():
                     try:
                         from data.intelligence import run_intelligence_analysis
