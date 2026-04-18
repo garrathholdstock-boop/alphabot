@@ -1189,7 +1189,7 @@ function pinCmd(path,label){{
     </div>
   </div>
   <div class="card">
-    <div class="lbl" style="color:#00aaff">TODAY · {d0["name"]}</div>
+    <div class="lbl" style="color:#00aaff">TODAY</div>
     <div style="font-size:22px;font-weight:700;color:{_col(d0["pnl"])};margin:6px 0">{_fmt(d0["pnl"])}</div>
     <div style="font-size:12px;color:#475569;margin-top:3px">{d0["t"]} trades · {d0["wr"]}% win</div>
     <div style="font-size:12px;color:#475569">avg {_fmt(d0["avg"])} · <span style="color:{_col(d0["pnl"])}">{d0["pct"]:+.2f}%</span></div>
