@@ -2326,8 +2326,16 @@ async def intelligence_dismiss(request: Request):
         return JSONResponse({"status": "error", "detail": str(e)})
 
 
-@app.post("/intelligence/snooze")
-async def intelligence_snooze(request: Request):
+@app.get("/intelligence/status")
+async def intelligence_status():
+    """Polled by the progress bar — returns latest run_id so JS knows when run completes."""
+    try:
+        run = db_get_latest_intelligence_run()
+        if run:
+            return JSONResponse({"run_id": run.get("run_id"), "created_at": run.get("created_at")})
+        return JSONResponse({"run_id": None})
+    except Exception as e:
+        return JSONResponse({"run_id": None, "error": str(e)})
     try:
         body = await request.json()
         db_snooze_recommendation(int(body.get("rec_id", 0)), days=7)
@@ -2372,7 +2380,7 @@ def _build_intelligence_page(run_triggered=False, run_error=None):
             f' · {cnt} recs · <span style="color:#888">{trig}</span></div>'
         )
     else:
-        last_run_html = '<div style="font-size:13px;color:#94a3b8">No run yet — first run Sunday 7pm ET or trigger manually.</div>'
+        last_run_html = '<div style="font-size:13px;color:#94a3b8">No run yet — first run Saturday 7am Paris or trigger manually.</div>'
 
     pending_count = len(pending)
     badge = (
@@ -2383,11 +2391,88 @@ def _build_intelligence_page(run_triggered=False, run_error=None):
 
     run_status_html = ""
     if run_triggered:
-        run_status_html = (
-            '<div style="background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);'
-            'border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#00ff88;font-weight:700">'
-            '✅ Intelligence run triggered — refresh in 60 seconds.</div>'
-        )
+        run_status_html = """
+        <div id="thinking-card" style="background:rgba(170,136,255,0.06);border:1px solid rgba(170,136,255,0.3);
+             border-radius:14px;padding:28px 24px;margin-bottom:20px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#aa88ff;font-family:'Syne',sans-serif;margin-bottom:8px">
+            🧠 Claude is analysing your trading data...
+          </div>
+          <div style="font-size:13px;color:#94a3b8;margin-bottom:20px">
+            Reading EV by discipline, near-miss data, exit categories, rotation audit...
+          </div>
+          <!-- Progress bar -->
+          <div style="background:rgba(255,255,255,0.06);border-radius:20px;height:8px;margin:0 auto 16px;max-width:500px;overflow:hidden">
+            <div id="intel-progress" style="height:100%;width:0%;background:linear-gradient(90deg,#7c3aed,#aa88ff);
+                 border-radius:20px;transition:width 0.5s ease"></div>
+          </div>
+          <div id="intel-status-msg" style="font-size:12px;color:#94a3b8;font-family:'JetBrains Mono',monospace">
+            Starting...
+          </div>
+        </div>
+        <script>
+        (function() {
+          var start = Date.now();
+          var maxMs = 90000; // 90 second max wait
+          var messages = [
+            [0,  "Assembling trading data..."],
+            [10, "Calculating EV by discipline..."],
+            [20, "Reviewing near-miss patterns..."],
+            [30, "Analysing exit categories..."],
+            [40, "Checking rotation quality..."],
+            [50, "Sending data to Claude..."],
+            [60, "Claude is reading your performance..."],
+            [70, "Generating recommendations..."],
+            [80, "Validating and storing results..."],
+            [88, "Almost done..."],
+          ];
+          var lastRunTs = null;
+          try {
+            var el = document.getElementById('intel-status-msg');
+          } catch(e) {}
+
+          function update() {
+            var elapsed = Date.now() - start;
+            var pct = Math.min(92, Math.round(elapsed / maxMs * 100));
+            var bar = document.getElementById('intel-progress');
+            var msg = document.getElementById('intel-status-msg');
+            if (bar) bar.style.width = pct + '%';
+            // Pick the right message
+            var label = messages[0][1];
+            for (var i = 0; i < messages.length; i++) {
+              if (pct >= messages[i][0]) label = messages[i][1];
+            }
+            if (msg) msg.textContent = label;
+          }
+
+          function checkDone() {
+            fetch('/intelligence/status')
+              .then(r => r.json())
+              .then(d => {
+                if (d.run_id && d.run_id !== lastRunTs) {
+                  // New run complete — load results
+                  var bar = document.getElementById('intel-progress');
+                  var msg = document.getElementById('intel-status-msg');
+                  if (bar) bar.style.width = '100%';
+                  if (bar) bar.style.background = 'linear-gradient(90deg,#00ff88,#00aaff)';
+                  if (msg) msg.textContent = '✅ Complete — loading recommendations...';
+                  setTimeout(function() { location.href = '/intelligence'; }, 800);
+                } else if (Date.now() - start > maxMs) {
+                  location.href = '/intelligence';
+                } else {
+                  update();
+                  setTimeout(checkDone, 4000);
+                }
+              })
+              .catch(function() {
+                update();
+                setTimeout(checkDone, 4000);
+              });
+          }
+
+          update();
+          setTimeout(checkDone, 5000);
+        })();
+        </script>"""
     elif run_error:
         run_status_html = (
             f'<div style="background:rgba(255,68,102,0.08);border:1px solid rgba(255,68,102,0.3);'
@@ -2490,7 +2575,7 @@ def _build_intelligence_page(run_triggered=False, run_error=None):
         <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
           <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
           <div style="color:#94a3b8;font-size:14px;padding:20px 0;text-align:center">
-            No pending recommendations — runs Sunday 7pm ET or trigger manually above.
+            No pending recommendations — runs Saturday 7am Paris or trigger manually above.
           </div>
         </div>"""
 
@@ -2674,12 +2759,27 @@ function snoozeRec(id){{
 function triggerRun(){{
   var pin=prompt('PIN to trigger intelligence run:');
   if(pin===null)return;
-  fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{pin:pin}})}})
-  .then(r=>r.json()).then(d=>{{
-    if(d.status==='ok')location.href='/intelligence?triggered=1';
-    else if(d.status==='wrong_pin')alert('Wrong PIN');
-    else alert('Error: '+JSON.stringify(d));
+  // First get current run_id so we can detect when the NEW one completes
+  fetch('/intelligence/status')
+  .then(r=>r.json())
+  .then(function(current) {{
+    fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{pin:pin}})}})
+    .then(r=>r.json()).then(d=>{{
+      if(d.status==='ok') {{
+        // Go to thinking page — pass current run_id so poller knows what's "new"
+        location.href='/intelligence?triggered=1';
+      }} else if(d.status==='wrong_pin') alert('Wrong PIN');
+      else alert('Error: '+JSON.stringify(d));
+    }});
+  }}).catch(function(){{
+    // If status check fails just proceed anyway
+    fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{pin:pin}})}})
+    .then(r=>r.json()).then(d=>{{
+      if(d.status==='ok')location.href='/intelligence?triggered=1';
+      else if(d.status==='wrong_pin')alert('Wrong PIN');
+    }});
   }});
 }}
 </script>
