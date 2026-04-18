@@ -32,7 +32,7 @@ from data.database import (
     db_entry_gate_attribution, db_rotation_summary, db_exit_category_breakdown,
     db_get_leaderboard, db_get_skip_reason_breakdown,
     db_save_intelligence_run, db_save_recommendations,
-    db_ev_by_discipline,
+    db_ev_by_discipline, db_get_config_history_for_intelligence,
 )
 
 # ── System prompt (the mandate) ───────────────────────────────
@@ -135,6 +135,7 @@ def _assemble_payload():
         skip_reasons   = db_get_skip_reason_breakdown()
         leaderboard    = db_get_leaderboard(limit=10)
         ev_data        = db_ev_by_discipline()
+        config_history = db_get_config_history_for_intelligence(days=30)
 
         return {
             "overview": {
@@ -151,6 +152,16 @@ def _assemble_payload():
                 "is_live": bool(cfg.IS_LIVE),
                 "paper_trading": not bool(cfg.IS_LIVE),
             },
+            "config_changes_last_30d": [
+                {
+                    "parameter": r["parameter"],
+                    "old_value": r["old_value"],
+                    "new_value": r["new_value"],
+                    "changed_by": r["changed_by"],
+                    "date": (r["created_at"] or "")[:16],
+                }
+                for r in (config_history or [])
+            ],
             "expected_value_by_discipline": [
                 {
                     "discipline": r[0],
@@ -301,6 +312,7 @@ def run_intelligence_analysis(triggered_by="scheduled"):
 
     narrative      = parsed.get("narrative", "No narrative provided.")
     recommendations = parsed.get("recommendations", [])
+    rec_count_raw  = len(recommendations)  # before validation
 
     # Validate + sanitise each rec
     valid_categories = {"THRESHOLD","POSITION_LIMITS","STOP_LOSS","REGIME_GATE","WATCHLIST","OBSERVATION"}
@@ -321,6 +333,7 @@ def run_intelligence_analysis(triggered_by="scheduled"):
         narrative=narrative,
         raw_payload=json.dumps(payload),
         rec_count=rec_count,
+        rec_count_raw=rec_count_raw,
         triggered_by=triggered_by,
     )
 
