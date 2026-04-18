@@ -17807,3 +17807,135 @@
 2026-04-18 07:20:36 [INFO] [DB] Trading Intelligence Database ready
 2026-04-18 07:20:36 [INFO] [BINANCE] Using TESTNET
 2026-04-18 07:20:36 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:27:06 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:27:06 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:27:06 [INFO] ==================================================
+2026-04-18 07:27:06 [INFO] AlphaBot starting up
+2026-04-18 07:27:06 [INFO] Mode:   PAPER trading
+2026-04-18 07:27:06 [INFO] Port:   8080
+2026-04-18 07:27:06 [INFO] ==================================================
+2026-04-18 07:27:06 [INFO] AlphaBot bot process starting — dashboard runs separately on port 8080
+2026-04-18 07:27:06 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:27:07 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:27:26 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:27:26 [ERROR] Cannot connect to IBKR — check TWS/Gateway connection
+2026-04-18 07:27:26 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:27:46 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:28:03 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:28:03 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:28:03 [INFO] ==================================================
+2026-04-18 07:28:03 [INFO] AlphaBot starting up
+2026-04-18 07:28:03 [INFO] Mode:   PAPER trading
+2026-04-18 07:28:03 [INFO] Port:   8080
+2026-04-18 07:28:03 [INFO] ==================================================
+2026-04-18 07:28:03 [INFO] AlphaBot bot process starting — dashboard runs separately on port 8080
+2026-04-18 07:28:03 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:28:03 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:28:06 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:28:06 [INFO] === Recovered 0 open position(s) ===
+
+2026-04-18 07:28:06 [INFO] [THREAD] US-Swing thread starting (interval=60s)
+2026-04-18 07:28:06 [INFO] [THREAD] Started: US-Swing (60s interval)
+2026-04-18 07:28:08 [INFO] [THREAD] Crypto-Swing thread starting (interval=60s)
+2026-04-18 07:28:08 [INFO] [THREAD] Started: Crypto-Swing (60s interval)
+2026-04-18 07:28:08 [INFO] [CRYPTO] Cycle 1 | P&L: $+0.00 | Positions: 0
+2026-04-18 07:28:10 [INFO] [THREAD] FTSE thread starting (interval=60s)
+2026-04-18 07:28:10 [INFO] [THREAD] Started: FTSE (60s interval)
+2026-04-18 07:28:12 [INFO] [THREAD] ASX thread starting (interval=60s)
+2026-04-18 07:28:12 [INFO] [THREAD] Started: ASX (60s interval)
+2026-04-18 07:28:13 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:28:13 [ERROR] Cannot connect to IBKR — check TWS/Gateway connection
+2026-04-18 07:28:13 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:28:14 [INFO] [THREAD] Intraday thread starting (interval=30s)
+2026-04-18 07:28:14 [INFO] [THREAD] Started: Intraday (30s interval)
+2026-04-18 07:28:14 [INFO] [CRYPTO_ID] Cycle 1 | P&L: $+0.00
+2026-04-18 07:28:16 [INFO] [THREAD] Smallcap thread starting (interval=120s)
+2026-04-18 07:28:16 [INFO] [THREAD] Started: Smallcap (120s interval)
+2026-04-18 07:28:18 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 07:28:18 [INFO] Main cycle 1 | 2026-04-18 07:28:18
+2026-04-18 07:28:18 [INFO] [WATCHDOG] Cycle 1 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 07:28:28 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:28:30 [ERROR] [IBKR] Thread 'FTSE' connection failed (clientId=4): 
+2026-04-18 07:28:31 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 07:28:32 [ERROR] [IBKR] Thread 'ASX' connection failed (clientId=5): 
+2026-04-18 07:28:38 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:28:38 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:28:38 [INFO] ==================================================
+2026-04-18 07:28:38 [INFO] AlphaBot starting up
+2026-04-18 07:28:38 [INFO] Mode:   PAPER trading
+2026-04-18 07:28:38 [INFO] Port:   8080
+2026-04-18 07:28:38 [INFO] ==================================================
+2026-04-18 07:28:38 [INFO] AlphaBot bot process starting — dashboard runs separately on port 8080
+2026-04-18 07:28:38 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:28:39 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:28:58 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:28:58 [ERROR] Cannot connect to IBKR — check TWS/Gateway connection
+2026-04-18 07:28:58 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:29:18 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:29:38 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:29:38 [INFO] === Recovered 0 open position(s) ===
+
+2026-04-18 07:29:38 [INFO] [THREAD] US-Swing thread starting (interval=60s)
+2026-04-18 07:29:38 [INFO] [THREAD] Started: US-Swing (60s interval)
+2026-04-18 07:29:40 [INFO] [THREAD] Crypto-Swing thread starting (interval=60s)
+2026-04-18 07:29:40 [INFO] [THREAD] Started: Crypto-Swing (60s interval)
+2026-04-18 07:29:40 [INFO] [CRYPTO] Cycle 1 | P&L: $+0.00 | Positions: 0
+2026-04-18 07:29:42 [INFO] [THREAD] FTSE thread starting (interval=60s)
+2026-04-18 07:29:42 [INFO] [THREAD] Started: FTSE (60s interval)
+2026-04-18 07:29:44 [INFO] [THREAD] ASX thread starting (interval=60s)
+2026-04-18 07:29:44 [INFO] [THREAD] Started: ASX (60s interval)
+2026-04-18 07:29:46 [INFO] [THREAD] Intraday thread starting (interval=30s)
+2026-04-18 07:29:46 [INFO] [CRYPTO_ID] Cycle 1 | P&L: $+0.00
+2026-04-18 07:29:46 [INFO] [THREAD] Started: Intraday (30s interval)
+2026-04-18 07:29:48 [INFO] [THREAD] Smallcap thread starting (interval=120s)
+2026-04-18 07:29:48 [INFO] [THREAD] Started: Smallcap (120s interval)
+2026-04-18 07:29:50 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 07:29:50 [INFO] Main cycle 1 | 2026-04-18 07:29:50
+2026-04-18 07:29:50 [INFO] [WATCHDOG] Cycle 1 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 07:30:02 [ERROR] [IBKR] Thread 'FTSE' connection failed (clientId=4): 
+2026-04-18 07:30:03 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 07:30:04 [ERROR] [IBKR] Thread 'ASX' connection failed (clientId=5): 
+2026-04-18 07:30:09 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 07:30:10 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:30:20 [ERROR] [DASHBOARD] Error: name 'disc_col_t' is not defined
+Traceback (most recent call last):
+  File "/home/alphabot/app/app/dashboard.py", line 1638, in index
+    html = build_dashboard()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/alphabot/app/app/dashboard.py", line 646, in build_dashboard
+    f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
+                                                                                          ^^^^^^^^^^
+NameError: name 'disc_col_t' is not defined
+
+2026-04-18 07:30:30 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:30:39 [INFO] [CRYPTO_ID] Cycle 2 | P&L: $+0.00
+2026-04-18 07:30:50 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:31:01 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 07:31:03 [INFO] [CRYPTO] Cycle 2 | P&L: $+0.00 | Positions: 0
+2026-04-18 07:31:10 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:31:10 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 07:31:22 [ERROR] [IBKR] Thread 'FTSE' connection failed (clientId=4): 
+2026-04-18 07:31:22 [ERROR] [API KILL] 5 consecutive API failures — all bots stopped
+2026-04-18 07:31:24 [ERROR] [IBKR] Thread 'ASX' connection failed (clientId=5): 
+2026-04-18 07:31:25 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 07:31:30 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:32:02 [ERROR] [DASHBOARD] Error: name 'disc_col_t' is not defined
+Traceback (most recent call last):
+  File "/home/alphabot/app/app/dashboard.py", line 1638, in index
+    html = build_dashboard()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/alphabot/app/app/dashboard.py", line 646, in build_dashboard
+    f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
+                                                                                          ^^^^^^^^^^
+NameError: name 'disc_col_t' is not defined
+
+2026-04-18 07:32:31 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 07:32:31 [INFO] Main cycle 2 | 2026-04-18 07:32:31
+2026-04-18 07:32:31 [INFO] [WATCHDOG] Cycle 2 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 07:32:42 [ERROR] [IBKR] Thread 'FTSE' connection failed (clientId=4): 
+2026-04-18 07:32:44 [ERROR] [IBKR] Thread 'ASX' connection failed (clientId=5): 
+2026-04-18 07:32:51 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 
+2026-04-18 07:33:11 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): 

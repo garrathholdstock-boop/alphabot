@@ -1,6 +1,6 @@
 # AlphaBot Debug Agent - Persistent Context
 ## Last Updated
-18-Apr-2026 09:20 Paris (auto-updated by agent)
+18-Apr-2026 09:28 Paris (auto-updated by agent)
 
 ## Architecture
 - VPS: 178.104.170.58 (Hetzner), user: root, Paris = UTC+2
@@ -40,7 +40,7 @@
 6. Crypto Intraday (crypto_intraday_state) — 24/7 Binance testnet
 
 ## Current Status
-- Bot running: NO
+- Bot running: YES
 - All-time P&L: $-0.36 (13 trades, 23% win rate)
 - Open positions: HOOD x7540, TSLA x257, PLUG x70702 (check dashboard for live)
 
