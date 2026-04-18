@@ -1220,47 +1220,6 @@ function pinCmd(path,label){{
   </div>
 </div>
 
-<!-- Last 7 days + Risk -->
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
-  <div class="card">
-    <div class="lbl">Last 7 Days</div>
-    <div style="font-size:24px;font-weight:700;color:{_col(week_pnl)};margin:6px 0">{_fmt(week_pnl)}</div>
-    <div style="font-size:13px;color:#475569">{week_t} trades · {week_wr}% win rate</div>
-    <div style="font-size:13px;color:#475569;margin-top:4px">Best: <span style="color:#00ff88">{week_best}</span> · Worst: <span style="color:#ff4466">{week_worst}</span></div>
-  </div>
-  <div class="card">
-    <div class="lbl">Performance</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-      <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
-        <div style="font-size:20px;font-weight:700;color:{wr_color}">{win_rate}%</div>
-        <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Win Rate</div>
-      </div>
-      <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
-        <div style="font-size:20px;font-weight:700;color:{pf_color}">{pf_str}</div>
-        <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Prof Factor</div>
-      </div>
-      <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
-        <div style="font-size:20px;font-weight:700;color:{dd_color}">{max_dd}%</div>
-        <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Max DD</div>
-      </div>
-      <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px">
-        <div style="font-size:20px;font-weight:700;color:{sharpe_color}">{sharpe_str}</div>
-        <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Sharpe</div>
-      </div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="lbl">Risk Status</div>
-    <div style="margin-top:10px;font-size:14px;display:flex;flex-direction:column;gap:6px">
-      <div><span style="color:#475569">VIX </span><span style="color:{vix_color};font-weight:700">{vix_str_val}</span></div>
-      <div><span style="color:#475569">Signal min </span><span style="color:#ffcc00;font-weight:700">{MIN_SIGNAL_SCORE}/10</span></div>
-      <div><span style="color:#475569">Global pos </span><span style="font-weight:700">{global_pos}/{MAX_TOTAL_POSITIONS}</span></div>
-      <div><span style="color:#475569">Loss streak </span><span style="color:{streak_color};font-weight:700">{loss_streak}/{LOSS_STREAK_LIMIT}</span></div>
-      <div><span style="color:#475569">Size mult </span><span style="color:#ffcc00;font-weight:700">{size_mult}x</span></div>
-    </div>
-  </div>
-</div>
-
 <!-- Market cards -->
 <div class="grid2" style="margin-bottom:14px">
   <div class="card card-blue">
