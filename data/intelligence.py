@@ -32,6 +32,7 @@ from data.database import (
     db_entry_gate_attribution, db_rotation_summary, db_exit_category_breakdown,
     db_get_leaderboard, db_get_skip_reason_breakdown,
     db_save_intelligence_run, db_save_recommendations,
+    db_ev_by_discipline,
 )
 
 # ── System prompt (the mandate) ───────────────────────────────
@@ -48,7 +49,21 @@ Your mandate from the portfolio manager (Garrath):
    Only assign HIGH confidence at n >= 30 with consistent results.
 6. When in doubt, recommend MONITOR rather than a parameter change.
 7. Be specific and evidence-based. Vague recommendations are useless.
-8. Consider the 2-week paper trading context — early data may not be statistically robust.
+8. Consider the paper trading context — early data may not be statistically robust.
+
+EXPECTED VALUE ANALYSIS — THIS IS YOUR PRIMARY LENS:
+You will receive expected_value_by_discipline data. EV = (win_rate * avg_win) - (loss_rate * avg_loss).
+This is the single most important metric per discipline. Use it as follows:
+- EV > $5 and n >= 10: strong evidence of edge — consider loosening constraints for this discipline
+- EV $0-$5: marginal edge — monitor, don't change yet
+- EV negative and n >= 10: evidence against edge — recommend raising MIN_SIGNAL_SCORE for this discipline
+- Reward/risk ratio < 1.0 means avg loss > avg win — this is structurally bad even at high win rates
+- ALWAYS analyse each discipline separately. Never make global recommendations when the issue is per-discipline.
+
+DISCIPLINE-SPECIFIC RECOMMENDATIONS:
+You can recommend different MIN_SIGNAL_SCORE per discipline using the "discipline" field.
+If crypto_intraday has negative EV but stock_swing has positive EV, recommend raising
+crypto_intraday threshold only — not a global change.
 
 Parameter ranges you are allowed to recommend:
   MIN_SIGNAL_SCORE: 4.0 to 9.0 (never below 4, never above 9)
@@ -64,7 +79,7 @@ Parameter ranges you are allowed to recommend:
 
 Respond ONLY with valid JSON in exactly this structure — no preamble, no markdown fences:
 {
-  "narrative": "2-3 paragraph plain English summary of overall performance and key insights",
+  "narrative": "2-3 paragraph plain English summary of overall performance and key insights, leading with the EV picture per discipline",
   "recommendations": [
     {
       "category": "THRESHOLD|POSITION_LIMITS|STOP_LOSS|REGIME_GATE|WATCHLIST|OBSERVATION",
@@ -73,14 +88,14 @@ Respond ONLY with valid JSON in exactly this structure — no preamble, no markd
       "discipline": "all|stock_swing|crypto_swing|stock_intraday|crypto_intraday",
       "current_value": current_numeric_value_or_null,
       "recommended_value": recommended_numeric_value_or_null,
-      "evidence": "specific data points that support this recommendation",
+      "evidence": "specific EV, win rate, avg win/loss, sample size that support this",
       "confidence": "HIGH|MEDIUM|LOW",
       "sample_size": integer_or_null
     }
   ]
 }
 
-OBSERVATION category recs have action=NONE and no parameter — they are insights only, no config change.
+OBSERVATION category recs have action=NONE and no parameter — they are insights only.
 Include 1-2 OBSERVATION recs per run for things worth watching but not yet actionable.
 Limit total recommendations to 6 maximum. Quality over quantity."""
 
@@ -119,6 +134,7 @@ def _assemble_payload():
         exit_data      = db_exit_category_breakdown(days=14)
         skip_reasons   = db_get_skip_reason_breakdown()
         leaderboard    = db_get_leaderboard(limit=10)
+        ev_data        = db_ev_by_discipline()
 
         return {
             "overview": {
@@ -135,6 +151,24 @@ def _assemble_payload():
                 "is_live": bool(cfg.IS_LIVE),
                 "paper_trading": not bool(cfg.IS_LIVE),
             },
+            "expected_value_by_discipline": [
+                {
+                    "discipline": r[0],
+                    "trades": r[1],
+                    "wins": r[2],
+                    "losses": r[3],
+                    "win_rate_pct": r[4],
+                    "avg_win_usd": r[5],
+                    "avg_loss_usd": r[6],
+                    "ev_per_trade_usd": r[7],
+                    "total_pnl_usd": r[8],
+                    "avg_score": r[9],
+                    "avg_hold_hours": r[10],
+                    "reward_risk_ratio": round(r[5] / r[6], 2) if r[6] and r[6] > 0 else None,
+                    "has_edge": r[7] > 0 and r[1] >= 10,
+                }
+                for r in (ev_data or [])
+            ],
             "near_misses": {
                 "total": int(nm_total),
                 "score_based": int(nm_score),
