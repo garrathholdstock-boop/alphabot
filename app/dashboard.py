@@ -499,29 +499,22 @@ def build_dashboard():
             bd2 = pos.get("entry_breakdown","")
             bd_html2 = f'<div style="font-size:11px;color:#888;margin-top:8px;white-space:pre-wrap">{bd2}</div>' if bd2 else ""
             iphone_pos_cards += (
-                f'<div class="pos-card" onclick="toggleCard({idx})" style="border-color:{cat_col}22;cursor:pointer;-webkit-tap-highlight-color:transparent">'
+                f'<div class="pos-card" style="border-color:{cat_col}22">'
                 f'<div class="pos-card-header">'
                 f'<div><span class="pos-card-sym" style="color:{cat_col}">{sym}</span>'
                 f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
-                f'<div style="text-align:right">'
-                f'<div class="pos-card-pnl" style="color:{pnl_c2}">{sign2}${pnl2:.2f} <span style="font-size:11px;opacity:0.8">({sign2}{pnl_pct2:.1f}%)</span></div>'
-                f'<div class="tap-hint" style="font-size:10px;color:#475569;margin-top:3px">tap for more ▾</div>'
-                f'</div>'
+                f'<div class="pos-card-pnl" style="color:{pnl_c2};text-align:right">{sign2}${pnl2:.2f}<br><span style="font-size:11px;opacity:0.8">({sign2}{pnl_pct2:.1f}%)</span></div>'
                 f'</div>'
                 f'<div class="pos-card-row">'
                 f'<div class="pos-card-item"><span class="pos-card-label">Entry</span><span class="pos-card-value">${entry2:.4f}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Live</span><span class="pos-card-value" style="color:#00aaff">${live2:.4f}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Stop</span><span class="pos-card-value" style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct2:+.1f}%)</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Position</span><span class="pos-card-value">${pos_val2:,.0f}</span></div>'
-                f'</div>'
-                f'<div class="pos-card-detail" id="card-det-{idx}" style="display:none">'
-                f'<div class="pos-card-detail-grid">'
                 f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{held_str2}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Purchased</span><span class="pos-card-value">{purchased2}</span></div>'
-                f'<div class="pos-card-item"><span class="pos-card-label">Score</span><span class="pos-card-value" style="color:#ffcc00">{score2}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Target</span><span class="pos-card-value" style="color:#00ff88">${tp2:.4f}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Qty</span><span class="pos-card-value">{qty2:,}</span></div>'
-                f'</div>{bd_html2}</div>'
+                f'</div>'
                 f'</div>'
             )
         positions_html = (
@@ -535,7 +528,7 @@ def build_dashboard():
             f'</div>'
             f'<script>'
             f'function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}'
-            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);var open=d.style.display!=="none";d.style.display=open?"none":"block";var card=d.closest(".pos-card");var hint=card?card.querySelector(".tap-hint"):null;if(hint)hint.textContent=open?"tap for more ▾":"tap to close ▴";}}'
+            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);var open=d.style.display!=="none";d.style.display=open?"none":"block";var card=d.parentElement;var hint=card.querySelector(".tap-hint");if(hint)hint.textContent=open?"tap for more ▾":"tap to close ▴";}}'
             f'</script>'
         )
     else:
