@@ -60,6 +60,33 @@ def calc_macd(prices):
     signal_line = ema(macd_line, 9)
     return macd_line[-1], signal_line
 
+def calc_atr(bars, period=14):
+    """
+    Average True Range — measures volatility in price terms.
+    Used to set dynamic stop losses: stop = entry - (ATR * multiplier).
+    A wider ATR = more volatile stock = wider stop needed.
+    Returns ATR as a price value, or None if insufficient data.
+    """
+    if not bars or len(bars) < period + 2:
+        return None
+    try:
+        highs  = [b["h"] for b in bars]
+        lows   = [b["l"] for b in bars]
+        closes = [b["c"] for b in bars]
+        tr_list = []
+        for i in range(1, len(bars)):
+            h, l, pc = highs[i], lows[i], closes[i-1]
+            tr = max(h - l, abs(h - pc), abs(l - pc))
+            tr_list.append(tr)
+        # Wilder smoothing (same as calc_adx)
+        s = sum(tr_list[:period])
+        for v in tr_list[period:]:
+            s = s - s / period + v
+        return round(s / period, 6)
+    except:
+        return None
+
+
 def calc_adx(bars, period=14):
     """ADX > 25 = strong trend. ADX < 20 = choppy — avoid EMA crossovers."""
     if not bars or len(bars) < period + 2: return None
