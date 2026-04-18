@@ -17799,3 +17799,11 @@
 2026-04-18 06:56:42 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
 2026-04-18 06:56:42 [INFO] [CRYPTO_ID] BUY IMXUSDT @ $0.1698
 2026-04-18 06:56:43 [INFO] [BINANCE] ORDER BUY 117.78 IMXUSDT | signal=$0.1698 fill=$0.1701 slippage=+0.177%
+2026-04-18 07:20:33 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:20:33 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:20:33 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:20:33 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:20:35 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:20:36 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 07:20:36 [INFO] [BINANCE] Using TESTNET
+2026-04-18 07:20:36 [INFO] [DB] Trading Intelligence Database ready
