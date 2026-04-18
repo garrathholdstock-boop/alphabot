@@ -225,7 +225,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 }
 .pos-cards{display:none}
 .trades-cards{display:none}
-.pos-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:rgba(0,255,136,0.1);user-select:none;-webkit-user-select:none}
+.pos-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px;margin-bottom:10px}
 .pos-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .pos-card-sym{font-size:17px;font-weight:700;font-family:'Syne',sans-serif}
 .pos-card-pnl{font-size:15px;font-weight:700;text-align:right;line-height:1.3}
@@ -233,7 +233,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 .pos-card-item{display:flex;flex-direction:column;gap:2px}
 .pos-card-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1.5px}
 .pos-card-value{font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace}
-.pos-card-detail{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
+.pos-card-detail{display:block;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
 .pos-card-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .trade-card{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px;margin-bottom:8px}
 .trade-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
