@@ -622,7 +622,10 @@ def build_dashboard():
                 f'</td></tr>'
             )
         # Build iPhone trade cards
+        # Visible line: Symbol · Market · Intraday badge (only if intraday) · % P/L
+        # Tap expand: Total $, Qty, Held, Reason
         iphone_trade_cards = ""
+        _card_counter = 0
         for row in db_trades:
             sym_t,pnl_t,side_t,ts_t,score_t = row[0],row[1],row[2],row[3],row[4]
             qty_t = row[5] if len(row)>5 else None
@@ -631,44 +634,57 @@ def build_dashboard():
             market_t = row[8] if len(row)>8 else "—"
             pc_t = "#00ff88" if pnl_t>=0 else "#ff4466"
             sign_t = "+" if pnl_t>=0 else ""
-            try:
-                dt_t = datetime.fromisoformat(ts_t)
-                if dt_t.tzinfo is None: dt_t = dt_t.replace(tzinfo=ZoneInfo("UTC"))
-                dt_tp = dt_t.astimezone(PARIS)
-                date_t = dt_tp.strftime("%d %b")
-                time_t = dt_tp.strftime("%H:%M")
-            except:
-                date_t = ts_t[:10] if ts_t else "—"; time_t = ""
             mkt_col_t = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market_t,"#475569")
             disc_t = row[9] if len(row)>9 else "swing"
-            _dm = {"crypto_intraday":("⚡","#aa88ff"),"stock_intraday":("⚡","#00aaff"),"crypto_swing":("🔄","#00ff88"),"stock_swing":("📈","#00aaff"),"swing":("📈","#00aaff")}
-            disc_icon_t, disc_col_t = _dm.get(disc_t, ("•","#475569"))
+            # Intraday badge only for intraday disciplines — swing trades get no badge
+            _is_intraday = "intraday" in str(disc_t).lower()
             qty_s_t = f"{int(qty_t):,}" if qty_t else "—"
-            price_s_t = f"${price_t:.4f}" if price_t else "—"
             total_s_t = f"${price_t*qty_t:,.0f}" if price_t and qty_t else "—"
             hold_s_t = f"{hold_t:.1f}h" if hold_t else "—"
-            t_card_idx = len(iphone_trade_cards)
+            pct_s_t = f"{sign_t}{abs(pnl_t/(price_t*qty_t)*100):.2f}%" if (price_t and qty_t) else f"{sign_t}${pnl_t:.2f}"
+            # Sell reason (mirrors desktop logic)
+            if pnl_t < 0:
+                sell_reason_t = "🛑 Stop loss triggered"
+                sell_col_t = "#ff4466"
+            elif hold_t and hold_t > 96:
+                sell_reason_t = "⏱ Max hold reached — stale exit"
+                sell_col_t = "#ffcc00"
+            elif hold_t and hold_t < 0.5:
+                sell_reason_t = "⚡ Quick scalp"
+                sell_col_t = "#00ff88"
+            elif pnl_t > 0:
+                sell_reason_t = "🎯 Take profit hit"
+                sell_col_t = "#00ff88"
+            else:
+                sell_reason_t = "— Position closed"
+                sell_col_t = "#475569"
+            t_card_idx = _card_counter
+            _card_counter += 1
+            intraday_badge = (
+                f'<span style="font-size:10px;background:rgba(170,136,255,0.12);color:#aa88ff;'
+                f'border:1px solid rgba(170,136,255,0.35);border-radius:4px;padding:1px 6px;'
+                f'font-weight:700;letter-spacing:0.5px">ID</span>'
+            ) if _is_intraday else ''
             iphone_trade_cards += (
-                f'<div onclick="toggleTradeCard({t_card_idx})" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<div style="display:flex;align-items:center;gap:7px">'
-                f'<span style="font-size:12px">{"✅" if pnl_t>0 else "❌"}</span>'
-                f'<div>'
-                f'<div style="font-size:14px;font-weight:700;color:{mkt_col_t};font-family:Syne,sans-serif">{sym_t} <span style="font-size:10px;color:{disc_col_t}">{disc_icon_t}</span></div>'
-                f'<div style="font-size:11px;color:#475569">{date_t} {time_t} · {hold_s_t}</div>'
-                f'</div></div>'
-                f'<div style="text-align:right">'
-                f'<div style="font-size:14px;font-weight:700;color:{pc_t}">{sign_t}${pnl_t:.2f}</div>'
-                f'<div style="font-size:11px;color:#475569">{price_s_t} · {qty_s_t}</div>'
-                f'</div></div>'
-                f'<div id="tcard-{t_card_idx}" style="display:none;margin-top:8px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">'
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12px">'
-                f'<div><span style="color:#475569">Entry</span> <b>{price_s_t}</b></div>'
-                f'<div><span style="color:#475569">Qty</span> <b>{qty_s_t}</b></div>'
-                f'<div><span style="color:#475569">Total</span> <b>{total_s_t}</b></div>'
-                f'<div><span style="color:#475569">Held</span> <b>{hold_s_t}</b></div>'
-                f'<div><span style="color:#475569">Market</span> <b style="color:{mkt_col_t}">{market_t}</b></div>'
-                f'<div><span style="color:#475569">Score</span> <b style="color:#ffcc00">{score_t or "—"}</b></div>'
+                f'<div onclick="toggleTradeCard({t_card_idx})" style="padding:12px 2px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+                f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+                f'<span style="font-size:15px;font-weight:700;font-family:Syne,sans-serif;color:#e0e0e0">{sym_t}</span>'
+                f'<span style="font-size:12px;font-weight:700;color:{mkt_col_t}">{market_t}</span>'
+                f'{intraday_badge}'
+                f'</div>'
+                f'<div style="font-size:16px;font-weight:700;color:{pc_t};white-space:nowrap">{pct_s_t}</div>'
+                f'</div>'
+                f'<div id="tcard-{t_card_idx}" style="display:none;margin-top:10px;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px">'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:13px;margin-bottom:8px">'
+                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Total</span><br><b>{total_s_t}</b></div>'
+                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Qty</span><br><b>{qty_s_t}</b></div>'
+                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Held</span><br><b>{hold_s_t}</b></div>'
+                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">P&amp;L</span><br><b style="color:{pc_t}">{sign_t}${pnl_t:.2f}</b></div>'
+                f'</div>'
+                f'<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">'
+                f'<span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Exit Reason</span><br>'
+                f'<b style="color:{sell_col_t};font-size:13px">{sell_reason_t}</b>'
                 f'</div></div>'
                 f'</div>'
             )
