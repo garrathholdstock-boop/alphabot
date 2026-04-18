@@ -223,8 +223,6 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   .scan-table th:nth-child(8),.scan-table td:nth-child(8){display:none}
   .scan-table td:nth-child(4),.scan-table td:nth-child(5){white-space:nowrap}
 }
-.pos-cards{display:none}
-.trades-cards{display:none}
 .pos-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:rgba(0,255,136,0.1);user-select:none;-webkit-user-select:none}
 .pos-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .pos-card-sym{font-size:17px;font-weight:700;font-family:'Syne',sans-serif}
