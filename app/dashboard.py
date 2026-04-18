@@ -199,7 +199,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   table{min-width:500px;font-size:13px}
   th,td{padding:8px 10px}
 }
-@media(max-width:768px){
+@media(max-width:820px){
   .big{font-size:20px}
   .grid5{grid-template-columns:1fr 1fr}
   .grid2{grid-template-columns:1fr}
@@ -214,10 +214,10 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   .card{padding:14px 14px}
   .tab{padding:10px 12px;font-size:11px}
   .lbl{font-size:10px}
-  .pos-table-wrap{display:none}
-  .pos-cards{display:block}
-  .trades-table-wrap{display:none}
-  .trades-cards{display:block}
+  .pos-table-wrap{display:none !important}
+  .pos-cards{display:block !important}
+  .trades-table-wrap{display:none !important}
+  .trades-cards{display:block !important}
   .scan-table th:nth-child(6),.scan-table td:nth-child(6),
   .scan-table th:nth-child(7),.scan-table td:nth-child(7),
   .scan-table th:nth-child(8),.scan-table td:nth-child(8){display:none}
