@@ -134,6 +134,13 @@ GAP_DOWN_PCT        = 3.0
 CRYPTO_STOP_PCT     = 4.0
 CRYPTO_TRAIL_PCT    = 3.0
 
+# ── ATR-based dynamic stops ───────────────────────────────────
+# Stop = entry_price - (ATR * ATR_STOP_MULTIPLIER)
+# 2.0 = stop 2 ATRs below entry — adapts to each stock's volatility
+# Falls back to fixed STOP_LOSS_PCT if ATR unavailable or disabled
+USE_ATR_STOPS        = True
+ATR_STOP_MULTIPLIER  = 2.0
+
 # ── Position & Trade Limits ───────────────────────────────────
 MAX_POSITIONS             = int(os.getenv("MAX_POSITIONS", "3"))
 MAX_TOTAL_POSITIONS       = int(os.getenv("MAX_TOTAL_POSITIONS", "15"))
@@ -416,6 +423,7 @@ def load_trading_config():
     global MAX_DAILY_LOSS_PCT, MAX_DAILY_SPEND_PCT, MAX_EXPOSURE_PCT, DAILY_PROFIT_TARGET_PCT
     global MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT, MAX_SECTOR_POSITIONS
     global LOSS_STREAK_LIMIT, VIX_HIGH_THRESHOLD, VIX_EXTREME
+    global USE_ATR_STOPS, ATR_STOP_MULTIPLIER
     try:
         with open(CONFIG_JSON_PATH) as f:
             c = _json.load(f)
@@ -445,6 +453,8 @@ def load_trading_config():
         LOSS_STREAK_LIMIT         = int(c.get("LOSS_STREAK_LIMIT", LOSS_STREAK_LIMIT))
         VIX_HIGH_THRESHOLD        = float(c.get("VIX_HIGH_THRESHOLD", VIX_HIGH_THRESHOLD))
         VIX_EXTREME               = float(c.get("VIX_EXTREME", VIX_EXTREME))
+        USE_ATR_STOPS             = bool(c.get("USE_ATR_STOPS", USE_ATR_STOPS))
+        ATR_STOP_MULTIPLIER       = float(c.get("ATR_STOP_MULTIPLIER", ATR_STOP_MULTIPLIER))
     except FileNotFoundError:
         pass  # config.json not yet created — use defaults
     except Exception as e:
