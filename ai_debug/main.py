@@ -10,8 +10,8 @@ AlphaBot Debug Agent v8
 - CONTEXT.md auto-sync nightly
 """
 
-from fastapi import FastAPI, Form, Response, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Form, Response, BackgroundTasks, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 import os, subprocess, sqlite3, json, anthropic, base64, html, re, uuid
 import threading, time, requests, logging
 from datetime import datetime, timezone, timedelta
@@ -604,6 +604,29 @@ def run_monitor():
                     _update_context_md()
             elif now_paris.hour != 7:
                 alerted.discard("morning_brief_sent")
+
+            # ── Daily backup at 02:00 Paris ──────────────────
+            # Runs every night at 2am — markets closed everywhere
+            # Keeps 30 days, auto-deletes older folders
+            if now_paris.hour == 2 and now_paris.minute < 5:
+                if "daily_backup_done" not in alerted:
+                    alerted.add("daily_backup_done")
+                    try:
+                        folder, results = _do_backup()
+                        ok_count = sum(1 for r in results if r["ok"])
+                        _log_agent(f"Daily backup complete: {folder} ({ok_count}/{len(results)} files)")
+                        # Auto-clean backups older than 30 days
+                        import glob as _gb
+                        cutoff = datetime.now(PARIS).timestamp() - (30 * 86400)
+                        for d in _gb.glob(os.path.join(BACKUP_ROOT, "????????")):
+                            if os.path.getmtime(d) < cutoff:
+                                import shutil as _sh
+                                _sh.rmtree(d)
+                                _log_agent(f"Auto-removed old backup: {d}")
+                    except Exception as e:
+                        _log_agent(f"Daily backup failed: {e}")
+            elif now_paris.hour != 2:
+                alerted.discard("daily_backup_done")
 
             # ── Clear old P1 alerts after 1 hour ────────────
             # (so if the issue recurs next day we alert again)
@@ -1576,6 +1599,10 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       <button type="submit" style="background:#0a0a1a;border:2px solid #7c3aed;color:#a78bfa;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">☀️ Morning Brief</button>
     </form>"""
 
+    quick += """<a href="/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
+      <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
+    </a>"""
+
     safe_files = ["app/main.py","app/dashboard.py","core/config.py","core/execution.py",
                   "core/risk.py","data/analytics.py","data/database.py","data/intelligence.py",
                   "ai_debug/main.py","start.sh",".env"]
@@ -1951,3 +1978,694 @@ async def view_file(filename: str = Form(""), question: str = Form(""), history:
     steps = messages + [{"role": "assistant", "content": response_text}]
     return store(dict(analysis=analysis, command=command, reason=reason, status=status,
                       question=question or filename, history=enc(steps), step_count=1))
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAINTENANCE SYSTEM
+# ═══════════════════════════════════════════════════════════════
+BACKUP_ROOT  = "/home/alphabot/backups"
+MAINT_PIN    = os.environ.get("KILL_PIN", os.environ.get("MAINT_PIN", "1234"))
+
+FILES_TO_BACKUP = [
+    ("app/main.py",           "main.py"),
+    ("app/dashboard.py",      "dashboard.py"),
+    ("data/analytics.py",     "analytics.py"),
+    ("data/database.py",      "database.py"),
+    ("data/intelligence.py",  "intelligence.py"),
+    ("core/config.py",        "config.py"),
+    ("ai_debug/main.py",      "agent_main.py"),
+    ("trading_config.json",   "trading_config.json"),
+    ("alphabot.db",           "alphabot.db"),
+]
+
+
+def _do_backup():
+    """Create a dated backup folder and copy all key files. Returns (folder, results)."""
+    import shutil
+    date_str   = datetime.now(PARIS).strftime("%Y%m%d")
+    backup_dir = os.path.join(BACKUP_ROOT, date_str)
+    os.makedirs(backup_dir, exist_ok=True)
+    results = []
+    for src_rel, dst_name in FILES_TO_BACKUP:
+        src = os.path.join(APP_PATH, src_rel)
+        dst = os.path.join(backup_dir, dst_name)
+        try:
+            shutil.copy2(src, dst)
+            size = os.path.getsize(dst)
+            results.append({"file": dst_name, "ok": True,
+                            "size": f"{size/1024:.1f} KB", "path": dst})
+        except Exception as e:
+            results.append({"file": dst_name, "ok": False, "error": str(e), "path": dst})
+    return backup_dir, results
+
+
+def _list_backups():
+    """Return list of backup folders with metadata."""
+    import glob
+    backups = []
+    try:
+        dirs = sorted(glob.glob(os.path.join(BACKUP_ROOT, "????????")), reverse=True)
+        for d in dirs:
+            date_str = os.path.basename(d)
+            try:
+                dt = datetime.strptime(date_str, "%Y%m%d")
+                label = dt.strftime("%A %d %B %Y")
+            except:
+                label = date_str
+            files = os.listdir(d) if os.path.isdir(d) else []
+            total_size = sum(
+                os.path.getsize(os.path.join(d, f))
+                for f in files if os.path.isfile(os.path.join(d, f))
+            )
+            backups.append({
+                "date_str": date_str,
+                "label":    label,
+                "path":     d,
+                "files":    len(files),
+                "size_mb":  round(total_size / 1024 / 1024, 2),
+            })
+    except Exception as e:
+        _log_agent(f"_list_backups error: {e}")
+    return backups
+
+
+def _do_monday_check():
+    """Run the pre-Monday readiness check. Returns list of (status, message) tuples."""
+    checks = []
+
+    # 1. All 3 screens alive?
+    screens = run_cmd("/usr/bin/screen -ls")
+    for name in ["alphabot", "dashboard", "agent"]:
+        if name in screens:
+            checks.append(("✅", f"Screen '{name}' is running"))
+        else:
+            checks.append(("🔴", f"Screen '{name}' is DOWN — restart needed"))
+
+    # 2. Last log entry recent?
+    try:
+        log_text = get_log_file(lines=5)
+        if log_text.strip():
+            checks.append(("✅", "Bot log has recent activity"))
+        else:
+            checks.append(("⚠️", "Bot log appears empty — check alphabot screen"))
+    except:
+        checks.append(("⚠️", "Could not read bot log"))
+
+    # 3. No P1 events in last 24h?
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        p1_count = conn.execute(
+            "SELECT COUNT(*) FROM agent_events WHERE priority='P1' "
+            "AND created_at >= datetime('now','-24 hours')"
+        ).fetchone()[0] or 0
+        conn.close()
+        if p1_count == 0:
+            checks.append(("✅", "No P1 safety events in last 24 hours"))
+        else:
+            checks.append(("🔴", f"{p1_count} P1 safety event(s) in last 24h — review before Monday"))
+    except:
+        checks.append(("⚠️", "Could not check P1 event history"))
+
+    # 4. MIN_SIGNAL_SCORE check
+    try:
+        with open(os.path.join(APP_PATH, "trading_config.json")) as f:
+            cfg_j = json.load(f)
+        score = cfg_j.get("MIN_SIGNAL_SCORE", 5)
+        is_live = cfg_j.get("IS_LIVE", False)
+        if is_live and score < 7:
+            checks.append(("🔴", f"IS_LIVE=true but MIN_SIGNAL_SCORE={score} — raise to 7 before live!"))
+        elif score < 7:
+            checks.append(("⚠️", f"MIN_SIGNAL_SCORE={score} — remember to raise to 7 before going live"))
+        else:
+            checks.append(("✅", f"MIN_SIGNAL_SCORE={score} ✓"))
+        checks.append(("ℹ️", f"IS_LIVE={'true ⚠️' if is_live else 'false ✓ (paper trading)'}"))
+    except:
+        checks.append(("⚠️", "Could not read trading_config.json"))
+
+    # 5. Pending intelligence recommendations?
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM tuning_recommendations WHERE status='PENDING'"
+        ).fetchone()[0] or 0
+        conn.close()
+        if pending > 0:
+            checks.append(("⚠️", f"{pending} intelligence recommendation(s) pending — review at :8080/intelligence"))
+        else:
+            checks.append(("✅", "No pending intelligence recommendations"))
+    except:
+        checks.append(("⚠️", "Could not check intelligence recommendations"))
+
+    # 6. Open positions — just list them
+    try:
+        with open(os.path.join(APP_PATH, "positions.json")) as f:
+            pos = json.load(f)
+        if pos:
+            syms = ", ".join(pos.keys())
+            checks.append(("ℹ️", f"Open positions going into Monday: {syms}"))
+        else:
+            checks.append(("ℹ️", "No open positions — starting Monday flat"))
+    except:
+        checks.append(("ℹ️", "Could not read positions.json"))
+
+    # 7. Friday backup exists?
+    backups = _list_backups()
+    if backups:
+        latest = backups[0]
+        checks.append(("✅", f"Latest backup: {latest['label']} ({latest['size_mb']} MB, {latest['files']} files)"))
+    else:
+        checks.append(("⚠️", "No backups found — run Friday Backup before making changes"))
+
+    return checks
+
+
+def _build_maintenance_page(msg=None, msg_type="ok", backup_result=None,
+                             monday_result=None, backups=None):
+    """Build the full maintenance page HTML."""
+    now = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
+
+    msg_html = ""
+    if msg:
+        col = "#00ff88" if msg_type == "ok" else "#ef4444"
+        ico = "✅" if msg_type == "ok" else "❌"
+        msg_html = f'<div style="background:{col}18;border:1px solid {col}44;border-radius:10px;padding:14px 18px;margin-bottom:20px;color:{col};font-weight:700">{ico} {html.escape(msg)}</div>'
+
+    # ── Friday Backup result ──────────────────────────────────
+    backup_html = ""
+    if backup_result:
+        folder, results = backup_result
+        rows = ""
+        for r in results:
+            ok_col = "#00ff88" if r["ok"] else "#ef4444"
+            ok_ico = "✅" if r["ok"] else "❌"
+            detail = r.get("size", r.get("error", ""))
+            rows += f'<tr><td style="color:{ok_col}">{ok_ico} {r["file"]}</td><td style="color:#94a3b8;font-size:11px">{detail}</td></tr>'
+        backup_html = f"""
+        <div style="background:#0a1a0f;border:1px solid rgba(0,255,136,0.3);border-radius:12px;padding:20px;margin-bottom:20px">
+          <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:4px">✅ Backup Complete</div>
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;font-family:'JetBrains Mono',monospace">{html.escape(folder)}</div>
+          <table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody>{rows}</tbody></table>
+          <div style="font-size:12px;color:#94a3b8;margin-top:12px">
+            Verify in Termius: <code style="color:#00ff88">ls -lh {html.escape(folder)}/</code>
+          </div>
+        </div>"""
+
+    # ── Monday Check result ───────────────────────────────────
+    monday_html = ""
+    if monday_result:
+        rows = ""
+        all_ok = all(s in ("✅", "ℹ️") for s, _ in monday_result)
+        for status, msg_item in monday_result:
+            col = "#00ff88" if status == "✅" else "#ef4444" if status == "🔴" else "#f59e0b" if status == "⚠️" else "#94a3b8"
+            rows += f'<tr><td style="font-size:16px;width:28px">{status}</td><td style="color:{col}">{html.escape(msg_item)}</td></tr>'
+        verdict_col = "#00ff88" if all_ok else "#ef4444"
+        verdict_txt = "READY FOR MONDAY ✅" if all_ok else "ACTION REQUIRED BEFORE MONDAY 🔴"
+        monday_html = f"""
+        <div style="background:#0a0a1a;border:1px solid {verdict_col}44;border-radius:12px;padding:20px;margin-bottom:20px">
+          <div style="font-size:15px;font-weight:700;color:{verdict_col};margin-bottom:14px">{verdict_txt}</div>
+          <table><tbody>{rows}</tbody></table>
+        </div>"""
+
+    # ── Backup list ───────────────────────────────────────────
+    if backups is None:
+        backups = _list_backups()
+    backup_list_html = ""
+    if backups:
+        rows = ""
+        for b in backups:
+            rows += (
+                f'<tr>'
+                f'<td style="color:#e0e0e0;font-weight:700">{html.escape(b["label"])}</td>'
+                f'<td style="color:#94a3b8;font-family:\'JetBrains Mono\',monospace;font-size:11px">{b["path"]}</td>'
+                f'<td style="color:#00aaff">{b["files"]} files</td>'
+                f'<td style="color:#ffcc00">{b["size_mb"]} MB</td>'
+                f'<td>'
+                f'<button onclick="restoreBackup(\'{html.escape(b["date_str"])}\')" '
+                f'style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);'
+                f'border-radius:6px;color:#ef4444;font-size:11px;padding:4px 10px;cursor:pointer">'
+                f'↩ Restore</button>'
+                f'</td>'
+                f'</tr>'
+            )
+        backup_list_html = f"""
+        <div class="card" style="margin-bottom:20px">
+          <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#f59e0b;text-transform:uppercase;margin-bottom:12px">🗂 Backup Archive</div>
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">
+            These folders live at <code style="color:#00ff88">/home/alphabot/backups/</code> on the VPS.
+            Verify any time in Termius with <code style="color:#00ff88">ls -lh /home/alphabot/backups/</code>
+          </div>
+          <div style="overflow-x:auto">
+            <table><thead><tr><th>Date</th><th>Path</th><th>Files</th><th>Size</th><th>Action</th></tr></thead>
+            <tbody>{rows}</tbody></table>
+          </div>
+        </div>"""
+    else:
+        backup_list_html = """
+        <div class="card" style="margin-bottom:20px">
+          <div style="font-size:13px;font-weight:700;color:#f59e0b;margin-bottom:8px">🗂 Backup Archive</div>
+          <div style="color:#94a3b8;font-size:13px">No backups yet — run Friday Backup to create the first one.</div>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlphaBot Maintenance</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+body {{ background:#0a0a0f; color:#e2e8f0; font-family:'JetBrains Mono',monospace; padding:16px; max-width:1000px; font-size:15px; margin:0 auto; }}
+.card {{ background:#111118; border:1px solid #1e1e2e; border-radius:10px; padding:18px; margin-bottom:16px; }}
+table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+th {{ color:#94a3b8; text-align:left; padding:6px 8px; border-bottom:1px solid #1e1e2e; font-size:11px; text-transform:uppercase; letter-spacing:1px; }}
+td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
+.btn {{ display:inline-block;padding:12px 22px;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;cursor:pointer;border:none;text-align:center; }}
+#pin-overlay {{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center}}
+#pin-overlay.visible {{display:flex}}
+.pin-box {{background:#111118;border:1px solid rgba(245,158,11,0.4);border-radius:16px;padding:32px 36px;text-align:center;max-width:360px;width:90%}}
+</style>
+</head>
+<body>
+
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #1e1e2e;flex-wrap:wrap">
+  <div>
+    <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#f59e0b">🔧 AlphaBot <span style="color:#94a3b8">Maintenance</span></div>
+    <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now}</div>
+  </div>
+  <a href="/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Back to Agent</a>
+</div>
+
+{msg_html}
+{backup_html}
+{monday_html}
+
+<!-- Action buttons -->
+<div class="card" style="margin-bottom:20px;border-color:rgba(245,158,11,0.2)">
+  <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#f59e0b;text-transform:uppercase;margin-bottom:16px">🛠 Maintenance Actions</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+
+    <!-- Friday Backup -->
+    <div style="background:#0a1020;border:1px solid rgba(0,255,136,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">📦 Friday Backup</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Backs up all Python files, the database, and config to a dated folder on the VPS.
+        Run every Friday night before weekend work. Takes ~5 seconds.
+      </div>
+      <button onclick="runAction('backup')" class="btn" style="width:100%;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.35);color:#00ff88">
+        📦 Run Backup Now
+      </button>
+    </div>
+
+    <!-- Pre-Monday Check -->
+    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#00aaff;margin-bottom:6px">✅ Pre-Monday Check</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Checks all 3 screens running, no P1 alerts, config correct, intelligence reviewed,
+        open positions known. Run Sunday night before bed.
+      </div>
+      <button onclick="runAction('monday')" class="btn" style="width:100%;background:rgba(0,170,255,0.12);border:1px solid rgba(0,170,255,0.35);color:#00aaff">
+        ✅ Run Check Now
+      </button>
+    </div>
+
+    <!-- Clean Old Backups -->
+    <div style="background:#0a1020;border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#ef4444;margin-bottom:6px">🧹 Clean Old Backups</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Removes backup folders older than 28 days (keeps last 4 weeks).
+        Run monthly to keep disk usage in check.
+      </div>
+      <button onclick="pinAction('clean', 'Clean backups older than 28 days?')" class="btn" style="width:100%;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);color:#ef4444">
+        🧹 Clean Old Backups
+      </button>
+    </div>
+
+    <!-- View Disk Usage -->
+    <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:6px">💾 Disk Usage</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Shows how much disk space the VPS is using — backups, logs, database.
+        Good to check monthly so you don't run out of space.
+      </div>
+      <button onclick="runAction('disk')" class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
+        💾 Check Disk Usage
+      </button>
+    </div>
+
+    <!-- Export DB -->
+    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#00aaff;margin-bottom:6px">📤 Export Database</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Downloads <code>alphabot.db</code> directly to your device — all trade history,
+        near-misses, intelligence runs. Off-site backup. Run weekly.
+      </div>
+      <a href="/maintenance/export-db" style="text-decoration:none">
+        <button class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff">
+          📤 Download Database
+        </button>
+      </a>
+    </div>
+
+    <!-- Revert a File -->
+    <div style="background:#0a1020;border:1px solid rgba(255,204,0,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#ffcc00;margin-bottom:6px">↩ Revert a File</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Put up a dodgy file? Pick the file, see all dated backups for it,
+        choose the version you want. PIN required. Never touches the database.
+      </div>
+      <a href="/maintenance/revert" style="text-decoration:none">
+        <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
+          ↩ Revert a File
+        </button>
+      </a>
+    </div>
+
+  </div>
+</div>
+
+{backup_list_html}
+
+<!-- Disk usage result -->
+<div id="disk-result" style="display:none" class="card">
+  <div style="font-size:13px;font-weight:700;color:#aa88ff;margin-bottom:10px">💾 Disk Usage</div>
+  <pre id="disk-output" style="font-size:12px;color:#94a3b8;white-space:pre-wrap"></pre>
+</div>
+
+<!-- PIN overlay for destructive actions -->
+<div id="pin-overlay" onclick="if(event.target===this)closePin()">
+  <div class="pin-box">
+    <div style="font-size:18px;font-weight:700;color:#f59e0b;margin-bottom:6px">🔒 Confirm Action</div>
+    <div id="pin-label" style="font-size:13px;color:#e0e0e0;margin-bottom:18px"></div>
+    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
+      style="background:#0a0a0f;border:1px solid rgba(245,158,11,0.4);border-radius:8px;color:#f59e0b;
+             font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;padding:10px;
+             width:100%;text-align:center;letter-spacing:4px;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')submitPin()">
+    <div style="display:flex;gap:10px">
+      <button onclick="closePin()" style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#94a3b8;padding:10px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:13px">Cancel</button>
+      <button onclick="submitPin()" style="flex:2;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);border-radius:8px;color:#f59e0b;padding:10px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700">Confirm</button>
+    </div>
+    <div id="pin-error" style="color:#ef4444;font-size:12px;margin-top:10px;display:none">Wrong PIN</div>
+  </div>
+</div>
+
+<script>
+var _pendingAction = null;
+
+function runAction(action) {{
+  if (action === 'disk') {{
+    fetch('/maintenance/disk')
+      .then(r => r.json())
+      .then(d => {{
+        document.getElementById('disk-result').style.display = 'block';
+        document.getElementById('disk-output').textContent = d.output || 'Error';
+      }});
+    return;
+  }}
+  window.location.href = '/maintenance/run?action=' + action;
+}}
+
+function pinAction(action, label) {{
+  _pendingAction = action;
+  document.getElementById('pin-label').textContent = label;
+  document.getElementById('pin-error').style.display = 'none';
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-overlay').classList.add('visible');
+  document.getElementById('pin-input').focus();
+}}
+
+function closePin() {{
+  document.getElementById('pin-overlay').classList.remove('visible');
+  _pendingAction = null;
+}}
+
+function submitPin() {{
+  var pin = document.getElementById('pin-input').value;
+  fetch('/maintenance/action', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{pin: pin, action: _pendingAction}})
+  }}).then(r => r.json()).then(d => {{
+    if (d.status === 'wrong_pin') {{
+      document.getElementById('pin-error').style.display = 'block';
+    }} else {{
+      closePin();
+      window.location.href = '/maintenance?msg=' + encodeURIComponent(d.message || 'Done');
+    }}
+  }});
+}}
+
+function restoreBackup(dateStr) {{
+  _pendingAction = 'restore:' + dateStr;
+  document.getElementById('pin-label').textContent = 'Restore all files from ' + dateStr + '? This will overwrite current code.';
+  document.getElementById('pin-error').style.display = 'none';
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-overlay').classList.add('visible');
+  document.getElementById('pin-input').focus();
+}}
+</script>
+</body></html>"""
+
+
+@app.get("/maintenance", response_class=HTMLResponse)
+async def maintenance_page(msg: str = None, msg_type: str = "ok"):
+    return HTMLResponse(_build_maintenance_page(msg=msg, msg_type=msg_type))
+
+
+@app.get("/maintenance/run")
+async def maintenance_run(action: str = "backup"):
+    """Run non-destructive maintenance actions — no PIN needed."""
+    if action == "backup":
+        folder, results = _do_backup()
+        all_ok = all(r["ok"] for r in results)
+        _log_agent(f"Backup {'complete' if all_ok else 'partial'}: {folder}")
+        return HTMLResponse(_build_maintenance_page(
+            msg=f"Backup saved to {folder}" if all_ok else "Backup completed with some errors — check results",
+            msg_type="ok" if all_ok else "error",
+            backup_result=(folder, results),
+        ))
+    elif action == "monday":
+        checks = _do_monday_check()
+        all_ok = all(s in ("✅", "ℹ️") for s, _ in checks)
+        _log_agent(f"Pre-Monday check: {'PASS' if all_ok else 'ACTION REQUIRED'}")
+        return HTMLResponse(_build_maintenance_page(
+            monday_result=checks,
+        ))
+    return HTMLResponse(_build_maintenance_page(msg="Unknown action", msg_type="error"))
+
+
+@app.get("/maintenance/disk")
+async def maintenance_disk():
+    """Return disk usage summary as JSON."""
+    output = run_cmd("df -h /home && echo '---' && du -sh /home/alphabot/backups/ 2>/dev/null && du -sh /home/alphabot/app/alphabot.db && du -sh /home/alphabot/app/alphabot.log")
+    return JSONResponse({"output": output})
+
+
+@app.post("/maintenance/action")
+async def maintenance_action(request: Request):
+    """PIN-gated destructive maintenance actions."""
+    from fastapi.responses import JSONResponse as JR
+    try:
+        body = await request.json()
+        if body.get("pin") != MAINT_PIN:
+            return JR({"status": "wrong_pin"})
+        action = body.get("action", "")
+
+        if action == "clean":
+            import glob as _glob
+            cutoff = datetime.now(PARIS).timestamp() - (28 * 86400)
+            removed = []
+            for d in _glob.glob(os.path.join(BACKUP_ROOT, "????????")):
+                if os.path.getmtime(d) < cutoff:
+                    import shutil
+                    shutil.rmtree(d)
+                    removed.append(os.path.basename(d))
+            msg = f"Removed {len(removed)} old backup(s): {', '.join(removed)}" if removed else "No backups older than 28 days found"
+            _log_agent(f"Maintenance clean: {msg}")
+            return JR({"status": "ok", "message": msg})
+
+        elif action.startswith("restore:"):
+            import shutil
+            date_str   = action.split(":", 1)[1]
+            backup_dir = os.path.join(BACKUP_ROOT, date_str)
+            if not os.path.isdir(backup_dir):
+                return JR({"status": "error", "message": f"Backup folder not found: {backup_dir}"})
+            restored = []
+            errors   = []
+            restore_map = {v: os.path.join(APP_PATH, k) for k, v in FILES_TO_BACKUP
+                           if v != "alphabot.db"}  # never auto-restore DB
+            for src_name, dst_path in restore_map.items():
+                src = os.path.join(backup_dir, src_name)
+                if os.path.exists(src):
+                    try:
+                        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                        shutil.copy2(src, dst_path)
+                        restored.append(src_name)
+                    except Exception as e:
+                        errors.append(f"{src_name}: {e}")
+            _log_agent(f"Restore from {date_str}: {len(restored)} files restored")
+            if errors:
+                return JR({"status": "ok", "message": f"Restored {len(restored)} files. Errors: {'; '.join(errors)}. Restart the bot to apply."})
+            return JR({"status": "ok", "message": f"Restored {len(restored)} files from {date_str}. Restart the bot to apply: pkill -9 -f python3 && bash /home/alphabot/start.sh"})
+
+            _log_agent(f"Restore from {date_str}: {len(restored)} files restored")
+            if errors:
+                return JR({"status": "ok", "message": f"Restored {len(restored)} files. Errors: {'; '.join(errors)}. Restart the bot to apply."})
+            return JR({"status": "ok", "message": f"Restored {len(restored)} files from {date_str}. Restart the bot to apply: pkill -9 -f python3 && bash /home/alphabot/start.sh"})
+
+        elif action.startswith("revert-file:"):
+            # Format: revert-file:YYYYMMDD:filename.py
+            import shutil
+            parts     = action.split(":", 2)
+            date_str  = parts[1] if len(parts) > 1 else ""
+            file_name = parts[2] if len(parts) > 2 else ""
+            revertable = [v for _, v in FILES_TO_BACKUP if v != "alphabot.db"]
+            if file_name not in revertable:
+                return JR({"status": "error", "message": f"File not allowed: {file_name}"})
+            src = os.path.join(BACKUP_ROOT, date_str, file_name)
+            if not os.path.exists(src):
+                return JR({"status": "error", "message": f"Backup not found: {src}"})
+            # Find destination path
+            dst = None
+            for rel, name in FILES_TO_BACKUP:
+                if name == file_name:
+                    dst = os.path.join(APP_PATH, rel)
+                    break
+            if not dst:
+                return JR({"status": "error", "message": "Could not resolve destination path"})
+            shutil.copy2(src, dst)
+            _log_agent(f"File revert: {file_name} restored from backup {date_str}")
+            return JR({"status": "ok", "message": f"{file_name} restored from {date_str}. Restart the bot to apply changes."})
+
+        return JR({"status": "error", "message": "Unknown action"})
+    except Exception as e:
+        return JR({"status": "error", "message": str(e)})
+
+
+@app.get("/maintenance/export-db")
+async def export_db():
+    """Download alphabot.db directly to browser."""
+    if not os.path.exists(DB_PATH):
+        return HTMLResponse("Database not found", status_code=404)
+    filename = f"alphabot_{datetime.now(PARIS).strftime('%Y%m%d_%H%M')}.db"
+    return FileResponse(DB_PATH, media_type="application/octet-stream", filename=filename)
+
+
+@app.get("/maintenance/revert", response_class=HTMLResponse)
+async def revert_page(file: str = None, msg: str = None):
+    """Pick a file, see its dated backups, choose one to restore."""
+    import html as _html
+    now_str    = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
+    revertable = [v for _, v in FILES_TO_BACKUP if v != "alphabot.db"]
+
+    msg_html = ""
+    if msg:
+        msg_html = f'<div style="background:#00ff8818;border:1px solid #00ff8844;border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#00ff88;font-weight:700">✅ {_html.escape(msg)}</div>'
+
+    # File-specific backup list
+    file_backups_html = ""
+    if file and file in revertable:
+        backups = _list_backups()
+        rows = ""
+        for b in backups:
+            fpath = os.path.join(b["path"], file)
+            if os.path.exists(fpath):
+                size     = os.path.getsize(fpath)
+                modified = datetime.fromtimestamp(
+                    os.path.getmtime(fpath), tz=PARIS).strftime("%Y-%m-%d %H:%M")
+                rows += (
+                    f'<tr>'
+                    f'<td style="color:#e0e0e0;font-weight:700">{_html.escape(b["label"])}</td>'
+                    f'<td style="color:#94a3b8;font-size:12px">{modified}</td>'
+                    f'<td style="color:#00aaff">{size/1024:.1f} KB</td>'
+                    f'<td><button onclick="doRevert(\'{_html.escape(b["date_str"])}\',\'{_html.escape(file)}\')" '
+                    f'style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);'
+                    f'border-radius:6px;color:#ef4444;font-size:12px;padding:5px 12px;cursor:pointer">'
+                    f'↩ Use This</button></td>'
+                    f'</tr>'
+                )
+        if rows:
+            file_backups_html = f"""
+            <div style="background:#111118;border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:18px;margin-bottom:16px">
+              <div style="font-size:13px;font-weight:700;color:#ef4444;margin-bottom:4px">
+                2. Pick a backup date for <span style="color:#ffcc00;font-family:'JetBrains Mono',monospace">{_html.escape(file)}</span>
+              </div>
+              <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">PIN required. Bot restart needed after.</div>
+              <table><thead><tr><th>Date</th><th>Saved</th><th>Size</th><th></th></tr></thead>
+              <tbody>{rows}</tbody></table>
+            </div>"""
+        else:
+            file_backups_html = f'<div style="background:#111118;border-radius:10px;padding:18px;color:#94a3b8">No backups found for {_html.escape(file)} — run Friday Backup first.</div>'
+
+    # File picker grid
+    file_btns = ""
+    for f_name in revertable:
+        sel = "rgba(255,204,0,0.6)" if f_name == file else "#1e1e2e"
+        col = "#ffcc00" if f_name == file else "#94a3b8"
+        file_btns += (
+            f'<a href="/maintenance/revert?file={_html.escape(f_name)}" style="text-decoration:none">'
+            f'<div style="background:#111118;border:1px solid {sel};border-radius:8px;'
+            f'padding:10px 14px;font-size:12px;color:{col};cursor:pointer;'
+            f'font-family:\'JetBrains Mono\',monospace">{_html.escape(f_name)}</div></a>'
+        )
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Revert File — AlphaBot</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0a0a0f;color:#e2e8f0;font-family:'JetBrains Mono',monospace;padding:16px;max-width:900px;font-size:14px;margin:0 auto}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+th{{color:#94a3b8;text-align:left;padding:6px 8px;border-bottom:1px solid #1e1e2e;font-size:11px;text-transform:uppercase;letter-spacing:1px}}
+td{{padding:8px;border-bottom:1px solid #0f0f18}}
+#po{{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center}}
+#po.v{{display:flex}}
+.pb{{background:#111118;border:1px solid rgba(239,68,68,0.4);border-radius:16px;padding:32px;text-align:center;max-width:360px;width:90%}}
+</style></head><body>
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #1e1e2e;flex-wrap:wrap">
+  <div>
+    <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#ef4444">↩ Revert a File</div>
+    <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now_str}</div>
+  </div>
+  <a href="/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
+</div>
+{msg_html}
+<div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:18px;margin-bottom:16px">
+  <div style="font-size:13px;font-weight:700;color:#ffcc00;margin-bottom:12px">1. Pick the file to revert</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">{file_btns}</div>
+</div>
+{file_backups_html}
+<div id="po" onclick="if(event.target===this)closePin()">
+  <div class="pb">
+    <div style="font-size:16px;font-weight:700;color:#ef4444;margin-bottom:6px">↩ Confirm Revert</div>
+    <div id="pl" style="font-size:12px;color:#e0e0e0;margin-bottom:16px"></div>
+    <input id="pi" type="password" maxlength="10" placeholder="••••"
+      style="background:#0a0a0f;border:1px solid rgba(239,68,68,0.4);border-radius:8px;color:#ef4444;
+             font-family:'JetBrains Mono',monospace;font-size:20px;padding:10px;width:100%;
+             text-align:center;letter-spacing:4px;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')submitPin()">
+    <div style="display:flex;gap:10px">
+      <button onclick="closePin()" style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#94a3b8;padding:10px;cursor:pointer;font-size:13px">Cancel</button>
+      <button onclick="submitPin()" style="flex:2;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);border-radius:8px;color:#ef4444;padding:10px;cursor:pointer;font-size:13px;font-weight:700">Revert File</button>
+    </div>
+    <div id="pe" style="color:#ef4444;font-size:12px;margin-top:10px;display:none">Wrong PIN</div>
+  </div>
+</div>
+<script>
+var _d=null,_f=null;
+function doRevert(d,f){{_d=d;_f=f;document.getElementById('pl').textContent='Revert '+f+' to backup from '+d+'?';document.getElementById('pe').style.display='none';document.getElementById('pi').value='';document.getElementById('po').classList.add('v');document.getElementById('pi').focus();}}
+function closePin(){{document.getElementById('po').classList.remove('v');}}
+function submitPin(){{
+  fetch('/maintenance/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{pin:document.getElementById('pi').value,action:'revert-file:'+_d+':'+_f}})}})
+  .then(r=>r.json()).then(d=>{{
+    if(d.status==='wrong_pin'){{document.getElementById('pe').style.display='block';}}
+    else{{closePin();window.location.href='/maintenance/revert?msg='+encodeURIComponent(d.message||'Done');}}
+  }});
+}}
+</script>
+</body></html>""")
