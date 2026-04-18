@@ -1603,6 +1603,10 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
     </a>"""
 
+    quick += """<a href="/log" style="display:inline-block;margin:3px;text-decoration:none;">
+      <button style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">📋 Live Log</button>
+    </a>"""
+
     safe_files = ["app/main.py","app/dashboard.py","core/config.py","core/execution.py",
                   "core/risk.py","data/analytics.py","data/database.py","data/intelligence.py",
                   "ai_debug/main.py","start.sh",".env"]
@@ -2342,6 +2346,34 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
       </a>
     </div>
 
+    <!-- Pull from GitHub -->
+    <div style="background:#0a1020;border:1px solid rgba(0,255,136,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">⬇️ Pull from GitHub</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Force-pulls latest code from GitHub. Resets all tracked files to match the repo.
+        Safe — never touches <code style="color:#ffcc00">.env</code> or <code style="color:#ffcc00">alphabot.db</code>.
+        PIN required. Restart bot after.
+      </div>
+      <button onclick="pinAction('github-pull', 'Force pull from GitHub? All tracked files will be reset to the repo version.')"
+        class="btn" style="width:100%;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);color:#00ff88">
+        ⬇️ Pull from GitHub
+      </button>
+    </div>
+
+    <!-- Download from VPS -->
+    <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:6px">📥 Download from VPS</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Download all app files as a zip — or pick individual files.
+        Use this to get a local copy of the current VPS state, especially before rebuilds.
+      </div>
+      <a href="/maintenance/download" style="text-decoration:none">
+        <button class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
+          📥 Download Files
+        </button>
+      </a>
+    </div>
+
   </div>
 </div>
 
@@ -2485,6 +2517,23 @@ async def maintenance_action(request: Request):
             msg = f"Removed {len(removed)} old backup(s): {', '.join(removed)}" if removed else "No backups older than 28 days found"
             _log_agent(f"Maintenance clean: {msg}")
             return JR({"status": "ok", "message": msg})
+
+        elif action == "github-pull":
+            # Safe force pull — resets tracked files to remote, never touches .env or DB
+            steps = [
+                f"cd {APP_PATH} && git fetch origin main",
+                f"cd {APP_PATH} && git stash",
+                f"cd {APP_PATH} && git reset --hard origin/main",
+                f"cd {APP_PATH} && git stash drop 2>/dev/null || true",
+            ]
+            results = []
+            for cmd in steps:
+                out = run_cmd(cmd, timeout=30)
+                results.append(f"$ {cmd.split('&& ')[1]}\n{out}")
+            summary = "\n\n".join(results)
+            _log_agent("GitHub force pull executed")
+            return JR({"status": "ok", "ok": True,
+                       "message": f"Pull complete — .env and database untouched. Restart the bot to apply new code.\n\n{summary[:500]}"})
 
         elif action.startswith("restore:"):
             import shutil
@@ -2667,5 +2716,218 @@ function submitPin(){{
     else{{closePin();window.location.href='/maintenance/revert?msg='+encodeURIComponent(d.message||'Done');}}
   }});
 }}
+</script>
+</body></html>""")
+
+
+# ═══════════════════════════════════════════════════════════════
+# DOWNLOAD FROM VPS — zip or individual file
+# ═══════════════════════════════════════════════════════════════
+@app.get("/maintenance/download", response_class=HTMLResponse)
+async def download_page():
+    """Pick individual files to download, or grab the whole app as a zip."""
+    import html as _html
+    now_str = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
+
+    # Build file list with sizes
+    file_rows = ""
+    for src_rel, dst_name in FILES_TO_BACKUP:
+        fpath = os.path.join(APP_PATH, src_rel)
+        if os.path.exists(fpath):
+            size = os.path.getsize(fpath)
+            size_str = f"{size/1024:.1f} KB" if size < 1024*1024 else f"{size/1024/1024:.1f} MB"
+            modified = datetime.fromtimestamp(os.path.getmtime(fpath),
+                                              tz=PARIS).strftime("%Y-%m-%d %H:%M")
+            file_rows += (
+                f'<tr>'
+                f'<td style="color:#e0e0e0;font-family:\'JetBrains Mono\',monospace">{_html.escape(dst_name)}</td>'
+                f'<td style="color:#94a3b8;font-size:12px">{_html.escape(src_rel)}</td>'
+                f'<td style="color:#00aaff">{size_str}</td>'
+                f'<td style="color:#94a3b8;font-size:12px">{modified}</td>'
+                f'<td><a href="/maintenance/download/file?name={_html.escape(dst_name)}" '
+                f'style="text-decoration:none">'
+                f'<button style="background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);'
+                f'border-radius:6px;color:#aa88ff;font-size:12px;padding:5px 12px;cursor:pointer">'
+                f'⬇ Download</button></a></td>'
+                f'</tr>'
+            )
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Download from VPS — AlphaBot</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0a0a0f;color:#e2e8f0;font-family:'JetBrains Mono',monospace;padding:16px;max-width:960px;font-size:14px;margin:0 auto}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+th{{color:#94a3b8;text-align:left;padding:8px;border-bottom:1px solid #1e1e2e;font-size:11px;text-transform:uppercase;letter-spacing:1px}}
+td{{padding:8px;border-bottom:1px solid #0f0f18;vertical-align:middle}}
+</style></head><body>
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #1e1e2e;flex-wrap:wrap">
+  <div>
+    <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#aa88ff">📥 Download from VPS</div>
+    <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now_str}</div>
+  </div>
+  <a href="/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
+</div>
+
+<div style="background:#0a1020;border:1px solid rgba(170,136,255,0.25);border-radius:12px;padding:20px;margin-bottom:20px">
+  <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:8px">📦 Download Everything as ZIP</div>
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+    Creates a zip of all current app files from the VPS — the exact code that is running right now.
+    Does not include <code style="color:#ffcc00">.env</code>.
+    Great to grab before a major rebuild session.
+  </div>
+  <a href="/maintenance/download/zip" style="text-decoration:none">
+    <button style="background:rgba(170,136,255,0.15);border:1px solid rgba(170,136,255,0.4);border-radius:8px;
+                   color:#aa88ff;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;
+                   padding:12px 28px;cursor:pointer">
+      📦 Download All as ZIP
+    </button>
+  </a>
+</div>
+
+<div style="background:#111118;border:1px solid #1e1e2e;border-radius:12px;padding:20px">
+  <div style="font-size:13px;font-weight:700;color:#e0e0e0;margin-bottom:14px">📄 Individual Files</div>
+  <div style="overflow-x:auto">
+    <table><thead><tr><th>File</th><th>VPS Path</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+    <tbody>{file_rows}</tbody></table>
+  </div>
+</div>
+</body></html>""")
+
+
+@app.get("/maintenance/download/zip")
+async def download_zip():
+    """Create a zip of all app files and serve it for download."""
+    import zipfile, tempfile
+    zip_name = f"alphabot_{datetime.now(PARIS).strftime('%Y%m%d_%H%M')}.zip"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp.close()
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
+        for src_rel, dst_name in FILES_TO_BACKUP:
+            fpath = os.path.join(APP_PATH, src_rel)
+            if os.path.exists(fpath) and dst_name != ".env":
+                zf.write(fpath, dst_name)
+    _log_agent(f"VPS zip download: {zip_name}")
+    return FileResponse(tmp.name, media_type="application/zip", filename=zip_name)
+
+
+@app.get("/maintenance/download/file")
+async def download_file(name: str = ""):
+    """Download a single named file from the VPS."""
+    allowed = {dst: src for src, dst in FILES_TO_BACKUP}
+    if name not in allowed:
+        return HTMLResponse("File not allowed", status_code=403)
+    fpath = os.path.join(APP_PATH, allowed[name])
+    if not os.path.exists(fpath):
+        return HTMLResponse("File not found", status_code=404)
+    _log_agent(f"VPS file download: {name}")
+    return FileResponse(fpath, media_type="application/octet-stream", filename=name)
+
+
+# ═══════════════════════════════════════════════════════════════
+# LIVE BOT LOG — scrollable, auto-refresh, works on iPad
+# ═══════════════════════════════════════════════════════════════
+@app.get("/log", response_class=HTMLResponse)
+async def live_log_page(lines: int = 200, screen: str = "alphabot"):
+    """Scrollable live bot log — works on iPad, auto-refreshes every 10s."""
+    now_str = datetime.now(PARIS).strftime("%H:%M:%S Paris")
+
+    # Read from the persistent log file
+    log_content = run_cmd(f"tail -{lines} {LOG_PATH}", timeout=10)
+
+    # Colour-code log lines
+    coloured = ""
+    for line in log_content.split("\n"):
+        if any(x in line for x in ["ERROR", "FAILED", "CRASH", "P1", "kill switch"]):
+            col = "#ef4444"
+        elif any(x in line for x in ["WARNING", "WARN", "⚠"]):
+            col = "#f59e0b"
+        elif any(x in line for x in ["✅", "BUY", "SELL", "FILLED", "profit"]):
+            col = "#00ff88"
+        elif any(x in line for x in ["SKIP", "HOLD", "near_miss"]):
+            col = "#94a3b8"
+        elif any(x in line for x in ["INTELLIGENCE", "ATR", "ROTATE", "STALE"]):
+            col = "#aa88ff"
+        else:
+            col = "#cbd5e1"
+        safe = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        coloured += f'<div style="color:{col};padding:1px 0;line-height:1.5">{safe}</div>'
+
+    # Screen tab buttons
+    screens = ["alphabot", "dashboard", "agent"]
+    tabs = ""
+    for s in screens:
+        active = "border-color:rgba(0,255,136,0.6);color:#00ff88" if s == screen else "border-color:#1e1e2e;color:#94a3b8"
+        tabs += (f'<a href="/log?screen={s}&lines={lines}" style="text-decoration:none">'
+                 f'<button style="background:#111118;border:1px solid;{active};border-radius:6px;'
+                 f'padding:6px 14px;font-size:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">'
+                 f'{s}</button></a> ')
+
+    # Lines selector
+    line_opts = ""
+    for n in [50, 100, 200, 500]:
+        sel = "color:#00ff88;font-weight:700" if n == lines else "color:#94a3b8"
+        line_opts += (f'<a href="/log?screen={screen}&lines={n}" '
+                      f'style="text-decoration:none;{sel};font-size:12px;margin-right:10px">{n}</a>')
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>AlphaBot Live Log</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0a0a0f;color:#e2e8f0;font-family:'JetBrains Mono',monospace;
+      font-size:12px;padding:0;margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}}
+#header{{padding:10px 14px;border-bottom:1px solid #1e1e2e;background:#0a0a0f;
+         display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0}}
+#log-wrap{{flex:1;overflow-y:auto;padding:12px 14px;-webkit-overflow-scrolling:touch}}
+#log-content{{font-size:11px;line-height:1.5;word-break:break-all}}
+#footer{{padding:8px 14px;border-top:1px solid #1e1e2e;background:#0a0a0f;
+         display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}}
+#countdown{{color:#94a3b8;font-size:11px}}
+.refresh-dot{{width:8px;height:8px;border-radius:50%;background:#00ff88;display:inline-block;animation:pulse 2s infinite}}
+@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:0.3}}}}
+</style>
+</head><body>
+
+<div id="header">
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:#00ff88">
+    AlphaBot <span style="color:#64748b">Live Log</span>
+  </div>
+  <div style="display:flex;gap:6px">{tabs}</div>
+  <a href="/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:12px">← Agent</a>
+</div>
+
+<div id="log-wrap">
+  <div id="log-content">{coloured if coloured else '<div style="color:#475569">No log output yet.</div>'}</div>
+</div>
+
+<div id="footer">
+  <span class="refresh-dot"></span>
+  <span style="color:#94a3b8;font-size:11px">Auto-refresh every 10s · {now_str} · Last {lines} lines</span>
+  <span style="margin-left:auto;color:#64748b;font-size:11px">Lines: {line_opts}</span>
+  <span id="countdown" style="font-size:11px;color:#475569"></span>
+</div>
+
+<script>
+// Auto-scroll to bottom on load
+window.addEventListener('load', function() {{
+  var w = document.getElementById('log-wrap');
+  w.scrollTop = w.scrollHeight;
+}});
+
+// Countdown + auto-refresh every 10s
+var secs = 10;
+var cd = document.getElementById('countdown');
+setInterval(function() {{
+  secs--;
+  if (cd) cd.textContent = 'Refreshing in ' + secs + 's';
+  if (secs <= 0) location.reload();
+}}, 1000);
 </script>
 </body></html>""")
