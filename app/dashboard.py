@@ -65,6 +65,7 @@ from data.database import (
     db_apply_recommendation, db_dismiss_recommendation, db_snooze_recommendation,
     db_get_latest_intelligence_run, db_get_intelligence_runs,
     db_ev_by_discipline, db_discipline_detail,
+    db_log_config_change, db_get_config_history,
 )
 
 try:
@@ -2256,8 +2257,18 @@ async def settings_save(request: Request):
     body = await request.json()
     if body.get("pin") != KILL_PIN:
         return JSONResponse({"status": "wrong_pin"})
-    if _save_tcfg(body.get("settings", {})):
-        return JSONResponse({"status": "ok"})
+    new_settings = body.get("settings", {})
+    if new_settings:
+        # Read current values before overwriting so we can log the diff
+        old_cfg = _load_tcfg()
+        if _save_tcfg(new_settings):
+            # Log each changed parameter
+            for param, new_val in new_settings.items():
+                old_val = old_cfg.get(param)
+                if str(old_val) != str(new_val):
+                    db_log_config_change(param, old_val, new_val, changed_by="manual")
+            return JSONResponse({"status": "ok"})
+        return JSONResponse({"status": "error"})
     return JSONResponse({"status": "error"})
 
 
@@ -2265,11 +2276,12 @@ async def settings_save(request: Request):
 # INTELLIGENCE ROUTES + PAGE
 # ═══════════════════════════════════════════════════════════════
 @app.get("/intelligence", response_class=HTMLResponse)
-async def intelligence_page(request: Request, triggered: str = None, error: str = None):
+async def intelligence_page(request: Request, triggered: str = None, error: str = None, since: str = None):
     try:
         return HTMLResponse(_build_intelligence_page(
             run_triggered=(triggered == "1"),
             run_error=error,
+            since_run_id=since,
         ))
     except Exception as e:
         log.error(f"[INTELLIGENCE PAGE] {e}")
@@ -2311,8 +2323,11 @@ async def intelligence_apply(request: Request):
                 cfg_val = int(numeric) if numeric == int(numeric) else numeric
             except (ValueError, TypeError):
                 cfg_val = value
+            old_cfg = _load_tcfg()
+            old_val = old_cfg.get(parameter)
             if not _save_tcfg({parameter: cfg_val}):
                 return JSONResponse({"status": "error", "detail": "config write failed"})
+            db_log_config_change(parameter, old_val, cfg_val, changed_by="intelligence")
         db_apply_recommendation(rec_id)
         log.info(f"[INTELLIGENCE] Applied rec {rec_id}: {parameter}={value}")
         return JSONResponse({"status": "ok"})
@@ -2341,19 +2356,27 @@ async def intelligence_snooze(request: Request):
 
 
 @app.get("/intelligence/status")
-async def intelligence_status():
-    """Polled by progress bar — returns whether a new run has completed."""
+async def intelligence_status(since: str = None):
+    """Polled by progress bar. Pass since=run_id to detect genuinely new runs."""
     try:
         run = db_get_latest_intelligence_run()
-        if run:
-            return JSONResponse({"run_id": run.get("run_id"), "new_run": True,
-                                 "created_at": run.get("created_at")})
-        return JSONResponse({"run_id": None, "new_run": False})
+        if not run:
+            return JSONResponse({"run_id": None, "new_run": False})
+        current_id = run.get("run_id")
+        # If caller provided a previous run_id, new_run = True only when it changed
+        new_run = (since is None) or (current_id != since)
+        return JSONResponse({
+            "run_id": current_id,
+            "new_run": new_run,
+            "rec_count": run.get("rec_count", 0),
+            "rec_count_raw": run.get("rec_count_raw", 0),
+            "created_at": run.get("created_at"),
+        })
     except Exception as e:
         return JSONResponse({"run_id": None, "new_run": False})
 
 
-def _build_intelligence_page(run_triggered=False, run_error=None):
+def _build_intelligence_page(run_triggered=False, run_error=None, since_run_id=None):
     pending    = db_get_pending_recommendations()
     history    = db_get_recommendation_history(limit=20)
     latest_run = db_get_latest_intelligence_run()
@@ -2448,7 +2471,8 @@ def _build_intelligence_page(run_triggered=False, run_error=None):
           }}
 
           function checkDone() {{
-            fetch('/intelligence/status')
+            var sinceParam = '{since_run_id or ""}';
+            fetch('/intelligence/status?since=' + encodeURIComponent(sinceParam))
               .then(function(r) {{ return r.json(); }})
               .then(function(d) {{
                 if (d.new_run) {{
@@ -2572,13 +2596,42 @@ def _build_intelligence_page(run_triggered=False, run_error=None):
           {rec_cards}
         </div>"""
     else:
-        pending_section = """
-        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
-          <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
-          <div style="color:#94a3b8;font-size:14px;padding:20px 0;text-align:center">
-            No pending recommendations — runs Saturday 7am Paris or trigger manually above.
-          </div>
-        </div>"""
+        if latest_run:
+            raw_cnt  = latest_run.get("rec_count_raw", 0) or 0
+            pass_cnt = latest_run.get("rec_count", 0) or 0
+            ts       = (latest_run.get("created_at") or "")[:16].replace("T", " ")
+            total_t_db = latest_run  # just for reference
+
+            if raw_cnt == 0:
+                reason_msg = "Claude reviewed the data but found nothing actionable yet — sample size is too small for confident recommendations. Keep trading and check back next week."
+                reason_icon = "⏳"
+            elif pass_cnt == 0 and raw_cnt > 0:
+                reason_msg = f"Claude generated {raw_cnt} recommendation(s) but they didn't pass validation (unexpected category or action values). This is a data quality issue — check the narrative below for Claude's actual findings."
+                reason_icon = "⚠️"
+            else:
+                reason_msg = "All recommendations have been actioned — apply, snooze or dismiss moves them to history below."
+                reason_icon = "✅"
+
+            pending_section = f"""
+            <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
+              <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
+              <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:20px;text-align:center">
+                <div style="font-size:28px;margin-bottom:10px">{reason_icon}</div>
+                <div style="font-size:15px;color:#e0e0e0;font-weight:700;margin-bottom:8px">No pending recommendations</div>
+                <div style="font-size:13px;color:#94a3b8;max-width:600px;margin:0 auto;line-height:1.7">{reason_msg}</div>
+                <div style="font-size:11px;color:#475569;margin-top:12px">
+                  Last run: {ts} · Claude generated {raw_cnt} rec(s) · {pass_cnt} stored
+                </div>
+              </div>
+            </div>"""
+        else:
+            pending_section = """
+            <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
+              <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
+              <div style="color:#94a3b8;font-size:14px;padding:20px 0;text-align:center">
+                No analysis run yet — runs Saturday 7am Paris or tap ⚡ Run Now above.
+              </div>
+            </div>"""
 
     # ── Latest narrative ──────────────────────────────────────
     narrative_html = ""
@@ -2760,12 +2813,28 @@ function snoozeRec(id){{
 function triggerRun(){{
   var pin=prompt('PIN to trigger intelligence run:');
   if(pin===null)return;
-  fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{pin:pin}})}})
-  .then(r=>r.json()).then(d=>{{
-    if(d.status==='ok')location.href='/intelligence?triggered=1';
-    else if(d.status==='wrong_pin')alert('Wrong PIN');
-    else alert('Error: '+JSON.stringify(d));
+  // Capture current run_id BEFORE firing so poller detects genuinely NEW run
+  fetch('/intelligence/status')
+  .then(function(r){{return r.json();}})
+  .then(function(current){{
+    var prevRunId=current.run_id||'';
+    fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{pin:pin}})}})
+    .then(function(r){{return r.json();}})
+    .then(function(d){{
+      if(d.status==='ok'){{
+        location.href='/intelligence?triggered=1&since='+encodeURIComponent(prevRunId);
+      }} else if(d.status==='wrong_pin') alert('Wrong PIN');
+      else alert('Error: '+JSON.stringify(d));
+    }});
+  }}).catch(function(){{
+    fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{pin:pin}})}})
+    .then(function(r){{return r.json();}})
+    .then(function(d){{
+      if(d.status==='ok') location.href='/intelligence?triggered=1';
+      else if(d.status==='wrong_pin') alert('Wrong PIN');
+    }});
   }});
 }}
 </script>
@@ -2795,6 +2864,53 @@ def _build_settings_page(msg=None, msg_type="ok"):
               style="background:#0d1117;border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#00ff88;
                      font-family:\'JetBrains Mono\',monospace;font-size:15px;font-weight:700;padding:9px 14px;width:100%;text-align:right">
             <div style="font-size:11px;color:#94a3b8">{note if not note else ""}</div>
+        </div>'''
+
+    # ── Config change history ─────────────────────────────────
+    history = db_get_config_history(limit=30)
+    if history:
+        hist_rows = ""
+        for h in history:
+            ts       = (h.get("created_at") or "")[:16].replace("T", " ")
+            param    = h.get("parameter", "")
+            old_v    = h.get("old_value", "—")
+            new_v    = h.get("new_value", "")
+            by       = h.get("changed_by", "manual")
+            by_col   = "#aa88ff" if by == "intelligence" else "#ffcc00"
+            by_label = "🧠 Intelligence" if by == "intelligence" else "👤 Manual"
+            hist_rows += (
+                f'<tr>'
+                f'<td style="color:#94a3b8;font-size:11px">{ts}</td>'
+                f'<td style="color:#00aaff;font-family:\'JetBrains Mono\',monospace">{param}</td>'
+                f'<td style="color:#94a3b8;text-decoration:line-through">{old_v}</td>'
+                f'<td style="color:#00ff88;font-weight:700">{new_v}</td>'
+                f'<td style="color:{by_col};font-size:11px">{by_label}</td>'
+                f'</tr>'
+            )
+        config_history_html = f'''
+        <div class="container" style="max-width:860px;padding-top:0">
+          <div class="settings-section">
+            <div class="settings-section-title">📋 Config Change History</div>
+            <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">
+              Every parameter change is logged here — manual saves and intelligence-applied recommendations.
+              Claude sees this data during analysis to understand what changed and when.
+            </div>
+            <div class="table-wrap">
+              <table><thead><tr>
+                <th>Time</th><th>Parameter</th><th>Old Value</th><th>New Value</th><th>Changed By</th>
+              </tr></thead><tbody>{hist_rows}</tbody></table>
+            </div>
+          </div>
+        </div>'''
+    else:
+        config_history_html = f'''
+        <div class="container" style="max-width:860px;padding-top:0">
+          <div class="settings-section">
+            <div class="settings-section-title">📋 Config Change History</div>
+            <div style="color:#94a3b8;font-size:13px;padding:16px 0">
+              No changes recorded yet — every save will appear here going forward.
+            </div>
+          </div>
         </div>'''
 
     return f'''<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -2958,4 +3074,5 @@ function submitSettings(){{
   }});
 }}
 </script>
+{config_history_html}
 </body></html>'''
