@@ -17314,3 +17314,286 @@
 2026-04-18 06:24:50 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
 2026-04-18 06:24:51 [INFO] [BINANCE] Using TESTNET
 2026-04-18 06:24:52 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 06:24:54 [INFO] [BINANCE] Using TESTNET
+2026-04-18 06:24:54 [INFO] [DB] Trading Intelligence Database ready
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [API KILL] 5 consecutive API failures — all bots stopped
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:25:20 [INFO] [CRYPTO_ID] Cycle 436 | P&L: $-0.37
+2026-04-18 06:25:28 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:25:28 [INFO] Main cycle 497 | 2026-04-18 06:25:28
+2026-04-18 06:25:28 [INFO] [WATCHDOG] Cycle 497 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:25:28 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:25:38 [INFO] [CRYPTO] Cycle 281 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:25:43 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:26:01 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:09 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:13 [INFO] [CRYPTO_ID] Cycle 437 | P&L: $-0.37
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:21 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:26:36 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:27:01 [INFO] [CRYPTO] Cycle 282 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:27:06 [INFO] [CRYPTO_ID] Cycle 438 | P&L: $-0.37
+2026-04-18 06:27:23 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:27:28 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 06:27:30 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:28:00 [INFO] [CRYPTO_ID] Cycle 439 | P&L: $-0.37
+2026-04-18 06:28:23 [INFO] [CRYPTO] Cycle 283 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:28:23 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:28:29 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:28:29 [INFO] Main cycle 498 | 2026-04-18 06:28:29
+2026-04-18 06:28:29 [INFO] [WATCHDOG] Cycle 498 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:28:29 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:28:45 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:28:53 [INFO] [CRYPTO_ID] Cycle 440 | P&L: $-0.37
+2026-04-18 06:29:17 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:29:45 [INFO] [CRYPTO] Cycle 284 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:29:47 [INFO] [CRYPTO_ID] Cycle 441 | P&L: $-0.37
+2026-04-18 06:30:08 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:30:10 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:30:29 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 06:30:40 [INFO] [CRYPTO_ID] Cycle 442 | P&L: $-0.37
+2026-04-18 06:31:03 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:31:08 [INFO] [CRYPTO] Cycle 285 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:31:30 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:31:30 [INFO] Main cycle 499 | 2026-04-18 06:31:30
+2026-04-18 06:31:30 [INFO] [WATCHDOG] Cycle 499 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:31:30 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:31:30 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:31:33 [INFO] [CRYPTO_ID] Cycle 443 | P&L: $-0.37
+2026-04-18 06:31:57 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:32:27 [INFO] [CRYPTO_ID] Cycle 444 | P&L: $-0.37
+2026-04-18 06:32:30 [INFO] [CRYPTO] Cycle 286 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:32:50 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:32:52 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:33:20 [INFO] [CRYPTO_ID] Cycle 445 | P&L: $-0.37
+2026-04-18 06:33:31 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 06:33:44 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:33:52 [INFO] [CRYPTO] Cycle 287 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:34:14 [INFO] [CRYPTO_ID] Cycle 446 | P&L: $-0.37
+2026-04-18 06:34:15 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:34:32 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:34:32 [INFO] Main cycle 500 | 2026-04-18 06:34:32
+2026-04-18 06:34:32 [INFO] [WATCHDOG] Cycle 500 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:34:32 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:34:37 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:35:07 [INFO] [CRYPTO_ID] Cycle 447 | P&L: $-0.37
+2026-04-18 06:35:15 [INFO] [CRYPTO] Cycle 288 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:35:30 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:35:37 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:36:00 [INFO] [CRYPTO_ID] Cycle 448 | P&L: $-0.37
+2026-04-18 06:36:24 [INFO] [CRYPTO_ID] 0 BUY / 41 scanned
+2026-04-18 06:36:32 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 06:36:37 [INFO] [CRYPTO] Cycle 289 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:36:54 [INFO] [CRYPTO_ID] Cycle 449 | P&L: $-0.37
+2026-04-18 06:37:00 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:37:17 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:37:33 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:37:33 [INFO] Main cycle 501 | 2026-04-18 06:37:33
+2026-04-18 06:37:33 [INFO] [WATCHDOG] Cycle 501 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:37:33 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:37:47 [INFO] [CRYPTO_ID] Cycle 450 | P&L: $-0.37
+2026-04-18 06:38:00 [INFO] [CRYPTO] Cycle 290 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:38:11 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:38:23 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:23 [ERROR] [IBKR] Thread 'MainThread' connection failed (clientId=1): The future belongs to a different loop than the one specified as the loop argument
+2026-04-18 06:38:41 [INFO] [CRYPTO_ID] Cycle 451 | P&L: $-0.37
+2026-04-18 06:39:04 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:39:23 [INFO] [CRYPTO] Cycle 291 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:39:33 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 06:39:34 [INFO] [CRYPTO_ID] Cycle 452 | P&L: $-0.37
+2026-04-18 06:39:45 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:39:58 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:40:28 [INFO] [CRYPTO_ID] Cycle 453 | P&L: $-0.37
+2026-04-18 06:40:33 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:40:33 [INFO] Main cycle 502 | 2026-04-18 06:40:33
+2026-04-18 06:40:33 [INFO] [WATCHDOG] Cycle 502 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:40:33 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:40:45 [INFO] [CRYPTO] Cycle 292 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:40:52 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:41:08 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:41:22 [INFO] [CRYPTO_ID] Cycle 454 | P&L: $-0.37
+2026-04-18 06:41:45 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:42:08 [INFO] [CRYPTO] Cycle 293 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:42:15 [INFO] [CRYPTO_ID] Cycle 455 | P&L: $-0.37
+2026-04-18 06:42:30 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:42:34 [INFO] [REGIME] BULL | SPY: $N/A MA20: $N/A | VIX: N/A
+2026-04-18 06:42:38 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:43:08 [INFO] [CRYPTO_ID] Cycle 456 | P&L: $-0.37
+2026-04-18 06:43:30 [INFO] [CRYPTO] Cycle 294 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:43:32 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:43:34 [INFO] 
+──────────────────────────────────────────────────
+2026-04-18 06:43:34 [INFO] Main cycle 503 | 2026-04-18 06:43:34
+2026-04-18 06:43:34 [INFO] [WATCHDOG] Cycle 503 alive | Stocks P&L: $+0.00 | Crypto P&L: $+0.00 | Positions: 0S/0C
+2026-04-18 06:43:35 [INFO] [SIZING] IBKR:$1,020,678.28 + Binance:$9,639.63 = Total:$1,030,317.91 | StockTrade:$51034 CryptoTrade:$193 DailyLoss:$5152
+2026-04-18 06:43:53 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
+2026-04-18 06:44:02 [INFO] [CRYPTO_ID] Cycle 457 | P&L: $-0.37
+2026-04-18 06:44:25 [INFO] [CRYPTO_ID] 1 BUY / 41 scanned
+2026-04-18 06:44:53 [INFO] [CRYPTO] Cycle 295 | P&L: $+0.00 | Positions: 0
+2026-04-18 06:44:55 [INFO] [CRYPTO_ID] Cycle 458 | P&L: $-0.37
+2026-04-18 06:45:15 [INFO] [CRYPTO] 0 qualified BUY / 0 scanned
