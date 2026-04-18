@@ -65,7 +65,7 @@ from core.risk import (
 from data.analytics import (
     get_signal, get_signal_smallcap, get_intraday_signal,
     score_signal, signal_breakdown, sell_breakdown,
-    vwap_signal, is_breakout, calc_rsi, calc_macd, calc_adx,
+    vwap_signal, is_breakout, calc_rsi, calc_macd, calc_adx, calc_atr,
     record_near_miss, update_near_miss_prices, mark_near_miss_triggered,
     run_near_miss_simulations, analyse_edge,
     load_near_miss_tracker_from_db,
@@ -421,8 +421,26 @@ def run_cycle(watchlist, st, crypto=False):
             except Exception: pass
             break
 
-        stop_price        = s["price"] * (1 - stop_pct_use / 100)
+        stop_pct_use      = CRYPTO_STOP_PCT if crypto else STOP_LOSS_PCT
         take_profit_price = s["price"] * (1 + TAKE_PROFIT_PCT / 100)
+
+        # ATR-based dynamic stop loss — adapts to each stock's volatility
+        # Falls back to fixed % if ATR unavailable or USE_ATR_STOPS disabled
+        _use_atr   = getattr(cfg, "USE_ATR_STOPS", True)
+        _atr_mult  = float(getattr(cfg, "ATR_STOP_MULTIPLIER", 2.0))
+        _atr_bars  = bars_cache.get(s["symbol"]) if not crypto else None
+        _atr_val   = None
+        if _use_atr and not crypto and _atr_bars and len(_atr_bars) >= 16:
+            _atr_val = calc_atr(_atr_bars, period=14)
+
+        if _atr_val and _atr_val > 0:
+            stop_price = s["price"] - (_atr_val * _atr_mult)
+            # Safety cap: ATR stop can't be worse than 2× the fixed % stop
+            min_stop   = s["price"] * (1 - (stop_pct_use * 2) / 100)
+            stop_price = max(stop_price, min_stop)
+            log.info(f"[{st.label}] ATR stop for {s['symbol']}: ATR={_atr_val:.4f} × {_atr_mult} = ${s['price'] - stop_price:.4f} below entry (${stop_price:.4f})")
+        else:
+            stop_price = s["price"] * (1 - stop_pct_use / 100)
 
         breakdown = signal_breakdown(
             s["symbol"], s["price"], s.get("change", 0), s.get("rsi"),
@@ -467,7 +485,11 @@ def run_cycle(watchlist, st, crypto=False):
             except Exception: pass
             continue
 
-        actual_stop = fill_price * (1 - stop_pct_use / 100)
+        if _atr_val and _atr_val > 0:
+            actual_stop = fill_price - (_atr_val * _atr_mult)
+            actual_stop = max(actual_stop, fill_price * (1 - (stop_pct_use * 2) / 100))
+        else:
+            actual_stop = fill_price * (1 - stop_pct_use / 100)
         actual_tp   = fill_price * (1 + TAKE_PROFIT_PCT / 100)
         now_ts = datetime.now().isoformat()
         st.positions[s["symbol"]] = {
@@ -481,6 +503,7 @@ def run_cycle(watchlist, st, crypto=False):
             "_adx_entry": _adx_entry, "_macd_bull": _macd_bull,
             "_breakout": _breakout_val, "_rs_spy": _rs_spy,
             "_news_state": _news_st, "_regime": _regime_entry, "_vix": _vix_entry,
+            "_atr_entry": _atr_val,  # ATR at entry — for stop quality tracking
         }
 
         # Software stop-loss active — exchange stop orders not supported on this account
