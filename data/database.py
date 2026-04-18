@@ -174,12 +174,23 @@ def init_db():
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS intelligence_runs (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id           TEXT UNIQUE NOT NULL,
+        narrative        TEXT,
+        raw_payload      TEXT,
+        rec_count        INTEGER DEFAULT 0,
+        rec_count_raw    INTEGER DEFAULT 0,
+        triggered_by     TEXT DEFAULT 'scheduled',
+        created_at       TEXT DEFAULT (datetime('now'))
+    )""")
+    _safe_alter(conn, "ALTER TABLE intelligence_runs ADD COLUMN rec_count_raw INTEGER DEFAULT 0")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS config_history (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id       TEXT UNIQUE NOT NULL,
-        narrative    TEXT,
-        raw_payload  TEXT,
-        rec_count    INTEGER DEFAULT 0,
-        triggered_by TEXT DEFAULT 'scheduled',
+        parameter    TEXT NOT NULL,
+        old_value    TEXT,
+        new_value    TEXT NOT NULL,
+        changed_by   TEXT DEFAULT 'manual',
         created_at   TEXT DEFAULT (datetime('now'))
     )""")
 
@@ -831,14 +842,14 @@ def db_save_recommendations(run_id, recs):
         return 0
 
 
-def db_save_intelligence_run(run_id, narrative, raw_payload, rec_count, triggered_by="scheduled"):
+def db_save_intelligence_run(run_id, narrative, raw_payload, rec_count, triggered_by="scheduled", rec_count_raw=0):
     """Archive an intelligence run."""
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("""INSERT OR REPLACE INTO intelligence_runs
-            (run_id, narrative, raw_payload, rec_count, triggered_by)
-            VALUES (?,?,?,?,?)""",
-            (run_id, narrative, raw_payload, rec_count, triggered_by))
+            (run_id, narrative, raw_payload, rec_count, rec_count_raw, triggered_by)
+            VALUES (?,?,?,?,?,?)""",
+            (run_id, narrative, raw_payload, rec_count, rec_count_raw, triggered_by))
         conn.commit(); conn.close()
     except Exception as e:
         log.debug(f"[DB] save_intelligence_run failed: {e}")
@@ -940,6 +951,50 @@ def db_get_intelligence_runs(limit=10):
         return [dict(r) for r in rows]
     except Exception as e:
         log.debug(f"[DB] get_intelligence_runs failed: {e}")
+        return []
+
+
+def db_log_config_change(parameter, old_value, new_value, changed_by="manual"):
+    """Write a config change to the audit log."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""INSERT INTO config_history (parameter, old_value, new_value, changed_by)
+            VALUES (?,?,?,?)""",
+            (parameter, str(old_value) if old_value is not None else None,
+             str(new_value), changed_by))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.debug(f"[DB] log_config_change failed: {e}")
+
+
+def db_get_config_history(limit=30):
+    """Return recent config changes, newest first."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""SELECT parameter, old_value, new_value, changed_by, created_at
+            FROM config_history ORDER BY created_at DESC LIMIT ?""", (limit,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        log.debug(f"[DB] get_config_history failed: {e}")
+        return []
+
+
+def db_get_config_history_for_intelligence(days=30):
+    """Return config changes for the intelligence payload — what changed and when."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        rows = conn.execute("""SELECT parameter, old_value, new_value, changed_by, created_at
+            FROM config_history WHERE created_at >= ? ORDER BY created_at DESC""",
+            (since,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        log.debug(f"[DB] get_config_history_for_intelligence failed: {e}")
         return []
 
 
