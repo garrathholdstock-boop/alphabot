@@ -30,8 +30,16 @@ def init_db():
         market          TEXT,
         date            TEXT,
         time            TEXT,
-        created_at      TEXT DEFAULT (datetime('now'))
+        created_at      TEXT DEFAULT (datetime('now')),
+        discipline      TEXT DEFAULT 'swing'
     )""")
+
+    # Add discipline column if upgrading existing DB
+    try:
+        conn.execute("ALTER TABLE trades ADD COLUMN discipline TEXT DEFAULT 'swing'")
+        conn.commit()
+    except:
+        pass  # Column already exists
 
     c.execute("""CREATE TABLE IF NOT EXISTS reports (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,25 +91,18 @@ def init_db():
 
 # ── Trade recording ───────────────────────────────────────────
 def db_record_trade(symbol, side, qty, price, pnl, score, rsi, vol_ratio,
-                    hold_hours, reason, breakdown, market="stock"):
+                    hold_hours, reason, breakdown, market="stock", discipline="swing"):
     try:
-        # Sanitise — score/rsi/vol_ratio may be "—" strings from recovery
-        def _safe_float(v):
-            try: return float(v) if v and v != "—" else None
-            except: return None
-        score     = _safe_float(score)
-        rsi       = _safe_float(rsi)
-        vol_ratio = _safe_float(vol_ratio)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         now = datetime.now()
         c.execute("""INSERT INTO trades
             (symbol, side, qty, price, pnl, score, rsi, vol_ratio,
-             hold_hours, reason, signal_breakdown, market, date, time)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             hold_hours, reason, signal_breakdown, market, date, time, discipline)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (symbol, side, qty, price, pnl, score, rsi, vol_ratio,
              hold_hours, reason, breakdown, market,
-             now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")))
+             now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), discipline))
         conn.commit()
 
         today = now.strftime("%Y-%m-%d")
