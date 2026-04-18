@@ -1215,6 +1215,8 @@ def build_dashboard():
 </div>
 
 <div class="controls-bar">
+  <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
+  <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
   <span style="font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:1px">Controls:</span>
   <button class="ctrl-btn" onclick="pinCmd('/kill','🛑 Kill all bots?')" style="border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466">🛑 KILL ALL BOTS</button>
   <button class="ctrl-btn" onclick="pinCmd('/close-all','💰 Close all positions?')" style="border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800">💰 CLOSE ALL POSITIONS</button>
