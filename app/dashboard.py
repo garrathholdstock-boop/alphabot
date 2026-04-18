@@ -514,7 +514,7 @@ def build_dashboard():
                 f'<div class="pos-card-item"><span class="pos-card-label">Stop</span><span class="pos-card-value" style="color:#ff4466">${pos["stop_price"]:.4f} ({stop_pct2:+.1f}%)</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Position</span><span class="pos-card-value">${pos_val2:,.0f}</span></div>'
                 f'</div>'
-                f'<div class="pos-card-detail" style="display:block" id="card-det-{idx}" style="display:block">'
+                f'<div class="pos-card-detail" id="card-det-{idx}" style="display:none">'
                 f'<div class="pos-card-detail-grid">'
                 f'<div class="pos-card-item"><span class="pos-card-label">Held</span><span class="pos-card-value">{held_str2}</span></div>'
                 f'<div class="pos-card-item"><span class="pos-card-label">Purchased</span><span class="pos-card-value">{purchased2}</span></div>'
