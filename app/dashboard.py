@@ -647,8 +647,10 @@ def build_dashboard():
             price_s_t = f"${price_t:.4f}" if price_t else "—"
             total_s_t = f"${price_t*qty_t:,.0f}" if price_t and qty_t else "—"
             hold_s_t = f"{hold_t:.1f}h" if hold_t else "—"
+            t_card_idx = len(iphone_trade_cards)
             iphone_trade_cards += (
-                f'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'
+                f'<div onclick="toggleTradeCard({t_card_idx})" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<div style="display:flex;align-items:center;gap:7px">'
                 f'<span style="font-size:12px">{"✅" if pnl_t>0 else "❌"}</span>'
                 f'<div>'
@@ -659,6 +661,16 @@ def build_dashboard():
                 f'<div style="font-size:14px;font-weight:700;color:{pc_t}">{sign_t}${pnl_t:.2f}</div>'
                 f'<div style="font-size:11px;color:#475569">{price_s_t} · {qty_s_t}</div>'
                 f'</div></div>'
+                f'<div id="tcard-{t_card_idx}" style="display:none;margin-top:8px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12px">'
+                f'<div><span style="color:#475569">Entry</span> <b>{price_s_t}</b></div>'
+                f'<div><span style="color:#475569">Qty</span> <b>{qty_s_t}</b></div>'
+                f'<div><span style="color:#475569">Total</span> <b>{total_s_t}</b></div>'
+                f'<div><span style="color:#475569">Held</span> <b>{hold_s_t}</b></div>'
+                f'<div><span style="color:#475569">Market</span> <b style="color:{mkt_col_t}">{market_t}</b></div>'
+                f'<div><span style="color:#475569">Score</span> <b style="color:#ffcc00">{score_t or "—"}</b></div>'
+                f'</div></div>'
+                f'</div>'
             )
         trades_html = (
             f'<div class="card" style="margin-bottom:16px">'
@@ -672,7 +684,7 @@ def build_dashboard():
             f'<div style="margin-top:10px;font-size:13px;color:#475569">Total: {total_t} trades · '
             f'<span style="color:{_col(total_pnl_db)}">{_fmt(total_pnl_db)}</span> all-time · '
             f'{win_rate}% win rate</div>'
-            f'<script>function toggleTrade(i){{var r=document.getElementById("trade-det-"+i);if(r)r.style.display=r.style.display==="none"?"table-row":"none";}}</script>'
+            f'<script>function toggleTrade(i){{var r=document.getElementById("trade-det-"+i);if(r)r.style.display=r.style.display==="none"?"table-row":"none";}}function toggleTradeCard(i){{var d=document.getElementById("tcard-"+i);if(!d)return;d.style.display=d.style.display==="block"?"none":"block";}}</script>'
             f'</div>'
         )
     else:
