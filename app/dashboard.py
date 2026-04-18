@@ -193,7 +193,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 .tab-bar{display:flex;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:20px;flex-wrap:wrap}
 .tab{padding:12px 18px;cursor:pointer;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#94a3b8;border-bottom:2px solid transparent;text-decoration:none}
 .tab:hover{color:#e0e0e0}
-.empty{text-align:center;padding:50px;color:#475569;font-size:16px}
+.empty{text-align:center;padding:50px;color:#94a3b8;font-size:16px}
 .scan-panel{display:none}.scan-panel.active{display:block}
 .controls-bar{background:#0d1117;border-bottom:1px solid rgba(255,255,255,0.06);padding:10px 28px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:73px;z-index:99}
 .ctrl-btn{padding:8px 18px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px}
@@ -242,7 +242,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 .pos-card-pnl{font-size:15px;font-weight:700;text-align:right;line-height:1.3}
 .pos-card-row{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-bottom:0}
 .pos-card-item{display:flex;flex-direction:column;gap:2px}
-.pos-card-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1.5px}
+.pos-card-label{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px}
 .pos-card-value{font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace}
 .pos-card-detail{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
 .pos-card-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -454,7 +454,7 @@ def build_dashboard():
                 f'<tr onclick="toggleDetail({idx})" style="cursor:pointer">'
                 f'<td style="font-weight:700;color:{cat_col}">{sym}</td>'
                 f'<td><span style="font-size:11px;color:{cat_col};font-weight:700">{cat}</span></td>'
-                f'<td style="color:#475569">{entry_dt}</td>'
+                f'<td style="color:#94a3b8">{entry_dt}</td>'
                 f'<td style="color:#777">{purchased}</td>'
                 f'<td>${entry:.4f}</td>'
                 f'<td style="color:#00aaff">${live:.4f}</td>'
@@ -516,7 +516,7 @@ def build_dashboard():
                 f'<span style="font-size:11px;color:{cat_col};margin-left:8px;font-weight:700;opacity:0.7">{cat}</span></div>'
                 f'<div style="text-align:right">'
                 f'<div class="pos-card-pnl" style="color:{pnl_c2}">{sign2}${pnl2:.2f} <span style="font-size:11px;opacity:0.8">({sign2}{pnl_pct2:.1f}%)</span></div>'
-                f'<div class="tap-hint" style="font-size:10px;color:#475569;margin-top:3px">tap for more ▾</div>'
+                f'<div class="tap-hint" style="font-size:10px;color:#94a3b8;margin-top:3px">tap for more ▾</div>'
                 f'</div>'
                 f'</div>'
                 f'<div class="pos-card-row">'
@@ -537,7 +537,7 @@ def build_dashboard():
             )
         positions_html = (
             f'<div class="card" style="margin-bottom:16px">'
-            f'<div class="section-title">CURRENTLY HOLDING ({len(all_pos)}) <span style="font-size:13px;color:#475569;font-weight:400;font-family:\'JetBrains Mono\'"></span></div>'
+            f'<div class="section-title">CURRENTLY HOLDING ({len(all_pos)}) <span style="font-size:13px;color:#94a3b8;font-weight:400;font-family:\'JetBrains Mono\'"></span></div>'
             f'<div class="pos-table-wrap table-wrap"><table><thead><tr>'
             f'<th>Symbol</th><th>Type</th><th>Held</th><th>Purchased</th>'
             f'<th>Entry $</th><th>Live $</th><th>Stop</th><th>Position $</th><th>P&L</th>'
@@ -564,7 +564,7 @@ def build_dashboard():
             market = row[8] if len(row) > 8 else "—"
             discipline = row[9] if len(row) > 9 else "swing"
             _disc_map = {"crypto_intraday":("⚡","#aa88ff","Crypto ID"),"stock_intraday":("⚡","#00aaff","Stock ID"),"crypto_swing":("🔄","#00ff88","Crypto Swing"),"stock_swing":("📈","#00aaff","Stock Swing"),"swing":("📈","#00aaff","Swing")}
-            disc_icon, disc_col, disc_label = _disc_map.get(discipline, ("•","#475569", discipline))
+            disc_icon, disc_col, disc_label = _disc_map.get(discipline, ("•","#94a3b8", discipline))
             pc = "#00ff88" if pnl>=0 else "#ff4466"; sign = "+" if pnl>=0 else ""
             # Date + time
             try:
@@ -579,7 +579,7 @@ def build_dashboard():
             price_s = f"${price:.4f}" if price else "—"
             total_s = f"${price*qty:,.0f}" if price and qty else "—"
             hold_s  = f"{hold_h:.1f}h" if hold_h else "—"
-            mkt_col = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market,"#475569")
+            mkt_col = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market,"#94a3b8")
             t_idx = len([x for x in trade_rows.split('trade-det-') if x]) - 1
             if pnl < 0:
                 sell_reason = "🛑 Stop loss triggered"
@@ -595,21 +595,21 @@ def build_dashboard():
                 sell_col = "#00ff88"
             else:
                 sell_reason = "— Position closed"
-                sell_col = "#475569"
+                sell_col = "#94a3b8"
             trade_rows += (
                 f'<tr onclick="toggleTrade({t_idx})" style="cursor:pointer">'
                 f'<td>{"✅" if pnl>0 else "❌"}</td>'
                 f'<td style="font-weight:700;color:#00aaff">{sym} <span title="{disc_label}" style="font-size:10px;background:rgba(255,255,255,0.06);color:{disc_col};border:1px solid {disc_col}44;border-radius:4px;padding:1px 5px;margin-left:3px;font-weight:700">{disc_icon}</span></td>'
                 f'<td style="color:{mkt_col};font-size:11px;font-weight:700">{market}</td>'
-                f'<td style="color:#475569">{date_s}</td>'
-                f'<td style="color:#475569">{time_s}</td>'
+                f'<td style="color:#94a3b8">{date_s}</td>'
+                f'<td style="color:#94a3b8">{time_s}</td>'
                 f'<td style="color:#777">{price_s}</td>'
                 f'<td style="color:#aaa">{qty_s}</td>'
                 f'<td style="color:#aaa">{total_s}</td>'
-                f'<td style="color:#475569">{hold_s}</td>'
+                f'<td style="color:#94a3b8">{hold_s}</td>'
                 f'<td style="color:{pc};font-weight:700">{sign}${pnl:.2f}</td>'
                 f'<td style="color:{pc};font-weight:700">{(f"{sign}{abs(pnl/(price*qty)*100):.1f}%" if price and qty else "—")}</td>'
-                f'<td style="color:#475569">{score or "—"}</td>'
+                f'<td style="color:#94a3b8">{score or "—"}</td>'
                 f'</tr>'
                 f'<tr id="trade-det-{t_idx}" style="display:none;background:rgba(255,255,255,0.04)">'
                 f'<td colspan="12" style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05)">'
@@ -642,7 +642,7 @@ def build_dashboard():
             market_t = row[8] if len(row)>8 else "—"
             pc_t = "#00ff88" if pnl_t>=0 else "#ff4466"
             sign_t = "+" if pnl_t>=0 else ""
-            mkt_col_t = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market_t,"#475569")
+            mkt_col_t = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00","ASX":"#ffaa00","FTSE":"#cc88ff"}.get(market_t,"#94a3b8")
             disc_t = row[9] if len(row)>9 else "swing"
             # Intraday badge only for intraday disciplines — swing trades get no badge
             _is_intraday = "intraday" in str(disc_t).lower()
@@ -695,7 +695,7 @@ def build_dashboard():
                 sell_col_t = "#00ff88"
             else:
                 sell_reason_t = "— Position closed"
-                sell_col_t = "#475569"
+                sell_col_t = "#94a3b8"
             t_card_idx = _card_counter
             _card_counter += 1
             intraday_badge = (
@@ -720,37 +720,37 @@ def build_dashboard():
                 f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.06)">'
                 f'<div>'
                 f'<div style="font-size:13px;font-weight:600;color:#e0e0e0">{date_full_t}</div>'
-                f'<div style="font-size:11px;color:#475569;margin-top:3px">Score <b style="color:#ffcc00;font-size:13px;margin-left:2px">{score_disp_t}</b></div>'
+                f'<div style="font-size:11px;color:#94a3b8;margin-top:3px">Score <b style="color:#ffcc00;font-size:13px;margin-left:2px">{score_disp_t}</b></div>'
                 f'</div>'
                 f'<div style="text-align:right;max-width:55%">'
-                f'<div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px">Entry Reason</div>'
+                f'<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">Entry Reason</div>'
                 f'<div style="font-size:12px;color:#00aaff;font-weight:600;margin-top:3px;line-height:1.3">{entry_reason_t}</div>'
                 f'</div>'
                 f'</div>'
                 # Metrics grid
                 f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:13px;margin-bottom:10px">'
-                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Total</span><br><b>{total_s_t}</b></div>'
-                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Qty</span><br><b>{qty_s_t}</b></div>'
-                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Held</span><br><b>{hold_s_t}</b></div>'
-                f'<div><span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">P&amp;L</span><br><b style="color:{pc_t}">{sign_t}${pnl_t:.2f}</b></div>'
+                f'<div><span style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px">Total</span><br><b>{total_s_t}</b></div>'
+                f'<div><span style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px">Qty</span><br><b>{qty_s_t}</b></div>'
+                f'<div><span style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px">Held</span><br><b>{hold_s_t}</b></div>'
+                f'<div><span style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px">P&amp;L</span><br><b style="color:{pc_t}">{sign_t}${pnl_t:.2f}</b></div>'
                 f'</div>'
                 # Exit reason at bottom
                 f'<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">'
-                f'<span style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:1px">Exit Reason</span><br>'
+                f'<span style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px">Exit Reason</span><br>'
                 f'<b style="color:{sell_col_t};font-size:13px">{sell_reason_t}</b>'
                 f'</div></div>'
                 f'</div>'
             )
         trades_html = (
             f'<div class="card" style="margin-bottom:16px">'
-            f'<div class="section-title" style="text-transform:uppercase;letter-spacing:1px">RECENT TRADES <span style="font-size:12px;color:#475569;font-weight:400;text-transform:none">DB-backed · survives restarts</span></div>'
+            f'<div class="section-title" style="text-transform:uppercase;letter-spacing:1px">RECENT TRADES <span style="font-size:12px;color:#94a3b8;font-weight:400;text-transform:none">DB-backed · survives restarts</span></div>'
             f'<div class="trades-table-wrap table-wrap"><table><thead><tr>'
             f'<th></th><th>Symbol</th><th>Mkt</th><th>Date</th><th>Time</th>'
             f'<th>Entry $</th><th>Qty</th><th>Total $</th><th>Held</th><th>P&L</th><th>%</th><th>Score</th>'
             f'</tr></thead>'
             f'<tbody>{trade_rows}</tbody></table></div>'
             f'<div class="trades-cards">{iphone_trade_cards}</div>'
-            f'<div style="margin-top:10px;font-size:13px;color:#475569">Total: {total_t} trades · '
+            f'<div style="margin-top:10px;font-size:13px;color:#94a3b8">Total: {total_t} trades · '
             f'<span style="color:{_col(total_pnl_db)}">{_fmt(total_pnl_db)}</span> all-time · '
             f'{win_rate}% win rate</div>'
             f'<script>function toggleTrade(i){{var r=document.getElementById("trade-det-"+i);if(r)r.style.display=r.style.display==="none"?"table-row":"none";}}function toggleTradeCard(i){{var d=document.getElementById("tcard-"+i);if(!d)return;d.style.display=d.style.display==="block"?"none":"block";}}</script>'
@@ -833,32 +833,32 @@ def build_dashboard():
   <td style="text-align:center">
     <span style="display:inline-flex;align-items:center;gap:5px">
       {g_scr}
-      <span style="font-size:11px;font-weight:700;color:{"#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#475569"}">{v_scr}</span>
+      <span style="font-size:11px;font-weight:700;color:{"#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#94a3b8"}">{v_scr}</span>
     </span>
   </td>
   <td style="text-align:center">
     <span style="display:inline-flex;align-items:center;gap:5px">
       {g_ema}
-      <span style="font-size:11px;color:{"#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#475569"}">{v_ema}</span>
+      <span style="font-size:11px;color:{"#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#94a3b8"}">{v_ema}</span>
     </span>
   </td>
   <td style="text-align:center">
     <span style="display:inline-flex;align-items:center;gap:5px">
       {g_rsi}
-      <span style="font-size:11px;color:{"#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#475569"}">{v_rsi}</span>
+      <span style="font-size:11px;color:{"#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#94a3b8"}">{v_rsi}</span>
     </span>
   </td>
   <td style="text-align:center">
     <span style="display:inline-flex;align-items:center;gap:5px">
       {g_vol}
-      <span style="font-size:11px;color:{"#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#475569"}">{v_vol}</span>
+      <span style="font-size:11px;color:{"#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#94a3b8"}">{v_vol}</span>
     </span>
   </td>
   <td style="text-align:center">{g_vap}</td>
-  <td style="text-align:center">{g_sec}<span style="font-size:10px;color:#475569;margin-left:3px">{v_sec}</span></td>
+  <td style="text-align:center">{g_sec}<span style="font-size:10px;color:#94a3b8;margin-left:3px">{v_sec}</span></td>
 </tr>
 <tr id="{rid}_detail" class="scan-row-desktop" style="display:none;background:rgba(255,255,255,0.02)">
-  <td colspan="9" style="padding:10px 16px;font-size:12px;color:#475569;border-bottom:1px solid rgba(255,255,255,0.04)">
+  <td colspan="9" style="padding:10px 16px;font-size:12px;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.04)">
     Score {v_scr} · EMA {v_ema} · RSI {v_rsi} · Vol {v_vol} · VWAP {v_vap} · Sector {v_sec}
     {"&nbsp;&nbsp;<span style=\"color:#00ff88;font-weight:700\">✅ ALL GATES PASS — eligible to trade</span>" if all_pass else ""}
   </td>
@@ -878,7 +878,7 @@ def build_dashboard():
   <td style="text-align:center;padding:0 2px">{g_sec}</td>
 </tr>
 <tr id="{rid}_mob_detail" class="scan-row-mobile" style="display:none;background:rgba(255,255,255,0.02)">
-  <td colspan="9" style="padding:8px 12px;font-size:11px;color:#475569">
+  <td colspan="9" style="padding:8px 12px;font-size:11px;color:#94a3b8">
     SCR:{v_scr} EMA:{v_ema} RSI:{v_rsi} Vol:{v_vol} VAP:{v_vap} Sec:{v_sec}
   </td>
 </tr>"""
@@ -892,7 +892,7 @@ def build_dashboard():
             f'<div style="display:flex;gap:18px;margin-bottom:14px;font-size:14px;flex-wrap:wrap">'
             f'<span style="color:#00ff88;font-weight:700">🟢 {buys} READY</span>'
             f'<span style="color:#ffcc00;font-weight:700">⚡ {watch} CLOSE</span>'
-            f'<span style="color:#475569;margin-left:auto">{len(scored)} scanned</span></div>'
+            f'<span style="color:#94a3b8;margin-left:auto">{len(scored)} scanned</span></div>'
             f'<div style="overflow-x:auto">'
             f'<table><thead>'
             f'<tr class="scan-row-desktop"><th style="font-size:13px">Symbol</th><th style="font-size:13px">Price</th><th style="font-size:13px">Chg%</th>'
@@ -938,10 +938,10 @@ def build_dashboard():
             row_bg     = "background:rgba(0,255,136,0.05);" if all_pass else "background:rgba(255,204,0,0.02);"
             rid = f"rtt_{sym}_{label}"
 
-            scr_c = "#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#475569"
-            ema_c2 = "#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#475569"
-            rsi_c2 = "#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#475569"
-            vol_c2 = "#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#475569"
+            scr_c = "#00ff88" if sc>=MIN_SIGNAL_SCORE else "#ffcc00" if sc>=MIN_SIGNAL_SCORE-1 else "#94a3b8"
+            ema_c2 = "#00ff88" if ema_gap and ema_gap>0 else "#ffcc00" if ema_gap and ema_gap>-0.5 else "#94a3b8"
+            rsi_c2 = "#00ff88" if c.get("rsi") and 50<=c["rsi"]<=65 else "#ffcc00" if c.get("rsi") and c["rsi"]<=75 else "#ff4466" if c.get("rsi") and c["rsi"]>75 else "#94a3b8"
+            vol_c2 = "#00ff88" if c.get("vol_ratio",0)>=1.5 else "#ffcc00" if c.get("vol_ratio",0)>=1.2 else "#94a3b8"
             rows += f"""<div style="margin-bottom:4px">
 <!-- Desktop RTT: dot + value stacked, larger -->
 <div class="rtt-desktop" onclick="toggleRTT('{rid}')" style="display:grid;grid-template-columns:100px 80px 58px repeat(5,1fr);
@@ -1001,7 +1001,7 @@ def build_dashboard():
             f'<div class="card" style="margin-bottom:16px;border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.03)">'
             f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
             f'<div class="section-title" style="color:#00ff88;margin-bottom:0">🟢 READY TO TRADE</div>'
-            f'<div style="font-size:12px;color:#475569">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed</div>'
+            f'<div style="font-size:12px;color:#94a3b8">Score ≥ {MIN_SIGNAL_SCORE} + EMA crossed</div>'
             f'</div>'
             f'<style>@media(min-width:600px){{.rtt-mobile{{display:none!important}}}}@media(max-width:599px){{.rtt-desktop{{display:none!important}}}}</style>'
             f'<div class="rtt-desktop" style="display:grid;grid-template-columns:100px 80px 58px repeat(5,1fr);'
@@ -1012,7 +1012,7 @@ def build_dashboard():
             f'<div style="text-align:center">VAP</div>'
             f'</div>'
             f'<div class="rtt-mobile" style="display:grid;grid-template-columns:60px 56px 40px repeat(6,24px);'
-            f'gap:2px;padding:3px 8px 8px;font-size:9px;color:#475569;font-weight:700;text-transform:uppercase">'
+            f'gap:2px;padding:3px 8px 8px;font-size:9px;color:#94a3b8;font-weight:700;text-transform:uppercase">'
             f'<div>Sym</div><div>Price</div><div>Chg</div>'
             f'<div style="text-align:center">S</div><div style="text-align:center">E</div>'
             f'<div style="text-align:center">R</div><div style="text-align:center">V</div>'
@@ -1026,15 +1026,15 @@ def build_dashboard():
         ready_to_trade_html = (
             f'<div class="card" style="margin-bottom:16px;border-color:rgba(255,255,255,0.07)">' 
             f'<div style="display:flex;align-items:center;gap:12px">' 
-            f'<div class="section-title" style="color:#475569;margin-bottom:0">🟢 READY TO TRADE</div>' 
-            f'<div style="font-size:13px;color:#475569">No signals qualify right now — watching {sum(len(x) for x in [us_scored,crypto_scored,ftse_scored,asx_scored,sc_scored])} stocks across all markets</div>'
+            f'<div class="section-title" style="color:#94a3b8;margin-bottom:0">🟢 READY TO TRADE</div>' 
+            f'<div style="font-size:13px;color:#94a3b8">No signals qualify right now — watching {sum(len(x) for x in [us_scored,crypto_scored,ftse_scored,asx_scored,sc_scored])} stocks across all markets</div>'
             f'</div></div>'
         )
 
     # ── Build per-market accordion panels ──
     def build_market_accordion(mid, label, icon, color, open_now, scored, is_open):
         if not scored:
-            preview_html = f'<div style="padding:16px;color:#475569;font-size:14px">No scan data yet — waiting for first cycle</div>'
+            preview_html = f'<div style="padding:16px;color:#94a3b8;font-size:14px">No scan data yet — waiting for first cycle</div>'
             full_html = preview_html
             buys = watch = 0
         else:
@@ -1112,14 +1112,14 @@ def build_dashboard():
                 f'<span style="color:#00ff88;font-weight:700">🟢 {buys} BUY</span>'
                 f'<span style="color:#00aaff;font-weight:700">👀 {watch} WATCH</span>'
                 f'<span style="color:#ff8800;font-weight:700">⚡ {near} NEAR</span>'
-                f'<span style="color:#475569;margin-left:auto">{total} scanned</span></div>'
+                f'<span style="color:#94a3b8;margin-left:auto">{total} scanned</span></div>'
             )
             preview_rows = mk_rows(scored[:10])
             full_rows    = mk_rows(scored)
             preview_html = summary + thead + preview_rows + tfoot
             show_all_btn = (
                 f'<div id="mkt-btn-{mid}" style="margin-top:10px;text-align:center">'
-                f'<button onclick="showFullMarket(\'{mid}\')" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:7px;color:#475569;padding:8px 20px;font-size:13px;cursor:pointer;font-family:monospace">'
+                f'<button onclick="showFullMarket(\'{mid}\')" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:7px;color:#94a3b8;padding:8px 20px;font-size:13px;cursor:pointer;font-family:monospace">'
                 f'▼ Show all {total} stocks</button></div>' if total > 10 else ''
             )
             full_html = summary + thead + full_rows + tfoot
@@ -1129,13 +1129,13 @@ def build_dashboard():
             f'<span style="font-size:12px;font-weight:700;color:{color};background:rgba(255,255,255,0.06);'
             f'padding:3px 10px;border-radius:5px;margin-left:8px">OPEN</span>'
             if open_now else
-            f'<span style="font-size:12px;color:#475569;background:rgba(255,255,255,0.03);'
+            f'<span style="font-size:12px;color:#94a3b8;background:rgba(255,255,255,0.03);'
             f'padding:3px 10px;border-radius:5px;margin-left:8px">CLOSED</span>'
         )
         buys_badge = (
             f'<span style="font-size:12px;color:#00ff88;font-weight:700;margin-left:auto">🟢 {buys} BUY</span>'
             if buys > 0 else
-            f'<span style="font-size:12px;color:#475569;margin-left:auto">{len(scored)} scanned</span>'
+            f'<span style="font-size:12px;color:#94a3b8;margin-left:auto">{len(scored)} scanned</span>'
         ) if scored else ''
 
         border_col = color if open_now else "rgba(255,255,255,0.07)"
@@ -1145,10 +1145,10 @@ def build_dashboard():
             f'<div style="border:1px solid {border_col};border-radius:12px;margin-bottom:10px;background:{bg_col};overflow:hidden">'
             f'<div onclick="toggleMarket(\'{mid}\')" style="display:flex;align-items:center;gap:10px;padding:14px 18px;cursor:pointer;user-select:none">'
             f'<span style="font-size:18px">{icon}</span>'
-            f'<span style="font-size:16px;font-weight:700;color:{color if open_now else "#475569"}">{label}</span>'
+            f'<span style="font-size:16px;font-weight:700;color:{color if open_now else "#94a3b8"}">{label}</span>'
             f'{status_badge}'
             f'{buys_badge}'
-            f'<span id="mkt-arrow-{mid}" style="font-size:13px;color:#475569;margin-left:12px">{"▼" if open_now else "▶"}</span>'
+            f'<span id="mkt-arrow-{mid}" style="font-size:13px;color:#94a3b8;margin-left:12px">{"▼" if open_now else "▶"}</span>'
             f'</div>'
             f'<div id="mkt-body-{mid}" style="display:{"block" if open_now else "none"};padding:0 18px 16px 18px">'
             f'<div id="mkt-preview-{mid}">{preview_html}</div>'
@@ -1163,7 +1163,7 @@ def build_dashboard():
         f'<div style="margin-bottom:20px">'
         f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
         f'<div class="section-title" style="margin-bottom:0">📡 Market Scanner</div>'
-        f'<div style="font-size:13px;color:#475569">Open markets expanded · top 10 shown/collapse</div>'
+        f'<div style="font-size:13px;color:#94a3b8">Open markets expanded · top 10 shown/collapse</div>'
         f'</div>'
         + build_market_accordion("crypto","Crypto","🪙","#00ff88", True, crypto_scored, True)
         + build_market_accordion("us","US Stocks","📈","#00aaff", market_open, us_scored, market_open)
@@ -1182,7 +1182,7 @@ def build_dashboard():
         all_r = skip_r + boost_r
         news_html = (
             f'<table><thead><tr><th>Symbol</th><th>Sentiment</th><th>Reason</th></tr></thead><tbody>{all_r}</tbody></table>'
-            if all_r else '<div style="color:#475569;font-size:14px;padding:10px 0">All clear — no negative news today.</div>'
+            if all_r else '<div style="color:#94a3b8;font-size:14px;padding:10px 0">All clear — no negative news today.</div>'
         )
     news_time = f"Last scan: {news_state.get('last_scan_time','')} ET" if news_state.get("last_scan_time") else "Scans at 9:00 AM ET daily"
 
@@ -1213,7 +1213,7 @@ def build_dashboard():
       <div style="font-size:15px;font-weight:700;color:{_col(st_states.get('crypto',{}).get('pnl',0))}">{_fmt(st_states.get('crypto',{}).get('pnl',0))}</div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:11px;color:#475569;letter-spacing:1px">Portfolio</div>
+      <div style="font-size:11px;color:#94a3b8;letter-spacing:1px">Portfolio</div>
       <div style="font-size:15px;font-weight:700;color:#00aaff">{portfolio}</div>
     </div>
     <a href="/analytics" style="padding:8px 16px;border-radius:8px;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">📊 ANALYTICS</a>
@@ -1227,12 +1227,12 @@ def build_dashboard():
   <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
   <a href="/intelligence" class="tab" style="text-decoration:none">🧠 Intelligence</a>
   <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
-  <span style="font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:1px">Controls:</span>
+  <span style="font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">Controls:</span>
   <button class="ctrl-btn" onclick="pinCmd('/kill','🛑 Kill all bots?')" style="border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466">🛑 KILL ALL BOTS</button>
   <button class="ctrl-btn" onclick="pinCmd('/close-all','💰 Close all positions?')" style="border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800">💰 CLOSE ALL POSITIONS</button>
   <button class="ctrl-btn" onclick="pinCmd('/resume','▶ Resume?')" style="border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88">▶ RESUME</button>
   <span id="dash-token" style="display:none">{DASH_TOKEN}</span>
-  <span id="cmd-status" style="font-size:13px;color:#475569;margin-left:8px"></span>
+  <span id="cmd-status" style="font-size:13px;color:#94a3b8;margin-left:8px"></span>
 </div>
 <script>
 function pinCmd(path,label){{
@@ -1263,46 +1263,46 @@ function pinCmd(path,label){{
         <div class="big blue" style="font-size:32px">{portfolio}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:12px;color:#475569">{now_date}</div>
-        <div style="font-size:13px;color:#475569;margin-top:3px">
+        <div style="font-size:12px;color:#94a3b8">{now_date}</div>
+        <div style="font-size:13px;color:#94a3b8;margin-top:3px">
           <span class="dot {'dot-green' if market_open else 'dot-red'}"></span>{"Open" if market_open else "Closed"}
         </div>
       </div>
     </div>
     <div style="margin-top:10px;display:flex;gap:24px;font-size:14px;flex-wrap:wrap">
-      <span><span style="color:#475569">Today </span><span style="font-weight:700;color:{_col(today_pnl)}">{_fmt(today_pnl)}</span></span>
-      <span><span style="color:#475569">Trades </span><span style="font-weight:700">{today_count}</span></span>
+      <span><span style="color:#94a3b8">Today </span><span style="font-weight:700;color:{_col(today_pnl)}">{_fmt(today_pnl)}</span></span>
+      <span><span style="color:#94a3b8">Trades </span><span style="font-weight:700">{today_count}</span></span>
     </div>
   </div>
   <div class="card">
     <div class="lbl" style="color:#00aaff">TODAY</div>
     <div style="font-size:22px;font-weight:700;color:{_col(d0["pnl"])};margin:6px 0">{_fmt(d0["pnl"])}</div>
-    <div style="font-size:12px;color:#475569;margin-top:3px">{d0["t"]} trades · {d0["wr"]}% win</div>
-    <div style="font-size:12px;color:#475569">avg {_fmt(d0["avg"])} · <span style="color:{_col(d0["pnl"])}">{d0["pct"]:+.2f}%</span></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">{d0["t"]} trades · {d0["wr"]}% win</div>
+    <div style="font-size:12px;color:#94a3b8">avg {_fmt(d0["avg"])} · <span style="color:{_col(d0["pnl"])}">{d0["pct"]:+.2f}%</span></div>
   </div>
   <div class="card">
     <div class="lbl">{d1["name"]}</div>
     <div style="font-size:22px;font-weight:700;color:{_col(d1["pnl"])};margin:6px 0">{_fmt(d1["pnl"])}</div>
-    <div style="font-size:12px;color:#475569;margin-top:3px">{d1["t"]} trades · {d1["wr"]}% win</div>
-    <div style="font-size:12px;color:#475569">avg {_fmt(d1["avg"])} · <span style="color:{_col(d1["pnl"])}">{d1["pct"]:+.2f}%</span></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">{d1["t"]} trades · {d1["wr"]}% win</div>
+    <div style="font-size:12px;color:#94a3b8">avg {_fmt(d1["avg"])} · <span style="color:{_col(d1["pnl"])}">{d1["pct"]:+.2f}%</span></div>
   </div>
   <div class="card">
     <div class="lbl">{d2["name"]}</div>
     <div style="font-size:22px;font-weight:700;color:{_col(d2["pnl"])};margin:6px 0">{_fmt(d2["pnl"])}</div>
-    <div style="font-size:12px;color:#475569;margin-top:3px">{d2["t"]} trades · {d2["wr"]}% win</div>
-    <div style="font-size:12px;color:#475569">avg {_fmt(d2["avg"])} · <span style="color:{_col(d2["pnl"])}">{d2["pct"]:+.2f}%</span></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">{d2["t"]} trades · {d2["wr"]}% win</div>
+    <div style="font-size:12px;color:#94a3b8">avg {_fmt(d2["avg"])} · <span style="color:{_col(d2["pnl"])}">{d2["pct"]:+.2f}%</span></div>
   </div>
   <div class="card">
     <div class="lbl" style="color:#00aaff">LAST 7 DAYS</div>
     <div style="font-size:22px;font-weight:700;color:{_col(week_pnl)};margin:6px 0">{_fmt(week_pnl)}</div>
-    <div style="font-size:12px;color:#475569;margin-top:3px">{week_t} trades · {week_wr}% win</div>
-    <div style="font-size:12px;color:#475569">best <span style="color:#00ff88">{week_best}</span> · worst <span style="color:#ff4466">{week_worst}</span></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">{week_t} trades · {week_wr}% win</div>
+    <div style="font-size:12px;color:#94a3b8">best <span style="color:#00ff88">{week_best}</span> · worst <span style="color:#ff4466">{week_worst}</span></div>
   </div>
   <div class="card">
     <div class="lbl">ALL TIME</div>
     <div style="font-size:22px;font-weight:700;color:{_col(total_pnl_db)};margin:6px 0">{_fmt(total_pnl_db)}</div>
-    <div style="font-size:12px;color:#475569;margin-top:3px">{total_t} trades · {win_rate}% win</div>
-    <div style="font-size:12px;color:#475569">avg score {avg_sc_db:.1f}</div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">{total_t} trades · {win_rate}% win</div>
+    <div style="font-size:12px;color:#94a3b8">avg score {avg_sc_db:.1f}</div>
   </div>
 </div>
 
@@ -1314,12 +1314,12 @@ function pinCmd(path,label){{
       <div style="font-size:18px;font-weight:700;color:{regime_color}">{'🐂' if regime=='BULL' else '🐻'} {regime}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('us',{}).get('running') else ('#ff4466' if st_states.get('us',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('us',{}))}</div>
-      <div><span style="color:#475569">SPY </span><b>{spy_str}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{st_states.get('us',{}).get('cycle',0)}</div>
-      <div><span style="color:#475569">MA20 </span><span style="color:#777">{spy_ma}</span></div>
-      <div><span style="color:#475569">Positions </span><b>{st_states.get('us',{}).get('positions',0)}</b></div>
-      <div><span style="color:#475569">VIX </span><span style="color:{vix_color}">{vix_regime}</span></div>
+      <div><span style="color:#94a3b8">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('us',{}).get('running') else ('#ff4466' if st_states.get('us',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('us',{}))}</div>
+      <div><span style="color:#94a3b8">SPY </span><b>{spy_str}</b></div>
+      <div><span style="color:#94a3b8">Cycle </span>#{st_states.get('us',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">MA20 </span><span style="color:#777">{spy_ma}</span></div>
+      <div><span style="color:#94a3b8">Positions </span><b>{st_states.get('us',{}).get('positions',0)}</b></div>
+      <div><span style="color:#94a3b8">VIX </span><span style="color:{vix_color}">{vix_regime}</span></div>
     </div>
   </div>
   <div class="card card-green">
@@ -1328,37 +1328,37 @@ function pinCmd(path,label){{
       <div style="font-size:18px;font-weight:700;color:{c_regime_color}">{'🐂' if c_regime=='BULL' else '🐻'} {c_regime}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('crypto',{}).get('running') else ('#ff4466' if st_states.get('crypto',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('crypto',{}))}</div>
-      <div><span style="color:#475569">BTC </span><b>{btc_str}</b></div>
-      <div><span style="color:#475569">MA14 </span><span style="color:#888">${st_crypto_regime.get('btc_ma20',0):.0f}</span></div>
-      <div><span style="color:#475569">Cycle </span>#{st_states.get('crypto',{}).get('cycle',0)}</div>
-      <div><span style="color:#475569">Chg </span><span style="color:{btc_chg_col}">{btc_chg_str}</span></div>
-      <div><span style="color:#475569">Positions </span><b>{st_states.get('crypto',{}).get('positions',0)}</b></div>
-      <div><span style="color:#475569">Testnet </span><span style="color:#ffcc00">{'YES' if BINANCE_USE_TESTNET else 'LIVE'}</span></div>
+      <div><span style="color:#94a3b8">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('crypto',{}).get('running') else ('#ff4466' if st_states.get('crypto',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('crypto',{}))}</div>
+      <div><span style="color:#94a3b8">BTC </span><b>{btc_str}</b></div>
+      <div><span style="color:#94a3b8">MA14 </span><span style="color:#888">${st_crypto_regime.get('btc_ma20',0):.0f}</span></div>
+      <div><span style="color:#94a3b8">Cycle </span>#{st_states.get('crypto',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">Chg </span><span style="color:{btc_chg_col}">{btc_chg_str}</span></div>
+      <div><span style="color:#94a3b8">Positions </span><b>{st_states.get('crypto',{}).get('positions',0)}</b></div>
+      <div><span style="color:#94a3b8">Testnet </span><span style="color:#ffcc00">{'YES' if BINANCE_USE_TESTNET else 'LIVE'}</span></div>
     </div>
   </div>
   <div class="card" style="border-color:rgba(255,170,0,0.25)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:16px;font-weight:700;color:#ffaa00">🦘 ASX <span style="font-size:11px;color:#475569;font-weight:400">00:00–06:00 UTC</span></div>
+      <div style="font-size:16px;font-weight:700;color:#ffaa00">🦘 ASX <span style="font-size:11px;color:#94a3b8;font-weight:400">00:00–06:00 UTC</span></div>
       <div style="font-size:16px;font-weight:700;color:{asx_col}">{'🐂' if asx_mode=='BULL' else '🐻'} {asx_mode}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Market </span><span style="color:{'#ffaa00' if asx_open else '#475569'};font-weight:700">{'OPEN' if asx_open else 'CLOSED'}</span></div>
-      <div><span style="color:#475569">CBA </span><b>{asx_cba}</b></div>
-      <div><span style="color:#475569">Positions </span><b>{st_states.get('asx',{}).get('positions',0)}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{st_states.get('asx',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">Market </span><span style="color:{'#ffaa00' if asx_open else '#94a3b8'};font-weight:700">{'OPEN' if asx_open else 'CLOSED'}</span></div>
+      <div><span style="color:#94a3b8">CBA </span><b>{asx_cba}</b></div>
+      <div><span style="color:#94a3b8">Positions </span><b>{st_states.get('asx',{}).get('positions',0)}</b></div>
+      <div><span style="color:#94a3b8">Cycle </span>#{st_states.get('asx',{}).get('cycle',0)}</div>
     </div>
   </div>
   <div class="card" style="border-color:rgba(204,136,255,0.25)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:16px;font-weight:700;color:#cc88ff">🎩 FTSE <span style="font-size:11px;color:#475569;font-weight:400">08:00–16:30 UTC</span></div>
+      <div style="font-size:16px;font-weight:700;color:#cc88ff">🎩 FTSE <span style="font-size:11px;color:#94a3b8;font-weight:400">08:00–16:30 UTC</span></div>
       <div style="font-size:16px;font-weight:700;color:{ftse_col}">{'🐂' if ftse_mode=='BULL' else '🐻'} {ftse_mode}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Market </span><span style="color:{'#cc88ff' if ftse_open else '#475569'};font-weight:700">{'OPEN' if ftse_open else 'CLOSED'}</span></div>
-      <div><span style="color:#475569">HSBA </span><b>{ftse_hsba}</b></div>
-      <div><span style="color:#475569">Positions </span><b>{st_states.get('ftse',{}).get('positions',0)}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{st_states.get('ftse',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">Market </span><span style="color:{'#cc88ff' if ftse_open else '#94a3b8'};font-weight:700">{'OPEN' if ftse_open else 'CLOSED'}</span></div>
+      <div><span style="color:#94a3b8">HSBA </span><b>{ftse_hsba}</b></div>
+      <div><span style="color:#94a3b8">Positions </span><b>{st_states.get('ftse',{}).get('positions',0)}</b></div>
+      <div><span style="color:#94a3b8">Cycle </span>#{st_states.get('ftse',{}).get('cycle',0)}</div>
     </div>
   </div>
 </div>
@@ -1368,19 +1368,19 @@ function pinCmd(path,label){{
   <div class="card" style="border-color:rgba(255,204,0,0.2)">
     <div style="font-size:16px;font-weight:700;color:#ffcc00;margin-bottom:10px">📊 Small Cap</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('smallcap',{}).get('running') else ('#ff4466' if st_states.get('smallcap',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('smallcap',{}))}</div>
-      <div><span style="color:#475569">Pool </span>{len(smallcap_pool.get('symbols',[]))}</div>
-      <div><span style="color:#475569">Positions </span><b>{st_states.get('smallcap',{}).get('positions',0)}</b></div>
-      <div><span style="color:#475569">Cycle </span>#{st_states.get('smallcap',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('smallcap',{}).get('running') else ('#ff4466' if st_states.get('smallcap',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('smallcap',{}))}</div>
+      <div><span style="color:#94a3b8">Pool </span>{len(smallcap_pool.get('symbols',[]))}</div>
+      <div><span style="color:#94a3b8">Positions </span><b>{st_states.get('smallcap',{}).get('positions',0)}</b></div>
+      <div><span style="color:#94a3b8">Cycle </span>#{st_states.get('smallcap',{}).get('cycle',0)}</div>
     </div>
   </div>
   <div class="card" style="border-color:rgba(170,136,255,0.2)">
     <div style="font-size:16px;font-weight:700;color:#aa88ff;margin-bottom:10px">⚡ Intraday</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
-      <div><span style="color:#475569">Stocks </span><span class="dot" style="background:{'#00ff88' if st_states.get('intraday',{}).get('running') else ('#ff4466' if st_states.get('intraday',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('intraday',{}))}</div>
-      <div><span style="color:#475569">ID Cycle </span>#{st_states.get('intraday',{}).get('cycle',0)}</div>
-      <div><span style="color:#475569">ID Pos </span>{st_states.get('intraday',{}).get('positions',0)}</div>
-      <div><span style="color:#475569">Crypto </span><span class="dot {_dot(st_states.get('crypto_id',{}))}"></span>{_status(st_states.get('crypto_id',{}))}</div>
+      <div><span style="color:#94a3b8">Stocks </span><span class="dot" style="background:{'#00ff88' if st_states.get('intraday',{}).get('running') else ('#ff4466' if st_states.get('intraday',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('intraday',{}))}</div>
+      <div><span style="color:#94a3b8">ID Cycle </span>#{st_states.get('intraday',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">ID Pos </span>{st_states.get('intraday',{}).get('positions',0)}</div>
+      <div><span style="color:#94a3b8">Crypto </span><span class="dot {_dot(st_states.get('crypto_id',{}))}"></span>{_status(st_states.get('crypto_id',{}))}</div>
     </div>
   </div>
 </div>
@@ -1413,7 +1413,7 @@ function showFullMarket(id){{
 <div class="card" style="margin-bottom:20px;border-color:rgba(170,136,255,0.2)">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div class="section-title" style="color:#aa88ff;margin-bottom:0">📰 Morning News Scan</div>
-    <div style="font-size:13px;color:#475569">{news_time}</div>
+    <div style="font-size:13px;color:#94a3b8">{news_time}</div>
   </div>
   {news_html}
 </div>
@@ -1454,7 +1454,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         wr_col = "#00ff88" if wr >= 55 else "#ffcc00" if wr >= 45 else "#ff4466"
         lb_rows += (
             f'<tr>'
-            f'<td style="color:#475569">{medal}</td>'
+            f'<td style="color:#94a3b8">{medal}</td>'
             f'<td style="font-weight:700;color:#00aaff">{sym}</td>'
             f'<td>{trades}</td><td style="color:#00ff88">{wins}</td><td style="color:#ff4466">{losses}</td>'
             f'<td style="font-weight:700;color:{wr_col}">{wr}%</td>'
@@ -1463,7 +1463,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
             f'<td style="color:#ffcc00">{avg_sc:.1f}</td></tr>'
         )
     if not lb_rows:
-        lb_rows = '<tr><td colspan="10" style="text-align:center;color:#475569;padding:24px">No trades yet</td></tr>'
+        lb_rows = '<tr><td colspan="10" style="text-align:center;color:#94a3b8;padding:24px">No trades yet</td></tr>'
 
     # ── Symbol search ─────────────────────────────────────────
     search_html = ""
@@ -1478,14 +1478,14 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
                 f'<div style="background:#0d1117;border:1px solid rgba(0,170,255,0.2);border-radius:12px;padding:22px;margin-bottom:20px">'
                 f'<div style="font-size:22px;font-weight:700;color:#00aaff;margin-bottom:14px;font-family:\'Syne\',sans-serif">{sym2}</div>'
                 f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">'
-                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700;color:{pc2}">${total_pnl2:+.2f}</div><div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Total P&L</div></div>'
-                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700">{total_t}</div><div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Trades</div></div>'
-                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700;color:#00ff88">{wr2}%</div><div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Win Rate</div></div>'
-                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700;color:#ff8800">{nm_count}</div><div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Near Misses</div></div>'
+                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700;color:{pc2}">${total_pnl2:+.2f}</div><div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Total P&L</div></div>'
+                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700">{total_t}</div><div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Trades</div></div>'
+                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700;color:#00ff88">{wr2}%</div><div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Win Rate</div></div>'
+                f'<div style="background:#111820;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:700;color:#ff8800">{nm_count}</div><div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:5px">Near Misses</div></div>'
                 f'</div></div>'
             )
         else:
-            search_html = f'<div style="color:#475569;padding:20px;text-align:center;font-size:15px">No data for <b style="color:#00aaff">{search_sym}</b> yet</div>'
+            search_html = f'<div style="color:#94a3b8;padding:20px;text-align:center;font-size:15px">No data for <b style="color:#00aaff">{search_sym}</b> yet</div>'
 
     # ── DB overview stats ─────────────────────────────────────
     total_t_db, total_pnl_db, wins_db, losses_db, avg_sc_db = _db_all_time_stats()
@@ -1527,30 +1527,30 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
     <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:22px">
       <div class="card" style="text-align:center">
         <div style="font-size:22px;font-weight:700;color:{pnl_col_db}">${total_pnl_db:+.2f}</div>
-        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Realised P&L</div>
+        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Realised P&L</div>
       </div>
       <div class="card" style="text-align:center">
         <div style="font-size:22px;font-weight:700;color:#00aaff">{total_t_db}</div>
-        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Trades</div>
+        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Trades</div>
         <div style="font-size:11px;color:#888;margin-top:2px">{win_rate_db}% win</div>
       </div>
       <div class="card" style="text-align:center">
         <div style="font-size:22px;font-weight:700;color:#ffcc00">{avg_sc_db:.1f}</div>
-        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Avg Score</div>
+        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Avg Score</div>
       </div>
       <div class="card" style="text-align:center;border-color:rgba(255,136,0,0.25)">
         <div style="font-size:22px;font-weight:700;color:#ff8800">{total_misses}</div>
-        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Near Misses</div>
+        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Near Misses</div>
         <div style="font-size:11px;color:#888;margin-top:2px">{cap_misses} capacity</div>
       </div>
       <div class="card" style="text-align:center;border-color:rgba(255,136,0,0.25)">
         <div style="font-size:22px;font-weight:700;color:{missed_col}">${missed_usd:+.2f}</div>
-        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Missed Profit</div>
+        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Missed Profit</div>
         <div style="font-size:11px;color:#888;margin-top:2px">{missed_count} sims run</div>
       </div>
       <div class="card" style="text-align:center">
         <div style="font-size:22px;font-weight:700;color:#00ff88">{unique_syms}</div>
-        <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Symbols</div>
+        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:6px">Symbols</div>
       </div>
     </div>"""
 
@@ -1565,7 +1565,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
     if missed_disc:
         disc_rows = ""
         for disc, cnt, total_usd, avg_pct, winners in missed_disc:
-            label, col = disc_map.get(disc, (disc, "#475569"))
+            label, col = disc_map.get(disc, (disc, "#94a3b8"))
             usd_col = "#00ff88" if (total_usd or 0) >= 0 else "#ff4466"
             disc_rows += (
                 f'<tr>'
@@ -1579,7 +1579,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         missed_profit_html = (
             f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
             f'<div class="section-title" style="color:#ff8800">💸 Missed Profit Analysis</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Simulated P&L if near-miss trades had been taken, using real stop/trail/TP rules.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">Simulated P&L if near-miss trades had been taken, using real stop/trail/TP rules.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Discipline</th><th>Near Misses</th><th>Simulated P&L</th><th>Avg %</th><th>Would Win</th>'
             f'</tr></thead><tbody>{disc_rows}</tbody></table></div>'
@@ -1589,12 +1589,12 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         missed_profit_html = (
             '<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
             '<div class="section-title" style="color:#ff8800">💸 Missed Profit Analysis</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates once near-miss simulations have run (daily at noon ET).</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates once near-miss simulations have run (daily at noon ET).</div></div>'
         )
 
     # ── CAPACITY SKIP BREAKDOWN ───────────────────────────────
     skip_reason_labels = {
-        "SCORE":               ("📊 Score below threshold", "#475569"),
+        "SCORE":               ("📊 Score below threshold", "#94a3b8"),
         "SECTOR_CAP":          ("🏗 Sector full",           "#ffcc00"),
         "MAX_TOTAL_POSITIONS": ("📦 Global pos cap",        "#ffcc00"),
         "MAX_DAILY_SPEND":     ("💰 Daily spend limit",     "#ff8800"),
@@ -1618,7 +1618,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         capacity_html = (
             f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
             f'<div class="section-title" style="color:#ffcc00">🚧 Capacity Skips — Last 30 Days</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Strong signals blocked by capacity or regime limits — not score. High counts here mean raise position limits or regime thresholds.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">Strong signals blocked by capacity or regime limits — not score. High counts here mean raise position limits or regime thresholds.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Reason</th><th>Count</th><th>Avg Score</th>'
             f'</tr></thead><tbody>{cap_rows}</tbody></table></div>'
@@ -1628,7 +1628,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         capacity_html = (
             '<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
             '<div class="section-title" style="color:#ffcc00">🚧 Capacity Skips</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">No capacity skips yet — populates as signals get blocked by position/spend/regime limits.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">No capacity skips yet — populates as signals get blocked by position/spend/regime limits.</div></div>'
         )
 
     # ── NEAR MISS TABLE (enhanced) ────────────────────────────
@@ -1638,9 +1638,9 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
             sym2, sc2, reason2, ts2, pct2, _, checked2, sim_pct, mfe, mae = row
             ts_s    = ts2[:10] if ts2 else "—"
             pct_s   = f"{pct2:+.1f}%" if pct2 is not None else "Tracking…"
-            pct_c   = "#00ff88" if pct2 and pct2 > 0 else ("#ff4466" if pct2 and pct2 < 0 else "#475569")
+            pct_c   = "#00ff88" if pct2 and pct2 > 0 else ("#ff4466" if pct2 and pct2 < 0 else "#94a3b8")
             sim_s   = f"{sim_pct:+.1f}%" if sim_pct is not None else "—"
-            sim_c   = "#00ff88" if sim_pct and sim_pct > 0 else ("#ff4466" if sim_pct and sim_pct < 0 else "#475569")
+            sim_c   = "#00ff88" if sim_pct and sim_pct > 0 else ("#ff4466" if sim_pct and sim_pct < 0 else "#94a3b8")
             mfe_s   = f"+{mfe:.1f}%" if mfe is not None else "—"
             reason_label, reason_col = skip_reason_labels.get(reason2 or "SCORE", (reason2 or "SCORE", "#888"))
             nr += (
@@ -1648,7 +1648,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
                 f'<td style="font-weight:700;color:#ffcc00">{sym2}</td>'
                 f'<td style="color:#ffcc00">{sc2}/10</td>'
                 f'<td style="color:{reason_col};font-size:11px">{reason_label}</td>'
-                f'<td style="color:#475569">{ts_s}</td>'
+                f'<td style="color:#94a3b8">{ts_s}</td>'
                 f'<td style="color:{pct_c};font-weight:700">{pct_s}</td>'
                 f'<td style="color:{sim_c};font-weight:700">{sim_s}</td>'
                 f'<td style="color:#888">{mfe_s}</td>'
@@ -1662,14 +1662,14 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
             f'<th>Symbol</th><th>Score</th><th>Skip Reason</th><th>Date</th>'
             f'<th>Actual %</th><th>Sim P&L</th><th>MFE</th><th>Fired</th>'
             f'</tr></thead><tbody>{nr}</tbody></table></div>'
-            f'<div style="font-size:13px;color:#475569;margin-top:12px">'
+            f'<div style="font-size:13px;color:#94a3b8;margin-top:12px">'
             f'Actual % = price move since miss. Sim P&L = what we\'d have made with real stops. MFE = best it got.</div></div>'
         )
     else:
         near_miss_html = (
             '<div class="card" style="margin-bottom:20px;border-color:rgba(255,136,0,0.2)">'
             '<div class="section-title" style="color:#ff8800">🎯 Near-Miss Intelligence</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">No near-misses tracked yet.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">No near-misses tracked yet.</div></div>'
         )
 
     # ── THRESHOLD SENSITIVITY (now DB-backed) ────────────────
@@ -1683,19 +1683,19 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
                 f'<div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1">'
                 f'<div style="font-size:11px;color:{bc};font-weight:700">{avg_pct:+.1f}%</div>'
                 f'<div style="width:100%;height:{bh}px;background:{bc};border-radius:4px 4px 0 0;opacity:0.8"></div>'
-                f'<div style="font-size:10px;color:#475569;text-align:center">{bucket}<br>{cnt}n</div></div>'
+                f'<div style="font-size:10px;color:#94a3b8;text-align:center">{bucket}<br>{cnt}n</div></div>'
             )
         threshold_html = (
             f'<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
             f'<div class="section-title" style="color:#ffcc00">📈 Threshold Sensitivity — Avg Outcome by Score</div>'
             f'<div style="display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 8px;border-bottom:1px solid #222;margin-bottom:10px">{bars_html}</div>'
-            f'<div style="font-size:13px;color:#475569">Use this to calibrate MIN_SIGNAL_SCORE before going live. Data is DB-backed and survives restarts.</div></div>'
+            f'<div style="font-size:13px;color:#94a3b8">Use this to calibrate MIN_SIGNAL_SCORE before going live. Data is DB-backed and survives restarts.</div></div>'
         )
     else:
         threshold_html = (
             '<div class="card" style="margin-bottom:20px;border-color:rgba(255,204,0,0.15)">'
             '<div class="section-title" style="color:#ffcc00">📈 Threshold Sensitivity</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates once near-miss price follow-up data is available.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates once near-miss price follow-up data is available.</div></div>'
         )
 
     # ── EDGE BY DISCIPLINE + SCORE ────────────────────────────
@@ -1719,7 +1719,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         edge_html = (
             f'<div class="card" style="margin-bottom:20px">'
             f'<div class="section-title">🔬 Edge by Discipline + Score</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Win rate and P&L per score band per discipline — tells you which score thresholds to raise or lower per market.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">Win rate and P&L per score band per discipline — tells you which score thresholds to raise or lower per market.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Discipline</th><th>Score Band</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th>'
             f'</tr></thead><tbody>{edge_rows}</tbody></table></div>'
@@ -1729,7 +1729,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         edge_html = (
             '<div class="card" style="margin-bottom:20px">'
             '<div class="section-title">🔬 Edge by Discipline + Score</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as closed trades accumulate.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates as closed trades accumulate.</div></div>'
         )
 
     # ── REGIME PERFORMANCE ────────────────────────────────────
@@ -1753,7 +1753,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         regime_html = (
             f'<div class="card" style="margin-bottom:20px">'
             f'<div class="section-title">🌍 Performance by Market Regime</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Are we only profitable in bull markets? This answers that.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">Are we only profitable in bull markets? This answers that.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Regime</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th><th>Avg P&L</th>'
             f'</tr></thead><tbody>{reg_rows}</tbody></table></div>'
@@ -1763,7 +1763,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         regime_html = (
             '<div class="card" style="margin-bottom:20px">'
             '<div class="section-title">🌍 Performance by Regime</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as trades close with regime context captured.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates as trades close with regime context captured.</div></div>'
         )
 
     # ── EXIT CATEGORY BREAKDOWN ───────────────────────────────
@@ -1775,7 +1775,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         "MAXHOLD": ("⏱ Max Hold",          "#ffcc00"),
         "EOD":     ("🌙 End of Day",        "#888"),
         "ROTATE":  ("🔄 Rotated Out",      "#aa88ff"),
-        "STALE":   ("💤 Stale Capital",    "#475569"),
+        "STALE":   ("💤 Stale Capital",    "#94a3b8"),
         "UNKNOWN": ("— Unknown",            "#333"),
     }
     if exit_data:
@@ -1796,7 +1796,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         exit_html = (
             f'<div class="card" style="margin-bottom:20px">'
             f'<div class="section-title">🚪 Exit Category Breakdown — Last 30 Days</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">How positions are closing. Too many stops = tighten entry. Too many signals = trust the bot more.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">How positions are closing. Too many stops = tighten entry. Too many signals = trust the bot more.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Exit Type</th><th>Count</th><th>Win Rate</th><th>Total P&L</th><th>Avg P&L</th>'
             f'</tr></thead><tbody>{exit_rows}</tbody></table></div>'
@@ -1806,7 +1806,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         exit_html = (
             '<div class="card" style="margin-bottom:20px">'
             '<div class="section-title">🚪 Exit Category Breakdown</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as trades close.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates as trades close.</div></div>'
         )
 
     # ── ROTATION AUDIT ────────────────────────────────────────
@@ -1827,7 +1827,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         rotation_html = (
             f'<div class="card" style="margin-bottom:20px">'
             f'<div class="section-title">🔄 Rotation Audit — Last 30 Days</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">GOOD = new position outperformed old by >1% over 24h. BAD = we sold a winner too early.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">GOOD = new position outperformed old by >1% over 24h. BAD = we sold a winner too early.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Type</th><th>Verdict</th><th>Count</th><th>Sold % After</th><th>Bought % After</th>'
             f'</tr></thead><tbody>{rot_rows}</tbody></table></div>'
@@ -1837,7 +1837,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         rotation_html = (
             '<div class="card" style="margin-bottom:20px">'
             '<div class="section-title">🔄 Rotation Audit</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates 24h after first rotation or stale exit fires.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates 24h after first rotation or stale exit fires.</div></div>'
         )
 
     # ── ENTRY GATE ATTRIBUTION ────────────────────────────────
@@ -1866,7 +1866,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         gate_html = (
             f'<div class="card" style="margin-bottom:20px">'
             f'<div class="section-title">🔭 Entry Gate Attribution</div>'
-            f'<div style="font-size:13px;color:#475569;margin-bottom:14px">Win rate when each entry gate was active vs not. Shows which gates actually predict winners.</div>'
+            f'<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">Win rate when each entry gate was active vs not. Shows which gates actually predict winners.</div>'
             f'<div class="table-wrap"><table><thead><tr>'
             f'<th>Gate</th><th>Value</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th>'
             f'</tr></thead><tbody>{gate_rows}</tbody></table></div>'
@@ -1876,7 +1876,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         gate_html = (
             '<div class="card" style="margin-bottom:20px">'
             '<div class="section-title">🔭 Entry Gate Attribution</div>'
-            '<div style="color:#475569;font-size:14px;padding:12px 0">Populates as trades close with structured entry context.</div></div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:12px 0">Populates as trades close with structured entry context.</div></div>'
         )
 
     # ── SKIP REASON SUMMARY (all) ─────────────────────────────
@@ -1910,7 +1910,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
 
     def _ev_verdict(ev, trades):
         if trades < 10:
-            return ("⏳ Need more data", "#475569", "Insufficient sample (n<10)")
+            return ("⏳ Need more data", "#94a3b8", "Insufficient sample (n<10)")
         if ev > 5:
             return ("✅ Positive Edge", "#00ff88", "This discipline is making money per trade")
         if ev > 0:
@@ -1933,7 +1933,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
             exit_mini = ""
             if detail.get("exit_cats"):
                 _exit_cols = {"STOP":"#ff4466","TP":"#00ff88","SIGNAL":"#888",
-                              "ROTATE":"#aa88ff","STALE":"#475569","EOD":"#888","MAXHOLD":"#ffcc00"}
+                              "ROTATE":"#aa88ff","STALE":"#94a3b8","EOD":"#888","MAXHOLD":"#ffcc00"}
                 cats = detail["exit_cats"][:3]
                 exit_mini = " · ".join(
                     f'<span style="color:{_exit_cols.get(c[0], "#888")}">{c[0]} {c[1]}</span>'
@@ -1959,7 +1959,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
                 <div style="font-size:16px;font-weight:700;color:{col};font-family:'Syne',sans-serif">{label}</div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                  <span style="font-size:11px;color:#475569">{trades} trades · avg score {avg_score:.1f} · avg hold {avg_hold:.1f}h</span>
+                  <span style="font-size:11px;color:#94a3b8">{trades} trades · avg score {avg_score:.1f} · avg hold {avg_hold:.1f}h</span>
                   <span style="font-size:12px;font-weight:700;color:{verdict_col};background:rgba(255,255,255,0.04);
                                border:1px solid {verdict_col}44;border-radius:6px;padding:3px 10px">{verdict}</span>
                 </div>
@@ -1968,27 +1968,27 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
               <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px">
                 <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px;border:1px solid {ev_col}44">
                   <div style="font-size:20px;font-weight:700;color:{ev_col}">${ev:+.2f}</div>
-                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">EV / Trade</div>
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:3px">EV / Trade</div>
                 </div>
                 <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
                   <div style="font-size:20px;font-weight:700;color:{'#00ff88' if win_rate>=55 else '#ffcc00' if win_rate>=40 else '#ff4466'}">{win_rate:.0f}%</div>
-                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Win Rate</div>
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Win Rate</div>
                 </div>
                 <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
                   <div style="font-size:20px;font-weight:700;color:#00ff88">${avg_win:.2f}</div>
-                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Avg Win</div>
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Avg Win</div>
                 </div>
                 <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
                   <div style="font-size:20px;font-weight:700;color:#ff4466">${avg_loss:.2f}</div>
-                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Avg Loss</div>
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Avg Loss</div>
                 </div>
                 <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
                   <div style="font-size:20px;font-weight:700;color:{'#00ff88' if avg_win>avg_loss else '#ff4466'}">{f"{avg_win/avg_loss:.1f}×" if avg_loss else "∞"}</div>
-                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Reward/Risk</div>
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Reward/Risk</div>
                 </div>
                 <div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 6px">
                   <div style="font-size:20px;font-weight:700;color:{pnl_col}">${total_pnl:+.2f}</div>
-                  <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Total P&L</div>
+                  <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:3px">Total P&L</div>
                 </div>
               </div>
               <!-- Verdict note -->
@@ -1997,13 +1997,13 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
               <!-- Score buckets -->
               {f'<div style="margin-bottom:8px;flex-wrap:wrap;display:flex;gap:4px">{score_mini}</div>' if score_mini else ''}
               <!-- Exit mini breakdown -->
-              {f'<div style="font-size:11px;color:#475569">Exits: {exit_mini}</div>' if exit_mini else ''}
+              {f'<div style="font-size:11px;color:#94a3b8">Exits: {exit_mini}</div>' if exit_mini else ''}
             </div>"""
 
         ev_section = f"""
         <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.15)">
           <div class="section-title" style="color:#00aaff">⚡ Expected Value by Discipline</div>
-          <div style="font-size:13px;color:#475569;margin-bottom:16px">
+          <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">
             EV = (Win Rate × Avg Win) − (Loss Rate × Avg Loss). The single number that tells you
             if a discipline is worth running. Positive = edge exists. Negative = losing per trade
             regardless of win rate. Reward/Risk should be >1.0 — means winners are bigger than losers.
@@ -2014,7 +2014,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
         ev_section = (
             '<div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.15)">'
             '<div class="section-title" style="color:#00aaff">⚡ Expected Value by Discipline</div>'
-            '<div style="color:#475569;font-size:14px;padding:20px 0">Populates once each discipline has 2+ closed trades.</div>'
+            '<div style="color:#94a3b8;font-size:14px;padding:20px 0">Populates once each discipline has 2+ closed trades.</div>'
             '</div>'
         )
 
@@ -2032,7 +2032,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
             f'<td style="color:#e0e0e0">{subject or "—"}</td></tr>'
         )
     if not report_rows:
-        report_rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:#475569">No reports yet</td></tr>'
+        report_rows = '<tr><td colspan="3" style="padding:24px;text-align:center;color:#94a3b8">No reports yet</td></tr>'
 
     report_viewer = ""
     if report_id:
@@ -2043,7 +2043,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
                 f'<div style="background:#0d1117;border:1px solid rgba(0,170,255,0.2);border-radius:12px;padding:22px;margin-bottom:20px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
                 f'<div style="font-weight:700;color:#e0e0e0;font-size:16px">{subject}</div>'
-                f'<div style="color:#475569;font-size:13px">{rdate}</div></div>'
+                f'<div style="color:#94a3b8;font-size:13px">{rdate}</div></div>'
                 f'<div style="border-top:1px solid #1a1a1a;padding-top:16px;font-size:14px;line-height:1.7;color:#ccc;white-space:pre-wrap">{body_text}</div>'
                 f'</div>'
             )
@@ -2057,7 +2057,7 @@ def build_analytics_page(search_sym=None, report_id=None, period="all"):
 <style>
 input{{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:12px 16px;color:#e0e0e0;font-size:15px;outline:none;width:70%;font-family:'JetBrains Mono',monospace}}
 input:focus{{border-color:#00aaff}}
-.period-btn{{padding:8px 16px;border-radius:7px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:#475569;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;font-family:'JetBrains Mono',monospace}}
+.period-btn{{padding:8px 16px;border-radius:7px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:#94a3b8;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;font-family:'JetBrains Mono',monospace}}
 .period-btn.active{{background:rgba(0,170,255,0.15);border-color:rgba(0,170,255,0.3);color:#00aaff}}
 @media(max-width:820px){{
   .analytics-strip{{grid-template-columns:1fr 1fr 1fr !important}}
@@ -2065,11 +2065,42 @@ input:focus{{border-color:#00aaff}}
 </style>
 </head>
 <body>
-<div style="background:#0d1117;border-bottom:1px solid #1a1a1a;padding:18px 28px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100">
-  <a href="/" style="color:#475569;text-decoration:none;font-size:14px;font-family:'JetBrains Mono',monospace">← Dashboard</a>
-  <span style="color:#333">|</span>
-  <span style="font-size:20px;font-weight:700;color:#00aaff;font-family:'Syne',sans-serif">🧠 Trading Intelligence</span>
+<div class="header">
+  <div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="logo">AlphaBot <span>Analytics</span></div>
+      <span class="badge {'badge-live' if IS_LIVE else 'badge-paper'}">{'LIVE' if IS_LIVE else 'PAPER'}</span>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <a href="/analytics" style="padding:8px 16px;border-radius:8px;background:rgba(0,170,255,0.15);border:1px solid rgba(0,170,255,0.5);color:#00aaff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">📊 ANALYTICS</a>
+    <a href="/intelligence" style="padding:8px 16px;border-radius:8px;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">🧠 INTELLIGENCE</a>
+    <a href="/settings" style="padding:8px 16px;border-radius:8px;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.25);color:#ffcc00;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">⚙️ SETTINGS</a>
+  </div>
 </div>
+<div class="controls-bar">
+  <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
+  <a href="/analytics" class="tab" style="text-decoration:none;color:#00aaff;border-bottom:2px solid #00aaff">📊 Analytics</a>
+  <a href="/intelligence" class="tab" style="text-decoration:none">🧠 Intelligence</a>
+  <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
+  <span style="font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-left:8px">Controls:</span>
+  <button class="ctrl-btn" onclick="pinAction('/kill','🛑 Kill all bots?')" style="border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466">🛑 KILL</button>
+  <button class="ctrl-btn" onclick="pinAction('/close-all','💰 Close all positions?')" style="border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800">💰 CLOSE ALL</button>
+  <button class="ctrl-btn" onclick="pinAction('/resume','▶ Resume?')" style="border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88">▶ RESUME</button>
+  <span id="act-status" style="font-size:13px;color:#94a3b8;margin-left:8px"></span>
+</div>
+<script>
+function pinAction(path,label){{
+  var pin=prompt('PIN to confirm: '+label);
+  if(pin===null)return;
+  var status=document.getElementById('act-status');
+  if(status)status.textContent='Sending...';
+  fetch(path+'?pin='+encodeURIComponent(pin),{{method:'POST'}})
+  .then(r=>r.json()).then(d=>{{
+    if(status)status.textContent=d.status==='wrong_pin'?'❌ Wrong PIN':'✅ Done';
+  }}).catch(()=>{{if(status)status.textContent='❌ Error';}});
+}}
+</script>
 <div class="container">
 
   {stats_strip}
@@ -2227,6 +2258,435 @@ async def settings_save(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
+# INTELLIGENCE ROUTES + PAGE
+# ═══════════════════════════════════════════════════════════════
+@app.get("/intelligence", response_class=HTMLResponse)
+async def intelligence_page(request: Request, triggered: str = None, error: str = None):
+    try:
+        return HTMLResponse(_build_intelligence_page(
+            run_triggered=(triggered == "1"),
+            run_error=error,
+        ))
+    except Exception as e:
+        log.error(f"[INTELLIGENCE PAGE] {e}")
+        return HTMLResponse(f"<pre style='color:#fff;background:#111;padding:40px'>Error: {e}</pre>", status_code=500)
+
+
+@app.post("/intelligence/run")
+async def intelligence_run(request: Request):
+    try:
+        body = await request.json()
+        if body.get("pin") != KILL_PIN:
+            return JSONResponse({"status": "wrong_pin"})
+        import threading
+        def _bg():
+            try:
+                from data.intelligence import run_intelligence_analysis
+                run_id, cnt, _ = run_intelligence_analysis(triggered_by="manual")
+                log.info(f"[INTELLIGENCE] Manual run complete — {cnt} recs, run_id={run_id}")
+            except Exception as e:
+                log.error(f"[INTELLIGENCE] Manual run failed: {e}")
+        threading.Thread(target=_bg, daemon=True).start()
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+@app.post("/intelligence/apply")
+async def intelligence_apply(request: Request):
+    try:
+        body = await request.json()
+        if body.get("pin") != KILL_PIN:
+            return JSONResponse({"status": "wrong_pin"})
+        rec_id    = int(body.get("rec_id", 0))
+        parameter = body.get("parameter", "")
+        value     = body.get("value")
+        if parameter and value is not None:
+            try:
+                numeric = float(value)
+                cfg_val = int(numeric) if numeric == int(numeric) else numeric
+            except (ValueError, TypeError):
+                cfg_val = value
+            if not _save_tcfg({parameter: cfg_val}):
+                return JSONResponse({"status": "error", "detail": "config write failed"})
+        db_apply_recommendation(rec_id)
+        log.info(f"[INTELLIGENCE] Applied rec {rec_id}: {parameter}={value}")
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+@app.post("/intelligence/dismiss")
+async def intelligence_dismiss(request: Request):
+    try:
+        body = await request.json()
+        db_dismiss_recommendation(int(body.get("rec_id", 0)))
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+@app.post("/intelligence/snooze")
+async def intelligence_snooze(request: Request):
+    try:
+        body = await request.json()
+        db_snooze_recommendation(int(body.get("rec_id", 0)), days=7)
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+def _build_intelligence_page(run_triggered=False, run_error=None):
+    pending    = db_get_pending_recommendations()
+    history    = db_get_recommendation_history(limit=20)
+    latest_run = db_get_latest_intelligence_run()
+    past_runs  = db_get_intelligence_runs(limit=8)
+
+    CONF_COL = {"HIGH": "#00ff88", "MEDIUM": "#ffcc00", "LOW": "#ff8800"}
+    CAT_COL  = {
+        "THRESHOLD":       "#00aaff",
+        "POSITION_LIMITS": "#aa88ff",
+        "STOP_LOSS":       "#ff4466",
+        "REGIME_GATE":     "#ffcc00",
+        "WATCHLIST":       "#00ff88",
+        "OBSERVATION":     "#94a3b8",
+    }
+    CAT_ICON = {
+        "THRESHOLD": "🎯", "POSITION_LIMITS": "📦",
+        "STOP_LOSS": "🛑", "REGIME_GATE": "🌍",
+        "WATCHLIST": "📋", "OBSERVATION": "👁",
+    }
+    ACTION_COL = {
+        "RAISE": "#00ff88", "LOWER": "#ff4466", "ADD": "#00ff88",
+        "REMOVE": "#ff4466", "MONITOR": "#ffcc00", "NONE": "#94a3b8",
+    }
+
+    # ── Last run info ─────────────────────────────────────────
+    if latest_run:
+        ts   = (latest_run.get("created_at") or "")[:16].replace("T", " ")
+        cnt  = latest_run.get("rec_count", 0)
+        trig = latest_run.get("triggered_by", "?")
+        last_run_html = (
+            f'<div style="font-size:13px;color:#94a3b8">'
+            f'Last run: <span style="color:#e0e0e0">{ts}</span>'
+            f' · {cnt} recs · <span style="color:#888">{trig}</span></div>'
+        )
+    else:
+        last_run_html = '<div style="font-size:13px;color:#94a3b8">No run yet — first run Sunday 7pm ET or trigger manually.</div>'
+
+    pending_count = len(pending)
+    badge = (
+        f'<span style="background:#ff4466;color:#fff;border-radius:10px;'
+        f'padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px">'
+        f'{pending_count}</span>'
+    ) if pending_count else ""
+
+    run_status_html = ""
+    if run_triggered:
+        run_status_html = (
+            '<div style="background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);'
+            'border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#00ff88;font-weight:700">'
+            '✅ Intelligence run triggered — refresh in 60 seconds.</div>'
+        )
+    elif run_error:
+        run_status_html = (
+            f'<div style="background:rgba(255,68,102,0.08);border:1px solid rgba(255,68,102,0.3);'
+            f'border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#ff4466;font-weight:700">'
+            f'❌ Run failed: {run_error}</div>'
+        )
+
+    # ── Pending cards ─────────────────────────────────────────
+    if pending:
+        rec_cards = ""
+        for r in pending:
+            rec_id    = r.get("id")
+            category  = r.get("category", "")
+            action    = r.get("action", "")
+            parameter = r.get("parameter", "")
+            discipline= r.get("discipline", "all")
+            cur_val   = r.get("current_value")
+            rec_val   = r.get("recommended_value")
+            evidence  = r.get("evidence", "")
+            confidence= r.get("confidence", "LOW")
+            sample_sz = r.get("sample_size")
+            created   = (r.get("created_at") or "")[:10]
+            is_obs    = category == "OBSERVATION"
+            cat_c  = CAT_COL.get(category, "#888")
+            cat_ic = CAT_ICON.get(category, "•")
+            conf_c = CONF_COL.get(confidence, "#888")
+            act_c  = ACTION_COL.get(action, "#888")
+
+            if not is_obs and parameter and rec_val is not None:
+                action_line = (
+                    f'<div style="font-size:16px;font-weight:700;color:#e0e0e0;margin:12px 0 8px">'
+                    f'<span style="color:{act_c}">{action}</span> '
+                    f'<span style="color:{cat_c}">{parameter}</span>'
+                    f'{f" ({discipline})" if discipline and discipline != "all" else ""}'
+                    f': <span style="color:#94a3b8;font-size:14px;text-decoration:line-through">{cur_val}</span>'
+                    f' → <span style="color:#00ff88;font-size:16px">{rec_val}</span></div>'
+                )
+            elif not is_obs and parameter:
+                action_line = (
+                    f'<div style="font-size:16px;font-weight:700;color:#e0e0e0;margin:12px 0 8px">'
+                    f'<span style="color:{act_c}">{action}</span> '
+                    f'<span style="color:{cat_c}">{parameter}</span></div>'
+                )
+            else:
+                action_line = ""
+
+            sample_html = f'<span style="font-size:11px;color:#94a3b8;margin-left:8px">n={sample_sz}</span>' if sample_sz else ""
+
+            btn_apply = ""
+            if not is_obs and parameter and rec_val is not None:
+                btn_apply = (
+                    f'<button onclick="applyRec({rec_id},\'{parameter}\',\'{rec_val}\')" '
+                    f'style="padding:10px 20px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.35);'
+                    f'border-radius:8px;color:#00ff88;font-family:\'JetBrains Mono\',monospace;font-size:13px;'
+                    f'font-weight:700;cursor:pointer;margin-right:8px">✅ Apply</button>'
+                )
+            btn_snooze = "" if is_obs else (
+                f'<button onclick="snoozeRec({rec_id})" '
+                f'style="padding:10px 16px;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.25);'
+                f'border-radius:8px;color:#ffcc00;font-family:\'JetBrains Mono\',monospace;font-size:13px;'
+                f'cursor:pointer;margin-right:8px">⏸ Snooze 7d</button>'
+            )
+            btn_dismiss = (
+                f'<button onclick="dismissRec({rec_id})" '
+                f'style="padding:10px 16px;background:rgba(255,68,102,0.08);border:1px solid rgba(255,68,102,0.25);'
+                f'border-radius:8px;color:#ff4466;font-family:\'JetBrains Mono\',monospace;font-size:13px;cursor:pointer">'
+                f'✕ Dismiss</button>'
+            )
+
+            rec_cards += f"""
+            <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);
+                        border-left:3px solid {cat_c};border-radius:12px;padding:20px 24px;margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="font-size:18px">{cat_ic}</span>
+                  <span style="font-size:12px;font-weight:700;color:{cat_c};text-transform:uppercase;
+                               letter-spacing:1px;background:rgba(255,255,255,0.05);
+                               border:1px solid {cat_c}44;border-radius:4px;padding:2px 8px">{category}</span>
+                  <span style="font-size:11px;font-weight:700;color:{conf_c};text-transform:uppercase;letter-spacing:1px">● {confidence}</span>
+                  {sample_html}
+                </div>
+                <div style="font-size:11px;color:#94a3b8">{created}</div>
+              </div>
+              {action_line}
+              <div style="font-size:13px;color:#ccc;line-height:1.6;margin-bottom:16px;
+                          border-left:2px solid rgba(255,255,255,0.06);padding-left:12px;margin-top:8px">{evidence}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">{btn_apply}{btn_snooze}{btn_dismiss}</div>
+            </div>"""
+
+        pending_section = f"""
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
+          <div class="section-title" style="color:#00aaff">📬 Pending Recommendations{badge}</div>
+          <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">
+            Apply changes in one tap — takes effect within 60 seconds, no restart needed.
+          </div>
+          {rec_cards}
+        </div>"""
+    else:
+        pending_section = """
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
+          <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
+          <div style="color:#94a3b8;font-size:14px;padding:20px 0;text-align:center">
+            No pending recommendations — runs Sunday 7pm ET or trigger manually above.
+          </div>
+        </div>"""
+
+    # ── Latest narrative ──────────────────────────────────────
+    narrative_html = ""
+    if latest_run and latest_run.get("narrative"):
+        narrative_html = f"""
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,255,136,0.1)">
+          <div class="section-title" style="color:#00ff88">📝 Latest Analysis Narrative</div>
+          <div style="font-size:14px;color:#ccc;line-height:1.8;white-space:pre-wrap">{latest_run['narrative']}</div>
+        </div>"""
+
+    # ── History table ─────────────────────────────────────────
+    history_section = ""
+    if history:
+        hist_rows = ""
+        for r in history:
+            cat    = r.get("category", "")
+            param  = r.get("parameter", "")
+            cur    = r.get("current_value")
+            rec    = r.get("recommended_value")
+            disc   = r.get("discipline", "all")
+            status = r.get("status", "")
+            ts     = (r.get("actioned_at") or r.get("created_at") or "")[:10]
+            cat_c  = CAT_COL.get(cat, "#888")
+            cat_ic = CAT_ICON.get(cat, "•")
+            st_col = {"APPLIED": "#00ff88", "DISMISSED": "#ff4466", "SNOOZED": "#ffcc00"}.get(status, "#888")
+            change = f"{param}: {cur} → {rec}" if param and rec is not None else (param or cat)
+            hist_rows += (
+                f'<tr><td style="color:{cat_c}">{cat_ic} {cat}</td>'
+                f'<td style="color:#e0e0e0;font-size:12px">{change}</td>'
+                f'<td style="color:#94a3b8;font-size:11px">{disc}</td>'
+                f'<td style="font-weight:700;color:{st_col}">{status}</td>'
+                f'<td style="color:#94a3b8">{ts}</td></tr>'
+            )
+        history_section = f"""
+        <div class="card" style="margin-bottom:20px">
+          <div class="section-title">📜 Decision History</div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Category</th><th>Change</th><th>Discipline</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>{hist_rows}</tbody></table>
+          </div>
+        </div>"""
+
+    # ── Run archive ───────────────────────────────────────────
+    runs_section = ""
+    if past_runs:
+        run_rows = ""
+        for r in past_runs:
+            ts      = (r.get("created_at") or "")[:16].replace("T", " ")
+            trig    = r.get("triggered_by", "?")
+            cnt     = r.get("rec_count", 0)
+            narr    = r.get("narrative") or "—"
+            preview = (narr[:120] + "…") if len(narr) > 120 else narr
+            tc      = "#00aaff" if trig == "scheduled" else "#ffcc00"
+            run_rows += (
+                f'<tr><td style="color:#94a3b8;font-size:11px">{ts}</td>'
+                f'<td style="color:{tc};font-size:11px">{trig}</td>'
+                f'<td style="color:#ffcc00">{cnt}</td>'
+                f'<td style="color:#94a3b8;font-size:12px">{preview}</td></tr>'
+            )
+        runs_section = f"""
+        <div class="card" style="margin-bottom:20px">
+          <div class="section-title">🗂 Run Archive</div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Time</th><th>Trigger</th><th>Recs</th><th>Summary</th></tr></thead>
+            <tbody>{run_rows}</tbody></table>
+          </div>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AlphaBot Intelligence</title>
+{BASE_CSS}
+<style>
+#pin-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center}}
+#pin-overlay.visible{{display:flex}}
+.pin-box{{background:#0d1117;border:1px solid rgba(0,255,136,0.3);border-radius:16px;padding:36px 40px;text-align:center;max-width:380px;width:90%}}
+</style>
+</head><body>
+<div class="header">
+  <div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="logo">AlphaBot <span>Intelligence</span></div>
+      {badge}
+    </div>
+    <div style="font-size:13px;color:#94a3b8;margin-top:3px">{last_run_html}</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <button onclick="triggerRun()"
+      style="padding:9px 18px;background:rgba(170,136,255,0.12);border:1px solid rgba(170,136,255,0.35);
+             border-radius:8px;color:#aa88ff;font-family:'JetBrains Mono',monospace;
+             font-size:12px;font-weight:700;cursor:pointer;letter-spacing:0.5px">⚡ Run Now</button>
+    <a href="/analytics" style="padding:8px 16px;border-radius:8px;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">📊 ANALYTICS</a>
+    <a href="/settings" style="padding:8px 16px;border-radius:8px;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.25);color:#ffcc00;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">⚙️ SETTINGS</a>
+  </div>
+</div>
+<div class="controls-bar">
+  <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
+  <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
+  <a href="/intelligence" class="tab" style="text-decoration:none;color:#aa88ff;border-bottom:2px solid #aa88ff">🧠 Intelligence</a>
+  <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
+  <span style="font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-left:8px">Controls:</span>
+  <button class="ctrl-btn" onclick="pinAction('/kill','🛑 Kill all bots?')" style="border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466">🛑 KILL</button>
+  <button class="ctrl-btn" onclick="pinAction('/close-all','💰 Close all positions?')" style="border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800">💰 CLOSE ALL</button>
+  <button class="ctrl-btn" onclick="pinAction('/resume','▶ Resume?')" style="border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88">▶ RESUME</button>
+  <span id="act-status" style="font-size:13px;color:#94a3b8;margin-left:8px"></span>
+</div>
+<script>
+function pinAction(path,label){{
+  var pin=prompt('PIN to confirm: '+label);
+  if(pin===null)return;
+  var status=document.getElementById('act-status');
+  if(status)status.textContent='Sending...';
+  fetch(path+'?pin='+encodeURIComponent(pin),{{method:'POST'}})
+  .then(r=>r.json()).then(d=>{{
+    if(status)status.textContent=d.status==='wrong_pin'?'❌ Wrong PIN':'✅ Done';
+  }}).catch(()=>{{if(status)status.textContent='❌ Error';}});
+}}
+</script>
+
+<div class="container">
+  {run_status_html}
+  {pending_section}
+  {narrative_html}
+  {history_section}
+  {runs_section}
+</div>
+
+<!-- PIN overlay -->
+<div id="pin-overlay" onclick="if(event.target===this)closePin()">
+  <div class="pin-box">
+    <div style="font-size:20px;font-weight:700;color:#00ff88;margin-bottom:8px">🔒 Confirm Apply</div>
+    <div id="pin-action-label" style="font-size:13px;color:#e0e0e0;margin-bottom:6px"></div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:20px">Takes effect within 60s — no restart needed.</div>
+    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
+      style="background:#111;border:1px solid rgba(0,255,136,0.3);border-radius:8px;color:#00ff88;
+             font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;padding:12px;
+             width:100%;text-align:center;letter-spacing:4px;margin-bottom:16px"
+      onkeydown="if(event.key==='Enter')submitApply()">
+    <div style="display:flex;gap:10px">
+      <button onclick="closePin()" style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#94a3b8;padding:12px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:13px">Cancel</button>
+      <button onclick="submitApply()" style="flex:2;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);border-radius:8px;color:#00ff88;padding:12px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700">Apply Change</button>
+    </div>
+    <div id="pin-error" style="color:#ff4466;font-size:12px;margin-top:10px;display:none">Wrong PIN</div>
+  </div>
+</div>
+
+<script>
+var _pendingRec=null;
+function applyRec(id,param,val){{
+  _pendingRec={{id:id,param:param,val:val}};
+  document.getElementById('pin-action-label').textContent='Apply: '+param+' → '+val;
+  document.getElementById('pin-error').style.display='none';
+  document.getElementById('pin-input').value='';
+  document.getElementById('pin-overlay').classList.add('visible');
+  document.getElementById('pin-input').focus();
+}}
+function closePin(){{document.getElementById('pin-overlay').classList.remove('visible');_pendingRec=null;}}
+function submitApply(){{
+  if(!_pendingRec)return;
+  var pin=document.getElementById('pin-input').value;
+  fetch('/intelligence/apply',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{pin:pin,rec_id:_pendingRec.id,parameter:_pendingRec.param,value:_pendingRec.val}})}})
+  .then(r=>r.json()).then(d=>{{
+    if(d.status==='ok'){{closePin();location.reload();}}
+    else if(d.status==='wrong_pin'){{document.getElementById('pin-error').style.display='block';}}
+    else{{alert('Error: '+JSON.stringify(d));}}
+  }});
+}}
+function dismissRec(id){{
+  if(!confirm('Dismiss permanently?'))return;
+  fetch('/intelligence/dismiss',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{rec_id:id}})}}).then(()=>location.reload());
+}}
+function snoozeRec(id){{
+  fetch('/intelligence/snooze',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{rec_id:id}})}}).then(()=>location.reload());
+}}
+function triggerRun(){{
+  var pin=prompt('PIN to trigger intelligence run:');
+  if(pin===null)return;
+  fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{pin:pin}})}})
+  .then(r=>r.json()).then(d=>{{
+    if(d.status==='ok')location.href='/intelligence?triggered=1';
+    else if(d.status==='wrong_pin')alert('Wrong PIN');
+    else alert('Error: '+JSON.stringify(d));
+  }});
+}}
+</script>
+</body></html>"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # SETTINGS PANEL
 # ═══════════════════════════════════════════════════════════════
 def _build_settings_page(msg=None, msg_type="ok"):
@@ -2243,12 +2703,12 @@ def _build_settings_page(msg=None, msg_type="ok"):
         return f'''<div style="display:grid;grid-template-columns:220px 140px 1fr;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
             <div>
               <div style="font-size:13px;font-weight:700;color:#e0e0e0">{label}</div>
-              {"<div style=\'font-size:11px;color:#475569;margin-top:3px\'>" + note + "</div>" if note else ""}
+              {"<div style=\'font-size:11px;color:#94a3b8;margin-top:3px\'>" + note + "</div>" if note else ""}
             </div>
             <input name="{key}" type="{typ}" step="{step}" value="{val}"
               style="background:#0d1117;border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#00ff88;
                      font-family:\'JetBrains Mono\',monospace;font-size:15px;font-weight:700;padding:9px 14px;width:100%;text-align:right">
-            <div style="font-size:11px;color:#475569">{note if not note else ""}</div>
+            <div style="font-size:11px;color:#94a3b8">{note if not note else ""}</div>
         </div>'''
 
     return f'''<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -2266,16 +2726,41 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 </style>
 </head><body>
 <div class="header">
-  <div class="logo">Alpha<span>Bot</span> <span style="color:#ffcc00;font-size:15px">⚙ Settings</span></div>
-  <div style="display:flex;align-items:center;gap:12px">
-    <span class="badge {"badge-live" if IS_LIVE else "badge-paper"}">{"● LIVE" if IS_LIVE else "◎ PAPER"}</span>
+  <div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="logo">AlphaBot <span>Settings</span></div>
+      <span class="badge {"badge-live" if IS_LIVE else "badge-paper"}">{"● LIVE" if IS_LIVE else "◎ PAPER"}</span>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <a href="/analytics" style="padding:8px 16px;border-radius:8px;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">📊 ANALYTICS</a>
+    <a href="/intelligence" style="padding:8px 16px;border-radius:8px;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">🧠 INTELLIGENCE</a>
+    <a href="/settings" style="padding:8px 16px;border-radius:8px;background:rgba(255,204,0,0.12);border:1px solid rgba(255,204,0,0.4);color:#ffcc00;text-decoration:none;font-size:13px;font-weight:700;letter-spacing:1px;font-family:'JetBrains Mono',monospace">⚙️ SETTINGS</a>
   </div>
 </div>
 <div class="controls-bar">
   <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
-  <a href="/analytics" class="tab" style="text-decoration:none">📊 Intelligence</a>
+  <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
+  <a href="/intelligence" class="tab" style="text-decoration:none">🧠 Intelligence</a>
   <a href="/settings" class="tab" style="text-decoration:none;color:#ffcc00;border-bottom:2px solid #ffcc00">⚙️ Settings</a>
+  <span style="font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-left:8px">Controls:</span>
+  <button class="ctrl-btn" onclick="pinAction('/kill','🛑 Kill all bots?')" style="border:1px solid #ff4466;background:rgba(255,68,102,0.1);color:#ff4466">🛑 KILL</button>
+  <button class="ctrl-btn" onclick="pinAction('/close-all','💰 Close all positions?')" style="border:1px solid #ff8800;background:rgba(255,136,0,0.1);color:#ff8800">💰 CLOSE ALL</button>
+  <button class="ctrl-btn" onclick="pinAction('/resume','▶ Resume?')" style="border:1px solid #00ff88;background:rgba(0,255,136,0.1);color:#00ff88">▶ RESUME</button>
+  <span id="act-status" style="font-size:13px;color:#94a3b8;margin-left:8px"></span>
 </div>
+<script>
+function pinAction(path,label){{
+  var pin=prompt('PIN to confirm: '+label);
+  if(pin===null)return;
+  var status=document.getElementById('act-status');
+  if(status)status.textContent='Sending...';
+  fetch(path+'?pin='+encodeURIComponent(pin),{{method:'POST'}})
+  .then(r=>r.json()).then(d=>{{
+    if(status)status.textContent=d.status==='wrong_pin'?'❌ Wrong PIN':'✅ Done';
+  }}).catch(()=>{{if(status)status.textContent='❌ Error';}});
+}}
+</script>
 
 <div class="container" style="max-width:860px">
   {msg_html}
@@ -2347,7 +2832,7 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 <div id="pin-overlay" onclick="if(event.target===this)hidePin()">
   <div class="pin-box">
     <div style="font-size:20px;font-weight:700;color:#ffcc00;margin-bottom:8px">🔒 Enter PIN</div>
-    <div style="font-size:13px;color:#475569;margin-bottom:20px">Required to save settings</div>
+    <div style="font-size:13px;color:#94a3b8;margin-bottom:20px">Required to save settings</div>
     <input id="pin-input" type="password" maxlength="10" placeholder="••••"
       style="background:#111;border:1px solid rgba(255,204,0,0.3);border-radius:8px;color:#ffcc00;
              font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;padding:12px;
@@ -2355,7 +2840,7 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
       onkeydown="if(event.key==='Enter')submitSettings()">
     <div style="display:flex;gap:10px">
       <button onclick="hidePin()"
-        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#475569;
+        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#94a3b8;
                padding:12px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:13px">
         Cancel
       </button>
