@@ -155,41 +155,6 @@ def init_db():
         checked_at            TEXT
     )""")
 
-    # ── tuning_recommendations (NEW) ─────────────────────────
-    # Stores Claude's weekly intelligence recommendations.
-    # status: PENDING → APPLIED | DISMISSED | SNOOZED
-    c.execute("""CREATE TABLE IF NOT EXISTS tuning_recommendations (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id              TEXT,
-        category            TEXT NOT NULL,
-        action              TEXT NOT NULL,
-        parameter           TEXT,
-        discipline          TEXT,
-        current_value       TEXT,
-        recommended_value   TEXT,
-        evidence            TEXT,
-        confidence          TEXT,
-        sample_size         INTEGER,
-        status              TEXT DEFAULT 'PENDING',
-        snooze_until        TEXT,
-        applied_at          TEXT,
-        dismissed_at        TEXT,
-        outcome_note        TEXT,
-        created_at          TEXT DEFAULT (datetime('now'))
-    )""")
-
-    # ── intelligence_runs (NEW) ───────────────────────────────
-    # Archives each weekly intelligence report + narrative.
-    c.execute("""CREATE TABLE IF NOT EXISTS intelligence_runs (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id          TEXT UNIQUE,
-        triggered_by    TEXT DEFAULT 'scheduled',
-        narrative       TEXT,
-        raw_payload     TEXT,
-        rec_count       INTEGER DEFAULT 0,
-        created_at      TEXT DEFAULT (datetime('now'))
-    )""")
-
     conn.commit()
     conn.close()
     return True
@@ -813,161 +778,115 @@ def db_exit_category_breakdown(days=30):
         return []
 
 
-def db_save_intelligence_run(run_id, narrative, raw_payload, rec_count, triggered_by="scheduled"):
-    """Archive a completed intelligence run."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("""INSERT OR REPLACE INTO intelligence_runs
-            (run_id, triggered_by, narrative, raw_payload, rec_count)
-            VALUES (?,?,?,?,?)""",
-            (run_id, triggered_by, narrative, raw_payload, rec_count))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        log.warning(f"[DB] intelligence run save failed: {e}")
-
-
-def db_save_recommendations(run_id, recommendations):
+def db_ev_by_discipline(days=None):
     """
-    Bulk-insert recommendations from a run.
-    recommendations = list of dicts matching the schema.
-    Skips OBSERVATION recs with no parameter (display only).
-    Returns count inserted.
+    Expected Value per discipline.
+    EV = (win_rate * avg_win) - (loss_rate * avg_loss)
+    Returns rows: (discipline, trades, wins, losses, win_rate, avg_win, avg_loss, ev, total_pnl)
+    Only disciplines with >= 3 trades are included.
     """
     try:
         conn = sqlite3.connect(DB_PATH)
-        inserted = 0
-        for r in recommendations:
-            conn.execute("""INSERT INTO tuning_recommendations
-                (run_id, category, action, parameter, discipline,
-                 current_value, recommended_value, evidence, confidence, sample_size)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (run_id,
-                 r.get("category", "OBSERVATION"),
-                 r.get("action", "NONE"),
-                 r.get("parameter"),
-                 r.get("discipline", "all"),
-                 str(r.get("current_value", "")) if r.get("current_value") is not None else None,
-                 str(r.get("recommended_value", "")) if r.get("recommended_value") is not None else None,
-                 r.get("evidence", ""),
-                 r.get("confidence", "MEDIUM"),
-                 r.get("sample_size")))
-            inserted += 1
-        conn.commit()
+        base = """SELECT
+            COALESCE(discipline, 'stock_swing') as disc,
+            COUNT(*) as trades,
+            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END) as losses,
+            ROUND(AVG(CASE WHEN pnl > 0 THEN pnl END), 2) as avg_win,
+            ROUND(ABS(AVG(CASE WHEN pnl <= 0 THEN pnl END)), 2) as avg_loss,
+            ROUND(SUM(pnl), 2) as total_pnl,
+            ROUND(AVG(score), 2) as avg_score,
+            ROUND(AVG(hold_hours), 2) as avg_hold_h
+            FROM trades WHERE side='SELL'"""
+        if days:
+            since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            rows = conn.execute(base + " AND date >= ? GROUP BY disc HAVING trades >= 2 ORDER BY disc", (since,)).fetchall()
+        else:
+            rows = conn.execute(base + " GROUP BY disc HAVING trades >= 2 ORDER BY disc").fetchall()
         conn.close()
-        return inserted
-    except Exception as e:
-        log.warning(f"[DB] recommendations save failed: {e}")
-        return 0
 
-
-def db_get_pending_recommendations():
-    """All PENDING recs not snoozed past today."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        today = datetime.now().strftime("%Y-%m-%d")
-        rows = conn.execute("""SELECT id, run_id, category, action, parameter, discipline,
-            current_value, recommended_value, evidence, confidence, sample_size, created_at
-            FROM tuning_recommendations
-            WHERE status='PENDING'
-              AND (snooze_until IS NULL OR snooze_until <= ?)
-            ORDER BY
-              CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
-              created_at DESC""", (today,)).fetchall()
-        conn.close()
-        return rows
+        result = []
+        for r in rows:
+            disc, trades, wins, losses, avg_win, avg_loss, total_pnl, avg_score, avg_hold = r
+            wins   = wins   or 0
+            losses = losses or 0
+            avg_win  = avg_win  or 0.0
+            avg_loss = avg_loss or 0.0
+            win_rate  = round(wins  / trades * 100, 1) if trades else 0
+            loss_rate = round(losses / trades * 100, 1) if trades else 0
+            ev = round((win_rate / 100 * avg_win) - (loss_rate / 100 * avg_loss), 2)
+            result.append((disc, trades, wins, losses, win_rate, avg_win, avg_loss,
+                           ev, total_pnl, avg_score or 0, avg_hold or 0))
+        return result
     except Exception as e:
-        log.debug(f"[DB] pending recs failed: {e}")
+        log.debug(f"[DB] ev_by_discipline failed: {e}")
         return []
 
 
-def db_get_recommendation_history(limit=30):
-    """Applied + dismissed recs for history panel."""
+def db_discipline_detail(discipline, days=None):
+    """
+    Full breakdown for a single discipline — for the per-discipline panel.
+    Returns dict with trades, ev, exit_categories, score_buckets, recent_trades.
+    """
     try:
         conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute("""SELECT id, category, action, parameter, discipline,
-            current_value, recommended_value, confidence, status,
-            applied_at, dismissed_at, outcome_note, created_at
-            FROM tuning_recommendations
-            WHERE status IN ('APPLIED','DISMISSED','SNOOZED')
-            ORDER BY created_at DESC LIMIT ?""", (limit,)).fetchall()
+        since_clause = ""
+        params_base  = [discipline]
+        if days:
+            since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            since_clause = " AND date >= ?"
+            params_base  = [discipline, since]
+
+        # Core stats
+        row = conn.execute(f"""SELECT COUNT(*), COALESCE(SUM(pnl),0),
+            SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END),
+            ROUND(AVG(CASE WHEN pnl>0 THEN pnl END),2),
+            ROUND(ABS(AVG(CASE WHEN pnl<=0 THEN pnl END)),2),
+            ROUND(AVG(score),2), ROUND(AVG(hold_hours),2)
+            FROM trades WHERE side='SELL' AND discipline=?{since_clause}""",
+            params_base).fetchone()
+
+        trades, total_pnl, wins, avg_win, avg_loss, avg_score, avg_hold = row
+        trades  = trades  or 0
+        wins    = wins    or 0
+        losses  = trades - wins
+        avg_win  = avg_win  or 0.0
+        avg_loss = avg_loss or 0.0
+        win_rate  = round(wins   / trades * 100, 1) if trades else 0
+        loss_rate = round(losses / trades * 100, 1) if trades else 0
+        ev = round((win_rate / 100 * avg_win) - (loss_rate / 100 * avg_loss), 2)
+
+        # Exit categories
+        exit_cats = conn.execute(f"""SELECT
+            COALESCE(exit_category,'UNKNOWN'), COUNT(*), ROUND(SUM(pnl),2)
+            FROM trades WHERE side='SELL' AND discipline=?{since_clause}
+            GROUP BY exit_category ORDER BY COUNT(*) DESC""", params_base).fetchall()
+
+        # Score buckets
+        score_bkts = conn.execute(f"""SELECT
+            CAST(score AS INTEGER) as sb, COUNT(*),
+            SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END), ROUND(SUM(pnl),2)
+            FROM trades WHERE side='SELL' AND discipline=? AND score IS NOT NULL{since_clause}
+            GROUP BY sb ORDER BY sb""", params_base).fetchall()
+
+        # Recent 5 trades
+        recent = conn.execute(f"""SELECT symbol, pnl, score, hold_hours, exit_category, date
+            FROM trades WHERE side='SELL' AND discipline=?{since_clause}
+            ORDER BY created_at DESC LIMIT 5""", params_base).fetchall()
+
         conn.close()
-        return rows
+        return {
+            "trades": trades, "wins": wins, "losses": losses,
+            "total_pnl": round(total_pnl or 0, 2),
+            "win_rate": win_rate, "avg_win": avg_win, "avg_loss": avg_loss,
+            "ev": ev, "avg_score": avg_score or 0, "avg_hold_h": avg_hold or 0,
+            "exit_cats": list(exit_cats),
+            "score_buckets": list(score_bkts),
+            "recent": list(recent),
+        }
     except Exception as e:
-        log.debug(f"[DB] rec history failed: {e}")
-        return []
-
-
-def db_apply_recommendation(rec_id):
-    """Mark a recommendation as APPLIED."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("""UPDATE tuning_recommendations SET
-            status='APPLIED', applied_at=datetime('now')
-            WHERE id=?""", (rec_id,))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        log.warning(f"[DB] apply rec failed: {e}")
-        return False
-
-
-def db_dismiss_recommendation(rec_id):
-    """Mark a recommendation as DISMISSED."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("""UPDATE tuning_recommendations SET
-            status='DISMISSED', dismissed_at=datetime('now')
-            WHERE id=?""", (rec_id,))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        log.warning(f"[DB] dismiss rec failed: {e}")
-        return False
-
-
-def db_snooze_recommendation(rec_id, days=7):
-    """Snooze a recommendation for N days."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        snooze_until = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-        conn.execute("""UPDATE tuning_recommendations SET
-            status='SNOOZED', snooze_until=?
-            WHERE id=?""", (snooze_until, rec_id))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        log.warning(f"[DB] snooze rec failed: {e}")
-        return False
-
-
-def db_get_latest_intelligence_run():
-    """Most recent intelligence run for the page header."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute("""SELECT run_id, narrative, rec_count, created_at, triggered_by
-            FROM intelligence_runs ORDER BY created_at DESC LIMIT 1""").fetchone()
-        conn.close()
-        return row
-    except Exception as e:
-        log.debug(f"[DB] latest run failed: {e}")
-        return None
-
-
-def db_get_intelligence_runs(limit=10):
-    """Recent intelligence runs for archive panel."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute("""SELECT run_id, triggered_by, rec_count, narrative, created_at
-            FROM intelligence_runs ORDER BY created_at DESC LIMIT ?""", (limit,)).fetchall()
-        conn.close()
-        return rows
-    except Exception as e:
-        log.debug(f"[DB] intelligence runs failed: {e}")
-        return []
+        log.debug(f"[DB] discipline detail failed for {discipline}: {e}")
+        return {}
 
 
 # ═══════════════════════════════════════════════════════════════
