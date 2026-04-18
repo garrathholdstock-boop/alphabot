@@ -582,7 +582,7 @@ def build_dashboard():
                 f'<td style="color:#475569">{score or "—"}</td>'
                 f'</tr>'
                 f'<tr id="trade-det-{t_idx}" style="display:none;background:rgba(255,255,255,0.04)">'
-                f'<td colspan="11" style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05)">'
+                f'<td colspan="12" style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.05)">'
                 f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px 20px;font-size:13px;margin-bottom:12px">'
                 f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Exit Price</span><br><b style="font-size:15px">{price_s}</b></div>'
                 f'<div><span style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Qty</span><br><b style="font-size:15px">{qty_s}</b></div>'
