@@ -159,7 +159,8 @@ def check_intraday_positions(st, crypto=False):
                 "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
             db_record_trade(sym, "SELL", pos["qty"], live, pnl,
                 pos.get("signal_score"), None, None, hold_hours,
-                f"[ID]{reason}", "", "crypto" if crypto else "stock")
+                f"[ID]{reason}", "", "crypto" if crypto else "stock",
+                discipline="crypto_intraday" if crypto else "stock_intraday")
             if st.daily_pnl <= -MAX_DAILY_LOSS:
                 st.shutoff = True
 
@@ -276,7 +277,8 @@ def run_cycle(watchlist, st, crypto=False):
                         "time": datetime.now().strftime("%H:%M:%S")})
                     db_record_trade(stale_sym, "SELL", stale_pos["qty"], st_price, pnl_st,
                         stale_pos.get("signal_score"), None, None, None, "StaleCapital", "",
-                        "crypto" if crypto else "stock")
+                        "crypto" if crypto else "stock",
+                        discipline="crypto_swing" if crypto else "stock_swing")
                     pos_count -= 1
                 else:
                     break
@@ -301,7 +303,8 @@ def run_cycle(watchlist, st, crypto=False):
                         "time": datetime.now().strftime("%H:%M:%S")})
                     db_record_trade(worst_sym, "SELL", worst_pos["qty"], rot_price, pnl_rot,
                         worst_pos.get("signal_score"), None, None, None, "Rotation", "",
-                        "crypto" if crypto else "stock")
+                        "crypto" if crypto else "stock",
+                        discipline="crypto_swing" if crypto else "stock_swing")
                     pos_count -= 1
                 else:
                     break
@@ -433,7 +436,8 @@ def run_cycle(watchlist, st, crypto=False):
             tg_trade_sell(s["symbol"], sell_price, pnl, hold_hours or 0, "Signal", market="crypto" if crypto else "stock")
             db_record_trade(s["symbol"], "SELL", pos["qty"], sell_price, pnl,
                             pos.get("signal_score"), None, None, hold_hours, "Signal", bd,
-                            "crypto" if crypto else "stock")
+                            "crypto" if crypto else "stock",
+                            discipline="crypto_swing" if crypto else "stock_swing")
             if st.daily_pnl >= DAILY_PROFIT_TARGET:
                 log.info(f"[{st.label}] Profit target hit! ${st.daily_pnl:.2f}")
                 st.shutoff = True; break
@@ -484,7 +488,8 @@ def run_cycle_smallcap(watchlist, st):
                 "price": live, "pnl": pnl, "reason": reason,
                 "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
             db_record_trade(sym, "SELL", pos["qty"], live, pnl,
-                pos.get("signal_score"), None, None, hold_hours, reason, "", "stock")
+                pos.get("signal_score"), None, None, hold_hours, reason, "", "stock",
+                discipline="stock_swing")
             if st.daily_pnl <= -MAX_DAILY_LOSS: st.shutoff = True; break
     if st.shutoff: st.running = False; return
 
@@ -552,7 +557,8 @@ def run_cycle_smallcap(watchlist, st):
             "price": s["price"], "pnl": pnl, "reason": "Signal",
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
         db_record_trade(s["symbol"], "SELL", pos["qty"], s["price"], pnl,
-            pos.get("signal_score"), None, None, hold_hours, "Signal", "", "stock")
+            pos.get("signal_score"), None, None, hold_hours, "Signal", "", "stock",
+            discipline="stock_swing")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -656,7 +662,8 @@ def run_intraday_cycle(watchlist, st):
             "price": s["price"], "pnl": pnl, "reason": "[ID]Signal",
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
         db_record_trade(s["symbol"], "SELL", pos["qty"], s["price"], pnl,
-            pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "stock")
+            pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "stock",
+            discipline="stock_intraday")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -753,7 +760,8 @@ def run_crypto_intraday_cycle(watchlist, st):
             "price": s["price"], "pnl": pnl, "reason": "[ID]Signal",
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
         db_record_trade(s["symbol"], "SELL", pos["qty"], sell_price, pnl,
-            pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "crypto")
+            pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "crypto",
+            discipline="crypto_intraday")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
