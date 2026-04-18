@@ -68,8 +68,12 @@ from data.analytics import (
     vwap_signal, is_breakout, calc_rsi, calc_macd, calc_adx,
     record_near_miss, update_near_miss_prices, mark_near_miss_triggered,
     run_near_miss_simulations, analyse_edge,
+    load_near_miss_tracker_from_db,
 )
-from data.database import db_record_trade, db_record_near_miss, db_record_report
+from data.database import (
+    db_record_trade, db_record_near_miss, db_record_report,
+    db_record_rotation, db_get_pending_rotations, db_update_rotation_followup,
+)
 from app.notifications import (
     tg, tg_trade_buy, tg_trade_sell, tg_hot_miss, tg_critical,
     run_morning_news_scan, send_daily_summary, send_weekly_near_miss_email,
@@ -160,7 +164,8 @@ def check_intraday_positions(st, crypto=False):
             db_record_trade(sym, "SELL", pos["qty"], live, pnl,
                 pos.get("signal_score"), None, None, hold_hours,
                 f"[ID]{reason}", "", "crypto" if crypto else "stock",
-                discipline="crypto_intraday" if crypto else "stock_intraday")
+                discipline="crypto_intraday" if crypto else "stock_intraday",
+                exit_category=("STOP" if "Stop" in str(reason) else "TP" if "Take-Profit" in str(reason) else "EOD"))
             if st.daily_pnl <= -MAX_DAILY_LOSS:
                 st.shutoff = True
 
@@ -278,7 +283,22 @@ def run_cycle(watchlist, st, crypto=False):
                     db_record_trade(stale_sym, "SELL", stale_pos["qty"], st_price, pnl_st,
                         stale_pos.get("signal_score"), None, None, None, "StaleCapital", "",
                         "crypto" if crypto else "stock",
-                        discipline="crypto_swing" if crypto else "stock_swing")
+                        discipline="crypto_swing" if crypto else "stock_swing",
+                        adx_at_entry=stale_pos.get("_adx_entry"),
+                        macd_bullish=stale_pos.get("_macd_bull"),
+                        breakout=stale_pos.get("_breakout"),
+                        rs_vs_spy=stale_pos.get("_rs_spy"),
+                        news_state=stale_pos.get("_news_state"),
+                        regime_at_entry=stale_pos.get("_regime"),
+                        vix_at_entry=stale_pos.get("_vix"),
+                        exit_category="STALE")
+                    try:
+                        db_record_rotation("STALE_EXIT",
+                            sold_symbol=stale_sym, sold_price=st_price,
+                            sold_score=stale_pos.get("signal_score"), sold_pnl=pnl_st,
+                            bought_symbol=s["symbol"], bought_price=s["price"],
+                            bought_score=s.get("score"), market="crypto" if crypto else "stock")
+                    except Exception: pass
                     pos_count -= 1
                 else:
                     break
@@ -304,7 +324,22 @@ def run_cycle(watchlist, st, crypto=False):
                     db_record_trade(worst_sym, "SELL", worst_pos["qty"], rot_price, pnl_rot,
                         worst_pos.get("signal_score"), None, None, None, "Rotation", "",
                         "crypto" if crypto else "stock",
-                        discipline="crypto_swing" if crypto else "stock_swing")
+                        discipline="crypto_swing" if crypto else "stock_swing",
+                        adx_at_entry=worst_pos.get("_adx_entry"),
+                        macd_bullish=worst_pos.get("_macd_bull"),
+                        breakout=worst_pos.get("_breakout"),
+                        rs_vs_spy=worst_pos.get("_rs_spy"),
+                        news_state=worst_pos.get("_news_state"),
+                        regime_at_entry=worst_pos.get("_regime"),
+                        vix_at_entry=worst_pos.get("_vix"),
+                        exit_category="ROTATE")
+                    try:
+                        db_record_rotation("SCORE_ROTATE",
+                            sold_symbol=worst_sym, sold_price=rot_price,
+                            sold_score=worst_curr_score, sold_pnl=pnl_rot,
+                            bought_symbol=s["symbol"], bought_price=s["price"],
+                            bought_score=sig_score, market="crypto" if crypto else "stock")
+                    except Exception: pass
                     pos_count -= 1
                 else:
                     break
@@ -313,14 +348,32 @@ def run_cycle(watchlist, st, crypto=False):
         if s["symbol"] in st.positions: continue
         if all_positions_count() >= MAX_TOTAL_POSITIONS:
             log.info(f"[{st.label}] Global position cap ({MAX_TOTAL_POSITIONS}) reached")
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "MAX_TOTAL_POSITIONS")
+            except Exception: pass
             break
         if s["symbol"] in all_symbols_held(): continue
         sym_sector = SECTOR_MAP.get(s["symbol"])
         if sym_sector and sectors_held().get(sym_sector, 0) >= MAX_SECTOR_POSITIONS:
             log.info(f"[{st.label}] SKIP {s['symbol']} — sector {sym_sector} full")
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "SECTOR_CAP")
+            except Exception: pass
             continue
-        if st.daily_pnl >= DAILY_PROFIT_TARGET: break
-        if total_exposure(st) >= MAX_PORTFOLIO_EXPOSURE: break
+        if st.daily_pnl >= DAILY_PROFIT_TARGET:
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "DAILY_TARGET_HIT")
+            except Exception: pass
+            break
+        if total_exposure(st) >= MAX_PORTFOLIO_EXPOSURE:
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "MAX_EXPOSURE")
+            except Exception: pass
+            break
 
         stop_pct_use  = CRYPTO_STOP_PCT if crypto else STOP_LOSS_PCT
         base_qty      = max(1 if not crypto else 0.0001,
@@ -333,7 +386,12 @@ def run_cycle(watchlist, st, crypto=False):
                             int(base_qty * eq_factor * vol_factor * news_factor) if not crypto
                             else round(base_qty * eq_factor * vol_factor * news_factor, 6))
         trade_val     = qty * s["price"]
-        if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
+        if st.daily_spend + trade_val > MAX_DAILY_SPEND:
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "MAX_DAILY_SPEND")
+            except Exception: pass
+            continue
 
         sig_score = s.get("score", 0)
         if sig_score < MIN_SIGNAL_SCORE:
@@ -348,11 +406,19 @@ def run_cycle(watchlist, st, crypto=False):
 
         if not crypto and is_choppy_market():
             log.info(f"[{st.label}] SKIP — choppy market")
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "CHOPPY_MARKET")
+            except Exception: pass
             break
 
         total_trades_today = sum(s2.trades_today for s2 in [state, crypto_state])
         if total_trades_today >= MAX_TRADES_PER_DAY:
             log.info(f"[{st.label}] Max trades per day ({MAX_TRADES_PER_DAY}) reached")
+            try:
+                db_record_near_miss(s["symbol"], s.get("score",0), MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - s.get("score",0), s["price"], crypto, "MAX_TRADES_DAY")
+            except Exception: pass
             break
 
         stop_price        = s["price"] * (1 - stop_pct_use / 100)
@@ -366,6 +432,25 @@ def run_cycle(watchlist, st, crypto=False):
         log.info(f"[{st.label}] ✅ BUY SIGNAL BREAKDOWN:\n{breakdown}")
         log.info(f"[{st.label}] Executing: BUY {s['symbol']} x{qty} @ ~${s['price']:.4f} | stop:${stop_price:.4f} | target:${take_profit_price:.4f}")
 
+        # Capture structured entry context for analytics
+        try:
+            _closes = s.get("closes", [])
+            _bars   = bars_cache.get(s["symbol"]) if not crypto else None
+            _adx_entry    = calc_adx(_bars, period=14) if _bars and len(_bars) >= 16 else None
+            _macd_v, _macd_s = calc_macd(_closes) if len(_closes) >= 35 else (None, None)
+            _macd_bull    = bool(_macd_v and _macd_s and _macd_v > _macd_s)
+            _breakout_val = is_breakout(_closes, lookback=20) if len(_closes) >= 21 else None
+            from data.analytics import relative_strength_vs_spy
+            _rs_spy       = relative_strength_vs_spy(_closes) if not crypto and len(_closes) >= 5 else None
+            _news_st      = ("WATCH" if s["symbol"] in news_state.get("watch_list", {})
+                             else "SKIP" if s["symbol"] in news_state.get("skip_list", {})
+                             else "NONE")
+            _regime_entry = market_regime.get("mode", "BULL") if not crypto else crypto_regime.get("mode", "BULL")
+            _vix_entry    = market_regime.get("vix")
+        except Exception:
+            _adx_entry = _macd_bull = _breakout_val = _rs_spy = None
+            _news_st = "NONE"; _regime_entry = None; _vix_entry = None
+
         mark_near_miss_triggered(s["symbol"])
         place_order._last_score = sig_score
         order, fill_price = place_order(s["symbol"], "buy", qty, crypto=crypto, estimated_price=s["price"])
@@ -376,6 +461,10 @@ def run_cycle(watchlist, st, crypto=False):
         if not order:
             log.warning(f"[{st.label}] ORDER FAILED for {s['symbol']}")
             record_near_miss(s["symbol"], sig_score, s["price"], crypto=crypto)
+            try:
+                db_record_near_miss(s["symbol"], sig_score, MIN_SIGNAL_SCORE,
+                    MIN_SIGNAL_SCORE - sig_score, s["price"], crypto, "ORDER_FAILED")
+            except Exception: pass
             continue
 
         actual_stop = fill_price * (1 - stop_pct_use / 100)
@@ -388,6 +477,10 @@ def run_cycle(watchlist, st, crypto=False):
             "entry_date": datetime.now().date().isoformat(),
             "entry_ts": now_ts, "days_held": 0,
             "signal_score": sig_score, "entry_breakdown": breakdown,
+            # Entry context stored for sell-side structured recording
+            "_adx_entry": _adx_entry, "_macd_bull": _macd_bull,
+            "_breakout": _breakout_val, "_rs_spy": _rs_spy,
+            "_news_state": _news_st, "_regime": _regime_entry, "_vix": _vix_entry,
         }
 
         # Software stop-loss active — exchange stop orders not supported on this account
@@ -437,7 +530,15 @@ def run_cycle(watchlist, st, crypto=False):
             db_record_trade(s["symbol"], "SELL", pos["qty"], sell_price, pnl,
                             pos.get("signal_score"), None, None, hold_hours, "Signal", bd,
                             "crypto" if crypto else "stock",
-                            discipline="crypto_swing" if crypto else "stock_swing")
+                            discipline="crypto_swing" if crypto else "stock_swing",
+                            adx_at_entry=pos.get("_adx_entry"),
+                            macd_bullish=pos.get("_macd_bull"),
+                            breakout=pos.get("_breakout"),
+                            rs_vs_spy=pos.get("_rs_spy"),
+                            news_state=pos.get("_news_state"),
+                            regime_at_entry=pos.get("_regime"),
+                            vix_at_entry=pos.get("_vix"),
+                            exit_category="SIGNAL")
             if st.daily_pnl >= DAILY_PROFIT_TARGET:
                 log.info(f"[{st.label}] Profit target hit! ${st.daily_pnl:.2f}")
                 st.shutoff = True; break
@@ -489,7 +590,8 @@ def run_cycle_smallcap(watchlist, st):
                 "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
             db_record_trade(sym, "SELL", pos["qty"], live, pnl,
                 pos.get("signal_score"), None, None, hold_hours, reason, "", "stock",
-                discipline="stock_swing")
+                discipline="stock_swing",
+                exit_category=("STOP" if "Stop" in reason else "TP" if "Take-Profit" in reason else "MAXHOLD"))
             if st.daily_pnl <= -MAX_DAILY_LOSS: st.shutoff = True; break
     if st.shutoff: st.running = False; return
 
@@ -663,7 +765,7 @@ def run_intraday_cycle(watchlist, st):
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
         db_record_trade(s["symbol"], "SELL", pos["qty"], s["price"], pnl,
             pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "stock",
-            discipline="stock_intraday")
+            discipline="stock_intraday", exit_category="SIGNAL")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -761,7 +863,7 @@ def run_crypto_intraday_cycle(watchlist, st):
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
         db_record_trade(s["symbol"], "SELL", pos["qty"], sell_price, pnl,
             pos.get("signal_score"), None, None, hold_hours, "[ID]Signal", "", "crypto",
-            discipline="crypto_intraday")
+            discipline="crypto_intraday", exit_category="SIGNAL")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -905,6 +1007,31 @@ def main():
     except NameError:
         pass
 
+    # Rehydrate near-miss tracker from DB — survives restarts
+    try:
+        load_near_miss_tracker_from_db()
+    except Exception as e:
+        log.warning(f"[STARTUP] Near-miss rehydration failed (non-critical): {e}")
+
+    # Rotation audit job — checks 24h follow-up on pending rotations
+    def _rotation_audit_job():
+        """Run every cycle: check pending rotations older than 24h and record verdict."""
+        try:
+            pending = db_get_pending_rotations(hours=24)
+            if not pending:
+                return
+            for rot in pending:
+                rot_id, rtype, sold_sym, bought_sym, sold_price, bought_price, market = rot
+                try:
+                    sold_now   = fetch_latest_price(sold_sym, crypto=(market=="crypto")) if sold_sym else None
+                    bought_now = fetch_latest_price(bought_sym, crypto=(market=="crypto")) if bought_sym else None
+                    db_update_rotation_followup(rot_id, sold_now, bought_now)
+                    log.info(f"[ROTATION AUDIT] {rtype} | sold {sold_sym} now ${sold_now} | bought {bought_sym} now ${bought_now}")
+                except Exception as e:
+                    log.debug(f"[ROTATION AUDIT] Follow-up failed for rotation {rot_id}: {e}")
+        except Exception as e:
+            log.debug(f"[ROTATION AUDIT] Job failed (non-critical): {e}")
+
     # ── Thread-safe cycle trackers ──
     _thread_lock = threading.Lock()
     _cycle_counter = {"main": 0}
@@ -980,8 +1107,12 @@ def main():
             log.info(f"Main cycle {cycle} | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             log.info(f"[WATCHDOG] Cycle {cycle} alive | Stocks P&L: ${state.daily_pnl:+.2f} | Crypto P&L: ${crypto_state.daily_pnl:+.2f} | Positions: {len(state.positions)}S/{len(crypto_state.positions)}C")
 
-            # Every 10 cycles: reconcile positions with IBKR
+            # Every 10 cycles: reconcile positions with IBKR + run rotation audit
             if cycle % 10 == 0:
+                try:
+                    _rotation_audit_job()
+                except Exception as e:
+                    log.debug(f"[ROTATION AUDIT] Loop call failed: {e}")
                 try:
                     ibkr_orders = ibkr_get_open_orders() or []
                     stop_syms = {o.get("symbol") for o in ibkr_orders if o.get("order_type") == "STP"}
