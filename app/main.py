@@ -1342,6 +1342,18 @@ def main():
                 log.info("[WEEKLY] Generating near-miss analysis report...")
                 threading.Thread(target=send_weekly_near_miss_email, daemon=True).start()
 
+            # Weekly intelligence analysis — Sunday 7pm ET
+            if et.weekday() == 6 and et.hour == 19 and et.minute < 2:
+                log.info("[INTELLIGENCE] Starting weekly intelligence run...")
+                def _run_intel():
+                    try:
+                        from data.intelligence import run_intelligence_analysis
+                        run_id, cnt, narrative = run_intelligence_analysis(triggered_by="scheduled")
+                        log.info(f"[INTELLIGENCE] Weekly run complete — {cnt} recs stored (run_id={run_id})")
+                    except Exception as e:
+                        log.error(f"[INTELLIGENCE] Weekly run failed: {e}")
+                threading.Thread(target=_run_intel, daemon=True).start()
+
             # Daily near-miss simulations — noon ET
             if et.hour == 12 and et.minute < 2:
                 threading.Thread(target=run_near_miss_simulations, daemon=True).start()
