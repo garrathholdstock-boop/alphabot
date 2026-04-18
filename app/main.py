@@ -1110,9 +1110,10 @@ def main():
             # Every 10 cycles: reconcile positions with IBKR + run rotation audit
             if cycle % 10 == 0:
                 try:
-                    _rotation_audit_job()
+                    # Run rotation audit in daemon thread to avoid IBKR loop conflicts
+                    threading.Thread(target=_rotation_audit_job, daemon=True).start()
                 except Exception as e:
-                    log.debug(f"[ROTATION AUDIT] Loop call failed: {e}")
+                    log.debug(f"[ROTATION AUDIT] Thread start failed: {e}")
                 try:
                     ibkr_orders = ibkr_get_open_orders() or []
                     stop_syms = {o.get("symbol") for o in ibkr_orders if o.get("order_type") == "STP"}
