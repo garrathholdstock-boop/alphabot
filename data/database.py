@@ -155,6 +155,41 @@ def init_db():
         checked_at            TEXT
     )""")
 
+    # ── tuning_recommendations (NEW) ─────────────────────────
+    # Stores Claude's weekly intelligence recommendations.
+    # status: PENDING → APPLIED | DISMISSED | SNOOZED
+    c.execute("""CREATE TABLE IF NOT EXISTS tuning_recommendations (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id              TEXT,
+        category            TEXT NOT NULL,
+        action              TEXT NOT NULL,
+        parameter           TEXT,
+        discipline          TEXT,
+        current_value       TEXT,
+        recommended_value   TEXT,
+        evidence            TEXT,
+        confidence          TEXT,
+        sample_size         INTEGER,
+        status              TEXT DEFAULT 'PENDING',
+        snooze_until        TEXT,
+        applied_at          TEXT,
+        dismissed_at        TEXT,
+        outcome_note        TEXT,
+        created_at          TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # ── intelligence_runs (NEW) ───────────────────────────────
+    # Archives each weekly intelligence report + narrative.
+    c.execute("""CREATE TABLE IF NOT EXISTS intelligence_runs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id          TEXT UNIQUE,
+        triggered_by    TEXT DEFAULT 'scheduled',
+        narrative       TEXT,
+        raw_payload     TEXT,
+        rec_count       INTEGER DEFAULT 0,
+        created_at      TEXT DEFAULT (datetime('now'))
+    )""")
+
     conn.commit()
     conn.close()
     return True
@@ -775,6 +810,163 @@ def db_exit_category_breakdown(days=30):
         return rows
     except Exception as e:
         log.debug(f"[DB] exit category failed: {e}")
+        return []
+
+
+def db_save_intelligence_run(run_id, narrative, raw_payload, rec_count, triggered_by="scheduled"):
+    """Archive a completed intelligence run."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""INSERT OR REPLACE INTO intelligence_runs
+            (run_id, triggered_by, narrative, raw_payload, rec_count)
+            VALUES (?,?,?,?,?)""",
+            (run_id, triggered_by, narrative, raw_payload, rec_count))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"[DB] intelligence run save failed: {e}")
+
+
+def db_save_recommendations(run_id, recommendations):
+    """
+    Bulk-insert recommendations from a run.
+    recommendations = list of dicts matching the schema.
+    Skips OBSERVATION recs with no parameter (display only).
+    Returns count inserted.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        inserted = 0
+        for r in recommendations:
+            conn.execute("""INSERT INTO tuning_recommendations
+                (run_id, category, action, parameter, discipline,
+                 current_value, recommended_value, evidence, confidence, sample_size)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (run_id,
+                 r.get("category", "OBSERVATION"),
+                 r.get("action", "NONE"),
+                 r.get("parameter"),
+                 r.get("discipline", "all"),
+                 str(r.get("current_value", "")) if r.get("current_value") is not None else None,
+                 str(r.get("recommended_value", "")) if r.get("recommended_value") is not None else None,
+                 r.get("evidence", ""),
+                 r.get("confidence", "MEDIUM"),
+                 r.get("sample_size")))
+            inserted += 1
+        conn.commit()
+        conn.close()
+        return inserted
+    except Exception as e:
+        log.warning(f"[DB] recommendations save failed: {e}")
+        return 0
+
+
+def db_get_pending_recommendations():
+    """All PENDING recs not snoozed past today."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        today = datetime.now().strftime("%Y-%m-%d")
+        rows = conn.execute("""SELECT id, run_id, category, action, parameter, discipline,
+            current_value, recommended_value, evidence, confidence, sample_size, created_at
+            FROM tuning_recommendations
+            WHERE status='PENDING'
+              AND (snooze_until IS NULL OR snooze_until <= ?)
+            ORDER BY
+              CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
+              created_at DESC""", (today,)).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        log.debug(f"[DB] pending recs failed: {e}")
+        return []
+
+
+def db_get_recommendation_history(limit=30):
+    """Applied + dismissed recs for history panel."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("""SELECT id, category, action, parameter, discipline,
+            current_value, recommended_value, confidence, status,
+            applied_at, dismissed_at, outcome_note, created_at
+            FROM tuning_recommendations
+            WHERE status IN ('APPLIED','DISMISSED','SNOOZED')
+            ORDER BY created_at DESC LIMIT ?""", (limit,)).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        log.debug(f"[DB] rec history failed: {e}")
+        return []
+
+
+def db_apply_recommendation(rec_id):
+    """Mark a recommendation as APPLIED."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""UPDATE tuning_recommendations SET
+            status='APPLIED', applied_at=datetime('now')
+            WHERE id=?""", (rec_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        log.warning(f"[DB] apply rec failed: {e}")
+        return False
+
+
+def db_dismiss_recommendation(rec_id):
+    """Mark a recommendation as DISMISSED."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""UPDATE tuning_recommendations SET
+            status='DISMISSED', dismissed_at=datetime('now')
+            WHERE id=?""", (rec_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        log.warning(f"[DB] dismiss rec failed: {e}")
+        return False
+
+
+def db_snooze_recommendation(rec_id, days=7):
+    """Snooze a recommendation for N days."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        snooze_until = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+        conn.execute("""UPDATE tuning_recommendations SET
+            status='SNOOZED', snooze_until=?
+            WHERE id=?""", (snooze_until, rec_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        log.warning(f"[DB] snooze rec failed: {e}")
+        return False
+
+
+def db_get_latest_intelligence_run():
+    """Most recent intelligence run for the page header."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("""SELECT run_id, narrative, rec_count, created_at, triggered_by
+            FROM intelligence_runs ORDER BY created_at DESC LIMIT 1""").fetchone()
+        conn.close()
+        return row
+    except Exception as e:
+        log.debug(f"[DB] latest run failed: {e}")
+        return None
+
+
+def db_get_intelligence_runs(limit=10):
+    """Recent intelligence runs for archive panel."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("""SELECT run_id, triggered_by, rec_count, narrative, created_at
+            FROM intelligence_runs ORDER BY created_at DESC LIMIT ?""", (limit,)).fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        log.debug(f"[DB] intelligence runs failed: {e}")
         return []
 
 
