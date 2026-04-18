@@ -643,7 +643,7 @@ def build_dashboard():
                 f'<div class="trade-card-header">'
                 f'<div style="display:flex;align-items:center;gap:8px">'  
                 f'<span style="font-size:16px">{"✅" if pnl_t>0 else "❌"}</span>'
-                f'<div><span class="trade-card-sym">{sym_t}</span>'
+                f'<div><span class="trade-card-sym">{sym_t}</span> <span style="font-size:10px;color:{disc_col_t};background:rgba(255,255,255,0.06);border:1px solid {disc_col_t}44;border-radius:4px;padding:1px 4px;font-weight:700">{disc_icon_t}</span>'
                 f'<span style="font-size:10px;color:{mkt_col_t};margin-left:6px;font-weight:700">{market_t}</span></div>'
                 f'</div>'
                 f'<span class="trade-card-pnl" style="color:{pc_t}">{sign_t}${pnl_t:.2f}</span>'
