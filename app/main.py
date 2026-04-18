@@ -74,12 +74,6 @@ from data.database import (
     db_record_trade, db_record_near_miss, db_record_report,
     db_record_rotation, db_get_pending_rotations, db_update_rotation_followup,
 )
-try:
-    from data.intelligence import run_intelligence_analysis
-    _INTELLIGENCE_AVAILABLE = True
-except Exception as _ie:
-    log.warning(f"[INTELLIGENCE] Module unavailable: {_ie}")
-    _INTELLIGENCE_AVAILABLE = False
 from app.notifications import (
     tg, tg_trade_buy, tg_trade_sell, tg_hot_miss, tg_critical,
     run_morning_news_scan, send_daily_summary, send_weekly_near_miss_email,
@@ -934,6 +928,7 @@ def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
     """Run a scan cycle for an international market (ASX or FTSE)."""
     if not market_open_fn(): return
     if regime["mode"] == "BEAR": return
+    discipline = "asx_swing" if label == "ASX" else "ftse_swing"
     results = []
     for sym in watchlist:
         try:
@@ -949,7 +944,9 @@ def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
             signal, e9, e21, rsi = get_signal(closes, volumes)
             sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars) if signal == "BUY" else 0
             ema_cross = "✅" if e9 and e21 and e9 > e21 else "–"
-            results.append({"symbol": sym, "price": price, "change": change, "signal": signal, "score": sig_score, "rsi": rsi, "ema_cross": ema_cross, "vol_ratio": vol_ratio, "sma9": e9, "sma21": e21, "closes": closes})
+            results.append({"symbol": sym, "price": price, "change": change, "signal": signal,
+                            "score": sig_score, "rsi": rsi, "ema_cross": ema_cross,
+                            "vol_ratio": vol_ratio, "sma9": e9, "sma21": e21, "closes": closes})
         except Exception as e:
             log.debug(f"[{label}] {sym} scan error: {e}")
     results.sort(key=lambda x: -x.get("score", 0))
@@ -964,7 +961,17 @@ def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
             place_order._last_score = s["score"]
             order, fill = place_order(sym, "buy", qty, crypto=False, estimated_price=s["price"])
             if order:
-                st.positions[sym] = {"qty": qty, "entry_price": fill, "stop_price": fill*(1-STOP_LOSS_PCT/100), "highest_price": fill, "take_profit_price": fill*(1+TAKE_PROFIT_PCT/100), "entry_date": datetime.now().date().isoformat(), "entry_ts": datetime.now().isoformat(), "days_held": 0}
+                now_ts = datetime.now().isoformat()
+                st.positions[sym] = {
+                    "qty": qty, "entry_price": fill,
+                    "stop_price": fill * (1 - STOP_LOSS_PCT / 100),
+                    "highest_price": fill,
+                    "take_profit_price": fill * (1 + TAKE_PROFIT_PCT / 100),
+                    "entry_date": datetime.now().date().isoformat(),
+                    "entry_ts": now_ts, "days_held": 0,
+                    "signal_score": s["score"],
+                    "entry_breakdown": "",
+                }
                 log.info(f"[{label}] BUY {sym} qty={qty} @ ${fill:.2f} score={s['score']}")
         except Exception as e:
             log.warning(f"[{label}] place_order {sym}: {e}")
@@ -973,11 +980,38 @@ def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
         try:
             price = fetch_latest_price(sym, crypto=False)
             if not price: continue
-            entry = pos["entry_price"]
-            if price <= entry * 0.97 or price >= entry * 1.05:
-                place_order(sym, "sell", pos["qty"], crypto=False, estimated_price=price)
-                del st.positions[sym]
-                log.info(f"[{label}] SELL {sym} @ ${price:.2f} P&L: ${(price-entry)*pos['qty']:+.2f}")
+            entry     = pos["entry_price"]
+            entry_ts  = pos.get("entry_ts")
+            now       = datetime.now(ZoneInfo("UTC"))
+            hold_hours = round(
+                (now - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo
+                        else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC"))
+                        )).total_seconds() / 3600, 2
+            ) if entry_ts else None
+            reason = None
+            if price <= pos["stop_price"]:
+                reason = f"Stop-Loss"; exit_cat = "STOP"
+            elif price >= pos.get("take_profit_price", entry * 1.05):
+                reason = f"Take-Profit"; exit_cat = "TP"
+            if reason:
+                order_sell, sell_price = place_order(sym, "sell", pos["qty"],
+                                                     crypto=False, estimated_price=price)
+                if order_sell:
+                    pnl = (sell_price - entry) * pos["qty"]
+                    del st.positions[sym]
+                    st.daily_pnl += pnl
+                    st.trades.insert(0, {"symbol": sym, "side": "SELL", "qty": pos["qty"],
+                        "price": sell_price, "pnl": pnl, "reason": reason,
+                        "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
+                    try:
+                        db_record_trade(sym, "SELL", pos["qty"], sell_price, pnl,
+                            pos.get("signal_score"), None, None, hold_hours,
+                            reason, "", label.lower(), discipline=discipline,
+                            exit_category=exit_cat,
+                            regime_at_entry=regime.get("mode"))
+                    except Exception as db_e:
+                        log.debug(f"[{label}] db_record_trade failed: {db_e}")
+                    log.info(f"[{label}] SELL {sym} @ ${sell_price:.2f} P&L: ${pnl:+.2f} ({reason})")
         except Exception as e:
             log.warning(f"[{label}] exit check {sym}: {e}")
 
@@ -1307,20 +1341,6 @@ def main():
             if et.weekday() == 6 and et.hour == 18 and et.minute < 2:
                 log.info("[WEEKLY] Generating near-miss analysis report...")
                 threading.Thread(target=send_weekly_near_miss_email, daemon=True).start()
-
-            # Weekly intelligence analysis — Sunday 7pm ET
-            if et.weekday() == 6 and et.hour == 19 and et.minute < 2 and _INTELLIGENCE_AVAILABLE:
-                log.info("[INTELLIGENCE] Starting weekly intelligence run...")
-                def _run_intelligence():
-                    try:
-                        run_id, rec_count, narrative = run_intelligence_analysis(triggered_by="scheduled")
-                        if run_id:
-                            log.info(f"[INTELLIGENCE] Weekly run complete — {rec_count} recommendations generated")
-                        else:
-                            log.warning(f"[INTELLIGENCE] Weekly run failed: {narrative}")
-                    except Exception as e:
-                        log.error(f"[INTELLIGENCE] Weekly run exception: {e}")
-                threading.Thread(target=_run_intelligence, daemon=True).start()
 
             # Daily near-miss simulations — noon ET
             if et.hour == 12 and et.minute < 2:
