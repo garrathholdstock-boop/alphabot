@@ -1770,6 +1770,19 @@ async def close_all(request: Request):
         st.shutoff = True
     return JSONResponse({"status": "closed"})
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, msg: str = None, msg_type: str = "ok"):
+    return HTMLResponse(_build_settings_page(msg, msg_type))
+
+@app.post("/settings")
+async def settings_save(request: Request):
+    body = await request.json()
+    if body.get("pin") != KILL_PIN:
+        return JSONResponse({"status": "wrong_pin"})
+    if _save_tcfg(body.get("settings", {})):
+        return JSONResponse({"status": "ok"})
+    return JSONResponse({"status": "error"})
+
 
 # ═══════════════════════════════════════════════════════════════
 # SETTINGS PANEL
