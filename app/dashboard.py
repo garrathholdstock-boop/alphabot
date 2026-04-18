@@ -218,6 +218,9 @@ tr:hover td{background:rgba(255,255,255,0.025)}
   .pos-cards{display:block !important}
   .trades-table-wrap{display:none !important}
   .trades-cards{display:block !important}
+  .pstrip{grid-template-columns:1fr 1fr 1fr !important;gap:6px !important}
+  .pstrip .card{padding:8px 10px !important}
+  .pstrip .big{font-size:18px !important}
   .scan-table th:nth-child(6),.scan-table td:nth-child(6),
   .scan-table th:nth-child(7),.scan-table td:nth-child(7),
   .scan-table th:nth-child(8),.scan-table td:nth-child(8){display:none}
@@ -535,7 +538,7 @@ def build_dashboard():
             f'</div>'
             f'<script>'
             f'function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}'
-            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);var open=d.style.display!=="none";d.style.display=open?"none":"block";var card=d.parentElement;var hint=card.querySelector(".tap-hint");if(hint)hint.textContent=open?"tap for more ▾":"tap to close ▴";}}'
+            f'function toggleCard(i){{var d=document.getElementById("card-det-"+i);if(!d)return;d.style.display=d.style.display==="block"?"none":"block";}}'
             f'</script>'
         )
     else:
@@ -1167,7 +1170,7 @@ function pinCmd(path,label){{
 {kill_banner}{circuit_banner}
 
 <!-- Portfolio strip -->
-<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px">
+<div class="pstrip" style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px">
   <div class="card">
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <div>
