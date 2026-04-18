@@ -70,11 +70,16 @@ P2_PATTERNS = [
                           "🟡 P2: Binance orders failing — crypto blocked"),
     ("binance_ban",       r"\[BINANCE\] Ban active|binance_ban_until",
                           "🟡 P2: Binance rate-limit ban active"),
-    # zero_scans removed - 0 signals is normal market behaviour, not a bug
     ("slow_cycle",        None,       # handled by timing logic
                           "🟡 P2: Bot cycle running >3× normal speed"),
     ("execution_block",   r"ORDER FAILED|place_order.*failed",
                           "🟡 P2: Order execution failing"),
+    ("sector_cap_flood",  None,       # handled by log pattern analysis
+                          "🟡 P2: Sector cap blocking repeatedly — consider raising MAX_SECTOR_POSITIONS"),
+    ("rotation_bad_rate", None,       # handled by DB check
+                          "🟡 P2: >50% of rotation decisions are BAD — rotation threshold may be too low"),
+    ("intelligence_fail", r"\[INTELLIGENCE\].*failed|intelligence run failed",
+                          "🟡 P2: Weekly intelligence run failed"),
 ]
 
 
@@ -202,6 +207,82 @@ def get_screen_log(lines=100):
             return "".join(f.readlines()[-lines:])
     except:
         return ""
+
+
+def get_log_file(lines=500, hours=None):
+    """Read from the actual alphabot.log file — 30-day persistent, richer than screen buffer."""
+    try:
+        if not os.path.exists(LOG_PATH):
+            return ""
+        with open(LOG_PATH, "r", errors="replace") as f:
+            all_lines = f.readlines()
+        if hours:
+            cutoff = datetime.now(PARIS) - timedelta(hours=hours)
+            cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M")
+            filtered = [l for l in all_lines if l[:16] >= cutoff_str]
+            return "".join(filtered[-lines:])
+        return "".join(all_lines[-lines:])
+    except Exception as e:
+        _log_agent(f"get_log_file error: {e}")
+        return ""
+
+
+def analyse_log_patterns(hours=6):
+    """
+    Deep pattern analysis on alphabot.log — looks for structural issues
+    that only become visible across many cycles. Returns list of findings.
+    """
+    log_text = get_log_file(lines=2000, hours=hours)
+    if not log_text:
+        return []
+
+    findings = []
+    lines = log_text.split("\n")
+
+    # Count skip reasons
+    skip_counts = {}
+    for line in lines:
+        for reason in ["SECTOR_CAP", "MAX_TOTAL_POSITIONS", "MAX_DAILY_SPEND",
+                       "CHOPPY_MARKET", "MAX_TRADES_DAY", "ORDER_FAILED", "MAX_EXPOSURE"]:
+            if reason in line:
+                skip_counts[reason] = skip_counts.get(reason, 0) + 1
+
+    # Flag if any capacity skip > 20 occurrences in 6h
+    for reason, cnt in skip_counts.items():
+        if cnt >= 20:
+            findings.append(("P2", "sector_cap_flood" if "SECTOR" in reason else "capacity_block",
+                f"🟡 {reason} fired {cnt}× in last {hours}h — structural limit may need raising"))
+
+    # Count ORDER FAILEDs
+    order_fails = sum(1 for l in lines if "ORDER FAILED" in l or "place_order.*failed" in l.lower())
+    if order_fails >= 5:
+        findings.append(("P2", "execution_block",
+            f"🟡 {order_fails} ORDER FAILED events in last {hours}h — execution reliability issue"))
+
+    # Check for intelligence run failures
+    intel_fails = sum(1 for l in lines if "[INTELLIGENCE]" in l and "failed" in l.lower())
+    if intel_fails > 0:
+        findings.append(("P2", "intelligence_fail",
+            f"🟡 Intelligence run failed {intel_fails}× in log — check CLAUDE_API_KEY"))
+
+    # Check rotation bad rate from DB
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("""SELECT
+            SUM(CASE WHEN rotation_verdict='BAD' THEN 1 ELSE 0 END) as bad,
+            COUNT(*) as total
+            FROM rotations WHERE rotation_verdict IS NOT NULL
+            AND created_at >= datetime('now','-7 days')""").fetchone()
+        conn.close()
+        if row and row[1] and row[1] >= 5:
+            bad_rate = row[0] / row[1]
+            if bad_rate > 0.5:
+                findings.append(("P2", "rotation_bad_rate",
+                    f"🟡 {int(bad_rate*100)}% of rotation decisions are BAD last 7d ({row[0]}/{row[1]}) — score gap threshold too low"))
+    except:
+        pass
+
+    return findings
 
 
 def is_bot_running():
@@ -485,6 +566,35 @@ def run_monitor():
                 # Markets closed — reset execution gap alert
                 alerted.discard("signal_no_execution")
 
+            # ── Deep log pattern analysis (every 30 mins) ────
+            if not hasattr(run_monitor, '_last_pattern_check'):
+                run_monitor._last_pattern_check = None
+            if (run_monitor._last_pattern_check is None or
+                    (now_paris - run_monitor._last_pattern_check).seconds >= 1800):
+                run_monitor._last_pattern_check = now_paris
+                try:
+                    pattern_findings = analyse_log_patterns(hours=6)
+                    for pri, ev_type, msg in pattern_findings:
+                        key = f"pattern_{ev_type}"
+                        if key not in alerted:
+                            alerted.add(key)
+                            with _queue_lock:
+                                approval_queue.insert(0, {
+                                    "id": str(uuid.uuid4())[:8],
+                                    "priority": pri,
+                                    "event_type": ev_type,
+                                    "message": msg,
+                                    "detail": "Detected via 6h log pattern analysis",
+                                    "time": now_paris.strftime("%H:%M"),
+                                    "status": "pending",
+                                    "claude_briefing": None,
+                                })
+                            db_log_event(pri, ev_type, msg, "log_pattern_analysis")
+                            send_telegram(f"{'🔴' if pri=='P1' else '🟡'} <b>{msg}</b>\n→ http://178.104.170.58:8000", pri)
+                            _log_agent(f"Pattern finding: {ev_type}")
+                except Exception as e:
+                    _log_agent(f"Pattern analysis error: {e}")
+
 
             # ── Morning briefing at 07:00 Paris ─────────────
             if now_paris.hour == 7 and now_paris.minute < 5:
@@ -542,7 +652,7 @@ def _generate_briefing(event_type, log_snippet):
 def _send_morning_briefing(now_paris):
     """Send 7am Paris morning briefing via Telegram."""
     try:
-        log = get_screen_log(100)
+        log = get_log_file(lines=200, hours=12)  # Use real log file, last 12h
         total_pnl, total_trades, win_rate = get_all_time_pnl()
         today_pnl = get_todays_pnl()
         markets = get_market_hours()
@@ -554,6 +664,44 @@ def _send_morning_briefing(now_paris):
         overnight = [e for e in events if e.get("priority") in ["P1", "P2"]]
         auto_fixed = [e for e in events if e.get("action_taken") and "auto" in e.get("action_taken","").lower()]
 
+        # Near-miss overnight summary
+        nm_score = nm_cap = nm_sim = 0
+        top_caps = []
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            yesterday = (datetime.now(PARIS) - timedelta(hours=24)).strftime("%Y-%m-%d")
+            nm_score = conn.execute("SELECT COUNT(*) FROM near_misses WHERE skip_reason='SCORE' AND date >= ?", (yesterday,)).fetchone()[0] or 0
+            nm_cap   = conn.execute("SELECT COUNT(*) FROM near_misses WHERE skip_reason!='SCORE' AND date >= ?", (yesterday,)).fetchone()[0] or 0
+            nm_sim_row = conn.execute("SELECT ROUND(SUM(simulated_pnl_usd),2) FROM near_misses WHERE simulated_pnl_pct IS NOT NULL AND date >= ?", (yesterday,)).fetchone()
+            nm_sim   = float(nm_sim_row[0] or 0)
+            top_caps = conn.execute("SELECT skip_reason, COUNT(*) FROM near_misses WHERE skip_reason!='SCORE' AND date >= ? GROUP BY skip_reason ORDER BY COUNT(*) DESC LIMIT 3", (yesterday,)).fetchall()
+            conn.close()
+        except:
+            pass
+
+        # Rotation quality overnight
+        rot_good = rot_bad = rot_neutral = 0
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            yesterday_ts = (datetime.now(PARIS) - timedelta(hours=24)).isoformat()
+            for verdict in ["GOOD", "BAD", "NEUTRAL"]:
+                cnt = conn.execute("SELECT COUNT(*) FROM rotations WHERE rotation_verdict=? AND created_at >= ?", (verdict, yesterday_ts)).fetchone()[0] or 0
+                if verdict == "GOOD": rot_good = cnt
+                elif verdict == "BAD": rot_bad = cnt
+                else: rot_neutral = cnt
+            conn.close()
+        except:
+            pass
+
+        # Pending intelligence recommendations
+        pending_recs = 0
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            pending_recs = conn.execute("SELECT COUNT(*) FROM tuning_recommendations WHERE status='PENDING'").fetchone()[0] or 0
+            conn.close()
+        except:
+            pass
+
         status_icon = "✅" if bot_up else "🔴"
         msg_lines = [
             f"☀️ <b>AlphaBot Morning Briefing</b>",
@@ -562,7 +710,7 @@ def _send_morning_briefing(now_paris):
             f"<b>Bot Status</b>",
             f"{status_icon} Bot: {'RUNNING' if bot_up else 'DOWN'}",
             f"💼 All-time P&L: <b>${total_pnl:+,.2f}</b> ({total_trades} trades, {win_rate}% win rate)",
-            f"📅 Today's P&L: <b>${today_pnl:+,.2f}</b>",
+            f"📅 Today P&L: <b>${today_pnl:+,.2f}</b>",
             f"",
             f"<b>Markets</b>",
             f"🇺🇸 US: {markets['US']}",
@@ -571,6 +719,25 @@ def _send_morning_briefing(now_paris):
             f"🪙 Crypto: {markets['CRYPTO']}",
             f"",
         ]
+
+        # Near-miss overnight
+        if nm_score + nm_cap > 0:
+            msg_lines.append(f"<b>Near Misses (last 24h)</b>")
+            msg_lines.append(f"📊 Score-based: {nm_score} | Capacity-blocked: {nm_cap}")
+            if nm_sim != 0:
+                msg_lines.append(f"💸 Simulated missed: ${nm_sim:+.2f}")
+            if top_caps:
+                msg_lines.append(f"Top blocks: {', '.join(f'{r[0]}×{r[1]}' for r in top_caps)}")
+            msg_lines.append("")
+
+        # Rotation quality
+        total_rots = rot_good + rot_bad + rot_neutral
+        if total_rots > 0:
+            msg_lines.append(f"<b>Rotation Quality (last 24h)</b>")
+            msg_lines.append(f"✅ Good: {rot_good} | ❌ Bad: {rot_bad} | — Neutral: {rot_neutral}")
+            if rot_bad > rot_good:
+                msg_lines.append(f"⚠️ More bad rotations than good — review /intelligence")
+            msg_lines.append("")
 
         if overnight:
             msg_lines.append(f"<b>Overnight Events ({len(overnight)})</b>")
@@ -582,11 +749,16 @@ def _send_morning_briefing(now_paris):
             msg_lines.append(f"✅ Auto-fixed: {len(auto_fixed)} issues")
             msg_lines.append("")
 
+        if pending_recs > 0:
+            msg_lines.append(f"🧠 <b>{pending_recs} intelligence recommendation(s) pending</b>")
+            msg_lines.append(f"→ http://178.104.170.58:8080/intelligence")
+            msg_lines.append("")
+
         if queue_count > 0:
-            msg_lines.append(f"⚠️ <b>{queue_count} items need your attention</b>")
+            msg_lines.append(f"⚠️ <b>{queue_count} debug items need attention</b>")
             msg_lines.append(f"→ http://178.104.170.58:8000")
         else:
-            msg_lines.append(f"✅ No issues in queue")
+            msg_lines.append(f"✅ No debug issues in queue")
 
         msg_lines.append(f"\n<b>Dashboard:</b> http://178.104.170.58:8080")
 
@@ -598,11 +770,68 @@ def _send_morning_briefing(now_paris):
 
 
 def _update_context_md():
-    """Rewrite CONTEXT.md with current bot state."""
+    """Rewrite CONTEXT.md with current bot state — fully dynamic."""
     try:
         total_pnl, total_trades, win_rate = get_all_time_pnl()
         today = datetime.now(PARIS).strftime("%d-%b-%Y %H:%M")
         bot_up = is_bot_running()
+
+        # Read live positions from positions.json (more accurate than DB)
+        pos_summary = "None open"
+        try:
+            with open("/home/alphabot/app/positions.json") as f:
+                pos_data = json.load(f)
+            if pos_data:
+                pos_lines = []
+                for sym, p in pos_data.items():
+                    qty = p.get("qty", "?")
+                    entry = p.get("entry_price", 0)
+                    typ = p.get("_type", "")
+                    pos_lines.append(f"{sym} x{qty} @ ${entry:.2f} [{typ}]")
+                pos_summary = ", ".join(pos_lines)
+        except:
+            pass
+
+        # Read near-miss summary from DB
+        nm_summary = ""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            nm_score = conn.execute("SELECT COUNT(*) FROM near_misses WHERE skip_reason='SCORE'").fetchone()[0] or 0
+            nm_cap   = conn.execute("SELECT COUNT(*) FROM near_misses WHERE skip_reason!='SCORE'").fetchone()[0] or 0
+            nm_cap_top = conn.execute("""SELECT skip_reason, COUNT(*) as cnt FROM near_misses
+                WHERE skip_reason!='SCORE' GROUP BY skip_reason ORDER BY cnt DESC LIMIT 3""").fetchall()
+            nm_summary = f"{nm_score} score-based, {nm_cap} capacity-blocked"
+            if nm_cap_top:
+                nm_summary += " (top: " + ", ".join(f"{r[0]}×{r[1]}" for r in nm_cap_top) + ")"
+            conn.close()
+        except:
+            nm_summary = "unavailable"
+
+        # Pending intelligence recommendations
+        intel_summary = ""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            recs = conn.execute("""SELECT category, parameter, recommended_value, confidence
+                FROM tuning_recommendations WHERE status='PENDING' LIMIT 3""").fetchall()
+            conn.close()
+            if recs:
+                intel_summary = "\n".join(f"  - [{r[2]} confidence] {r[0]}: {r[1]} → {r[2]}" for r in recs)
+            else:
+                intel_summary = "  - None pending"
+        except:
+            intel_summary = "  - unavailable"
+
+        # Load current trading config
+        try:
+            with open("/home/alphabot/app/trading_config.json") as f:
+                tcfg = json.load(f)
+            min_score = tcfg.get("MIN_SIGNAL_SCORE", 5)
+            max_pos = tcfg.get("MAX_POSITIONS", 3)
+            max_total = tcfg.get("MAX_TOTAL_POSITIONS", 15)
+            stop_pct = tcfg.get("STOP_LOSS_PCT", 5.0)
+            cycle_s = tcfg.get("CYCLE_SECONDS", 60)
+        except:
+            min_score, max_pos, max_total, stop_pct, cycle_s = 5, 3, 15, 5.0, 60
 
         content = f"""# AlphaBot Debug Agent - Persistent Context
 ## Last Updated
@@ -613,42 +842,75 @@ def _update_context_md():
 - Git root: /home/alphabot/app/ (branch: main)
 - Bot start: bash /home/alphabot/start.sh → screen session "alphabot"
 - start.sh runs: python3 -m app.main (NOT python3 app/main.py)
-- Dashboard: port 8080 | Debug agent: port 8000
+- Dashboard: port 8080 | Debug agent: port 8000 | Intelligence: /intelligence
 - DB: /home/alphabot/app/alphabot.db
 - GitHub: https://github.com/garrathholdstock-boop/alphabot
 
 ## File Structure
 - app/main.py — main trading loop (6 disciplines)
-- app/dashboard.py — web dashboard port 8080
-- core/config.py — all config + watchlists
+- app/dashboard.py — web dashboard port 8080 + /intelligence + /analytics + /settings
+- core/config.py — all config + watchlists (US_WATCHLIST includes CBRE, BIPC, VRT, ANET, EQIX)
 - core/execution.py — order execution (IBKR + Binance)
 - core/risk.py — risk management
-- data/analytics.py — signal scoring
-- data/database.py — DB operations
+- data/analytics.py — signal scoring + near-miss tracking + DB persistence
+- data/database.py — DB operations (v2: trades, near_misses, rotations, tuning_recommendations, intelligence_runs)
+- data/intelligence.py — weekly Claude intelligence analysis (Sunday 7pm ET + manual trigger)
 - ai_debug/main.py — this agent (port 8000)
-- start.sh — starts bot in screen session
+- start.sh — starts 3 screens: alphabot, dashboard, agent
 
-## Config (core/config.py + .env)
-- MIN_SIGNAL_SCORE=5 (RAISE TO 7 BEFORE GOING LIVE)
+## Database Tables (v2 schema)
+- trades: symbol, pnl, score, adx_at_entry, macd_bullish, breakout, rs_vs_spy, news_state, regime_at_entry, vix_at_entry, exit_category, discipline
+- near_misses: symbol, score, skip_reason, prices_since (JSON), pct_move, simulated_pnl_pct, mfe_pct, mae_pct, triggered, discipline
+- rotations: sold_symbol, bought_symbol, rotation_type (SCORE_ROTATE|STALE_EXIT), rotation_verdict (GOOD|BAD|NEUTRAL), 24h follow-up prices
+- tuning_recommendations: Claude-generated tuning actions with PENDING|APPLIED|DISMISSED|SNOOZED status
+- intelligence_runs: archive of weekly intelligence analysis runs + narratives
+- stock_stats: per-symbol aggregated stats
+- agent_events: this agent's event log
+
+## Config (trading_config.json — hot-reloaded every 60s)
+- MIN_SIGNAL_SCORE={min_score} {'⚠️ RAISE TO 7 BEFORE GOING LIVE' if min_score < 7 else '✅'}
 - IS_LIVE=false (paper trading — DUQ191770)
-- MAX_POSITIONS=3 per discipline, MAX_TOTAL_POSITIONS=15
-- CYCLE_SECONDS=60
-- STOP_LOSS_PCT=5%
+- MAX_POSITIONS={max_pos} per discipline, MAX_TOTAL_POSITIONS={max_total}
+- CYCLE_SECONDS={cycle_s} {'⚠️ RAISE TO 300 BEFORE LIVE' if cycle_s < 300 else '✅'}
+- STOP_LOSS_PCT={stop_pct}%
 - Brokers: IBKR (US stocks + ASX + FTSE), Binance TESTNET (crypto)
-- BINANCE_TESTNET=true — BINANCE_SECRET may be corrupted (check .env)
 
 ## Bot Architecture — 6 Disciplines
-1. US Stocks (state) — 9am ET daily scan
+1. US Stocks (state) — swing trades, US market hours
 2. US Intraday (intraday_state) — 9:30am-4pm ET
-3. Small Cap (smallcap_state) — US hours
-4. ASX (asx_state) — 2am-8am Paris
+3. Small Cap (smallcap_state) — US hours, filtered watchlist
+4. ASX (asx_state) — 1am-7am Paris
 5. FTSE (ftse_state) — 9am-5:30pm Paris
 6. Crypto Intraday (crypto_intraday_state) — 24/7 Binance testnet
 
+## Skip Reason Taxonomy (near_misses.skip_reason)
+- SCORE: signal below MIN_SIGNAL_SCORE (expected)
+- SECTOR_CAP: sector position limit hit (structural — consider raising MAX_SECTOR_POSITIONS)
+- MAX_TOTAL_POSITIONS: global position cap (structural)
+- MAX_DAILY_SPEND: daily spend limit (structural)
+- CHOPPY_MARKET: choppy market regime gate
+- MAX_TRADES_DAY: daily trade count cap
+- MAX_EXPOSURE: portfolio exposure limit
+- ORDER_FAILED: IBKR/Binance order failure (execution issue)
+
+## Rotation Logic
+- Logic 1 (SCORE_ROTATE): sells weakest held position if new signal scores 1.5+ higher AND held is in profit >0.1%
+- Logic 2 (STALE_EXIT): sells flat (±0.5%) position held 30+ min to free slot
+- Both logged to rotations table with 24h follow-up verdict
+
+## Intelligence System
+- Weekly run: Sunday 7pm ET (daemon thread in main.py)
+- Manual trigger: /intelligence page → ⚡ Run Now (PIN-gated)
+- Mandate: protect capital first, open to more trades/exposure if data supports it, never touch IS_LIVE
+- Recommendations reviewed at http://178.104.170.58:8080/intelligence
+
 ## Current Status
-- Bot running: {'YES' if bot_up else 'NO'}
+- Bot running: {'YES ✅' if bot_up else 'NO 🔴'}
 - All-time P&L: ${total_pnl:+,.2f} ({total_trades} trades, {win_rate}% win rate)
-- Open positions: HOOD x7540, TSLA x257, PLUG x70702 (check dashboard for live)
+- Open positions: {pos_summary}
+- Near misses total: {nm_summary}
+- Pending intelligence recommendations:
+{intel_summary}
 
 ## KNOWN COSMETIC ERRORS — ALWAYS IGNORE
 - Error 10089, Error 300 — market data subscription, harmless
@@ -656,22 +918,23 @@ def _update_context_md():
 - DeprecationWarning utcnow() — Python 3.12, cosmetic
 - reqHistoricalData Timeout for SPY — harmless, retries next cycle
 - Can't find EId with tickerId — harmless IBKR cosmetic
+- "future belongs to a different loop" — harmless if from dashboard thread, P1 if from alphabot screen
 
 ## Priority Matrix
 - P1 SAFETY: bot down, stop not firing, IBKR disconnect, kill switch, daily loss limit
-- P2 EFFICIENCY: no trades 90+ mins, Binance failing, zero scans, execution block
+- P2 EFFICIENCY: signal blocked, Binance failing, execution block, sector_cap_flood, rotation_bad_rate
 - P3 BUGS: dashboard mismatches, near-miss anomalies, new unknown errors
 
-## Remaining Roadmap
-- P1: Verify BINANCE_SECRET not corrupted; raise MIN_SIGNAL_SCORE 5→7 before live
-- P2: Minimum hold time on rotation (10-15 min); Weekly Tuning Tracker
-- P3: Pre-open news 9:30am Paris; earnings calendar
-- P4: ATR stops (after 2wk paper); CYCLE_SECONDS 60→300
-- P5: IS_LIVE=true, IBKR live account DUQ191770
+## Pre-Live Checklist
+- [ ] MIN_SIGNAL_SCORE raised to 7
+- [ ] CYCLE_SECONDS raised to 300
+- [ ] 2-week paper period complete
+- [ ] Intelligence recommendations reviewed
+- [ ] IS_LIVE=true (Garrath decision only — never automated)
 
 ## Deploy Workflow
 cd /home/alphabot/app && git pull origin main
-screen -S alphabot -X quit && sleep 2 && bash /home/alphabot/start.sh
+pkill -9 -f python3 && pkill -9 -f uvicorn && screen -wipe && bash /home/alphabot/start.sh
 
 ## Emergency
 pkill -9 -f python3 && screen -wipe && bash /home/alphabot/start.sh
@@ -694,19 +957,30 @@ Read the CONTEXT section carefully - it has architecture, known errors, previous
 ARCHITECTURE:
 - Bot screen: "alphabot" | Dashboard: port 8080 | Debug agent: port 8000
 - Files: app/main.py, app/dashboard.py, core/config.py, core/execution.py, core/risk.py
+- New files: data/analytics.py, data/database.py (v2), data/intelligence.py
 - DB: /home/alphabot/app/alphabot.db
-- Start: bash /home/alphabot/start.sh (uses python3 -m app.main)
+- Start: bash /home/alphabot/start.sh (3 screens: alphabot, dashboard, agent)
 - Brokers: IBKR (US/ASX/FTSE), Binance TESTNET (crypto)
+
+DB TABLES (v2 schema — key new fields):
+- trades: exit_category (STOP/TP/TRAIL/SIGNAL/MAXHOLD/EOD/ROTATE/STALE), regime_at_entry, adx_at_entry, discipline
+- near_misses: skip_reason (SCORE|SECTOR_CAP|MAX_TOTAL_POSITIONS|MAX_DAILY_SPEND|CHOPPY_MARKET|MAX_TRADES_DAY|ORDER_FAILED), simulated_pnl_pct, mfe_pct, mae_pct
+- rotations: rotation_type (SCORE_ROTATE|STALE_EXIT), rotation_verdict (GOOD|BAD|NEUTRAL)
+- tuning_recommendations: status (PENDING|APPLIED|DISMISSED|SNOOZED), category, parameter, confidence
+- intelligence_runs: weekly Claude analysis archive
 
 PRIORITY MATRIX:
 - P1 SAFETY (act immediately): bot down, stop not firing, IBKR disconnect, kill switch
-- P2 EFFICIENCY (act promptly): no trades during market hours, Binance failing, execution blocks  
+- P2 EFFICIENCY (act promptly): no trades during market hours, Binance failing, execution blocks,
+  sector_cap_flood (SECTOR_CAP skip reason firing >20× per 6h), rotation_bad_rate (>50% BAD verdicts)
 - P3 BUGS (queue for review): cosmetic errors, dashboard mismatches
 
 COMMAND SYNTAX (no smart quotes):
 - grep -n searchterm /home/alphabot/app/app/main.py
 - sed -n 200,250p /home/alphabot/app/app/main.py
 - cat /home/alphabot/app/core/config.py
+- sqlite3 /home/alphabot/app/alphabot.db "SELECT skip_reason, COUNT(*) FROM near_misses GROUP BY skip_reason"
+- tail -100 /home/alphabot/app/alphabot.log
 
 RESPONSE FORMAT (always exact):
 
@@ -733,6 +1007,7 @@ RULES:
 - Never touch .env — flag to user instead
 - NO smart quotes in commands
 - If COMPLETE, fill CONTEXT_UPDATE
+- Prefer reading alphabot.log over screen buffer for pattern analysis
 """
 
 COMPRESS_PROMPT = """Summarise this debugging session into under 300 words.
@@ -743,7 +1018,8 @@ AUDIT_SYSTEM = """You are auditing the AlphaBot trading dashboard and bot health
 
 PRIORITY MATRIX:
 P1 SAFETY — flag immediately: stop not firing, bot down, IBKR disconnected with positions open
-P2 EFFICIENCY — flag prominently: no trades during market hours, Binance failing, zero signals
+P2 EFFICIENCY — flag prominently: no trades during market hours, Binance failing, zero signals,
+  high capacity skip rate (SECTOR_CAP/MAX_TOTAL_POSITIONS firing repeatedly), rotation BAD rate >50%
 P3 BUGS — note for review: dashboard mismatches, formatting issues
 
 IGNORE COMPLETELY (known cosmetic): Error 10089, Error 300, BrokenPipeError, DeprecationWarning
@@ -751,15 +1027,24 @@ IGNORE COMPLETELY (known cosmetic): Error 10089, Error 300, BrokenPipeError, Dep
 MARKET HOURS (Paris time):
 - US: 3:30pm-10pm Paris (Mon-Fri)
 - FTSE: 9am-5:30pm Paris (Mon-Fri)
-- ASX: 2am-8am Paris (Mon-Fri)
+- ASX: 1am-7am Paris (Mon-Fri)
 - Crypto: 24/7
 
+DB HEALTH CHECKS (v2 schema):
+- near_misses.skip_reason breakdown: SCORE = normal, high SECTOR_CAP = structural issue
+- trades.exit_category: high STOP rate = stop too tight or bad entries, high TP = good
+- rotations.rotation_verdict: >50% BAD = score gap threshold (1.5) too low
+- tuning_recommendations: any PENDING recs = review /intelligence page
+- intelligence_runs: last run < 8 days ago = healthy, older = Sunday job may have failed
+
 AUDIT CHECKLIST:
-DASHBOARD: Balance correct? Period P&L from DB? Live prices showing? Positions table accurate?
-TRADING: Any market open with 0 signals >90 mins? Positions at stops? Binance orders working?
+DASHBOARD: Balance correct? P&L from DB? Live prices showing? Positions accurate?
+TRADING: Any market open with 0 signals >90 mins? Positions at stops? Binance working?
+DATA QUALITY: New columns populating (exit_category, regime_at_entry)? Near-miss MFE/MAE updating?
+INTELLIGENCE: Any pending recommendations? Last run date?
 SCORING: Give each section PASS/WARN/FAIL. Final verdict: PASS/WARN/FAIL
 
-Be specific with numbers."""
+Be specific with numbers from the DB snapshot provided."""
 
 
 def clean(s):
@@ -838,6 +1123,8 @@ def get_db_snapshot():
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+
+        # Core trades
         cur.execute("SELECT * FROM trades ORDER BY created_at DESC LIMIT 50")
         snap["trades"] = [dict(r) for r in cur.fetchall()]
         today = datetime.now().strftime("%Y-%m-%d")
@@ -847,11 +1134,62 @@ def get_db_snapshot():
         snap["total_pnl"] = float(cur.fetchone()["total"] or 0)
         cur.execute("SELECT COALESCE(SUM(pnl),0) as wpnl FROM trades WHERE created_at >= date('now','-30 days') AND side='SELL'")
         snap["week_pnl"] = float(cur.fetchone()["wpnl"] or 0)
+
+        # Near misses — enhanced with new columns
         try:
-            cur.execute("SELECT * FROM near_misses ORDER BY created_at DESC LIMIT 10")
+            cur.execute("""SELECT symbol, score, skip_reason, created_at, pct_move,
+                simulated_pnl_pct, mfe_pct, mae_pct, triggered
+                FROM near_misses ORDER BY created_at DESC LIMIT 20""")
             snap["near_misses"] = [dict(r) for r in cur.fetchall()]
+            cur.execute("SELECT skip_reason, COUNT(*) as cnt FROM near_misses GROUP BY skip_reason ORDER BY cnt DESC")
+            snap["skip_reason_breakdown"] = [dict(r) for r in cur.fetchall()]
         except:
             snap["near_misses"] = []
+            snap["skip_reason_breakdown"] = []
+
+        # Exit categories
+        try:
+            cur.execute("""SELECT exit_category, COUNT(*) as cnt, ROUND(AVG(pnl),2) as avg_pnl
+                FROM trades WHERE side='SELL' AND exit_category IS NOT NULL
+                GROUP BY exit_category ORDER BY cnt DESC""")
+            snap["exit_categories"] = [dict(r) for r in cur.fetchall()]
+        except:
+            snap["exit_categories"] = []
+
+        # Rotation audit
+        try:
+            cur.execute("""SELECT rotation_type, rotation_verdict, COUNT(*) as cnt
+                FROM rotations WHERE rotation_verdict IS NOT NULL
+                GROUP BY rotation_type, rotation_verdict""")
+            snap["rotation_summary"] = [dict(r) for r in cur.fetchall()]
+        except:
+            snap["rotation_summary"] = []
+
+        # Pending intelligence recommendations
+        try:
+            cur.execute("""SELECT category, action, parameter, recommended_value,
+                confidence, evidence FROM tuning_recommendations
+                WHERE status='PENDING' ORDER BY created_at DESC LIMIT 5""")
+            snap["pending_recommendations"] = [dict(r) for r in cur.fetchall()]
+        except:
+            snap["pending_recommendations"] = []
+
+        # Latest intelligence run
+        try:
+            cur.execute("""SELECT run_id, rec_count, created_at, triggered_by
+                FROM intelligence_runs ORDER BY created_at DESC LIMIT 1""")
+            row = cur.fetchone()
+            snap["latest_intelligence_run"] = dict(row) if row else None
+        except:
+            snap["latest_intelligence_run"] = None
+
+        # Agent events
+        try:
+            cur.execute("SELECT * FROM agent_events ORDER BY created_at DESC LIMIT 10")
+            snap["agent_events"] = [dict(r) for r in cur.fetchall()]
+        except:
+            snap["agent_events"] = []
+
         conn.close()
     except Exception as e:
         snap["error"] = str(e)
@@ -1212,14 +1550,16 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 
     # ── Quick actions ─────────────────────────────────────────
     quick_btns = [
-        ("🏥 Bot Health",    "Is the bot running and healthy? Check screen, IBKR connection, and positions."),
-        ("📊 Positions",     "Check current open positions, their P&L, and how long they've been held."),
-        ("🚨 Real Errors",   "Find any real errors in the logs — ignore known cosmetics listed in CONTEXT.md."),
-        ("🎯 Near Misses",   "Analyse near misses from DB — should we adjust MIN_SIGNAL_SCORE?"),
-        ("💰 Trading Check", "Is the bot trading efficiently? Any markets open with 0 signals? Execution blocks?"),
-        ("🔑 Binance Fix",   "Check BINANCE_SECRET in .env — it may be corrupted. Diagnose the -2010 error."),
-        ("📈 Next Steps",    "What should I do next to move AlphaBot closer to live trading?"),
-        ("🔮 FTSE Check",    "FTSE scanning shows 0 qualified BUY. Diagnose why no FTSE stocks qualify."),
+        ("🏥 Bot Health",      "Is the bot running and healthy? Check all 3 screens (alphabot, dashboard, agent), IBKR connection, and current positions."),
+        ("📊 Positions",       "Check current open positions from positions.json, their P&L, hold time, and stop distances."),
+        ("🚨 Real Errors",     "Find any real errors in alphabot.log from the last 6 hours — ignore known cosmetics listed in CONTEXT.md."),
+        ("🎯 Near Misses",     "Analyse near_misses table — what's the skip_reason breakdown? Are we getting blocked by SECTOR_CAP or MAX_TOTAL_POSITIONS more than SCORE?"),
+        ("💰 Trading Check",   "Is the bot trading efficiently? Check exit_category distribution — too many STOPs vs TPs? Any execution blocks?"),
+        ("🔄 Rotation Audit",  "Check rotations table — what's the GOOD/BAD/NEUTRAL breakdown? Is the score gap threshold of 1.5 appropriate?"),
+        ("🧠 Intelligence",    "Check tuning_recommendations table for PENDING items. Has the weekly intelligence run fired? Check intelligence_runs table."),
+        ("📈 Log Patterns",    "Analyse alphabot.log for repeated patterns — are any skip reasons flooding? Any ORDER FAILED spikes? Cycle timing issues?"),
+        ("🔑 Binance Fix",     "Check BINANCE_SECRET in .env — it may be corrupted. Diagnose any -2010 error."),
+        ("⚡ Pre-Live Check",  "Review the pre-live checklist: MIN_SIGNAL_SCORE at 7? CYCLE_SECONDS at 300? 2-week paper period done? Intelligence reviewed?"),
     ]
     quick = ""
     for label, q in quick_btns:
@@ -1236,7 +1576,9 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       <button type="submit" style="background:#0a0a1a;border:2px solid #7c3aed;color:#a78bfa;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">☀️ Morning Brief</button>
     </form>"""
 
-    cmd_html = ""
+    safe_files = ["app/main.py","app/dashboard.py","core/config.py","core/execution.py",
+                  "core/risk.py","data/analytics.py","data/database.py","data/intelligence.py",
+                  "ai_debug/main.py","start.sh",".env"]
     if cmd_output:
         cmd_html = f"""<div style="background:#0a0a14;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
           <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Output: {html.escape(cmd_run)}</div>
@@ -1245,8 +1587,6 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 
     err_html = f'<div style="background:#2d0a0a;border:1px solid #ef4444;border-radius:8px;padding:12px;margin-bottom:12px;color:#ef4444;font-size:13px;">{html.escape(error)}</div>' if error else ""
 
-    safe_files = ["app/main.py","app/dashboard.py","core/config.py","core/execution.py",
-                  "core/risk.py","data/analytics.py","data/database.py","start.sh",".env"]
     file_btns = "".join([f"""<form method="POST" action="/file" style="display:inline-block;margin:2px;">
       <input type="hidden" name="filename" value="{f}">
       <input type="hidden" name="question" value="{html.escape(question)}">
@@ -1487,26 +1827,31 @@ async def approve(command: str = Form(""), question: str = Form(""),
 async def audit_dashboard():
     dash_html = fetch_dashboard()
     db_snap = get_db_snapshot()
-    log, screen, _ = get_bot_context()
+    log_screen = get_screen_log(80)
+    log_file   = get_log_file(lines=200, hours=6)  # real log — last 6h
     markets = get_market_hours()
     audit_input = f"""CURRENT TIME: {markets['UTC_time']} / {markets['Paris_time']}
 
 MARKET STATUS:
 - US: {markets['US']} (3:30pm-10pm Paris)
 - FTSE: {markets['FTSE']} (9am-5:30pm Paris)
-- ASX: {markets['ASX']} (2am-8am Paris)
+- ASX: {markets['ASX']} (1am-7am Paris)
 - Crypto: {markets['CRYPTO']}
 
-DATABASE:
-{json.dumps(db_snap, default=str, indent=2)[:3000]}
+DATABASE SNAPSHOT (v2 schema):
+{json.dumps(db_snap, default=str, indent=2)[:4000]}
 
 BOT SCREEN LOG (last 80 lines):
-{log}
+{log_screen}
+
+ALPHABOT.LOG (last 6h, last 200 lines):
+{log_file[:3000]}
 
 DASHBOARD HTML:
-{dash_html[:15000]}
+{dash_html[:12000]}
 
-Perform comprehensive audit. Flag P1 issues first, then P2, then P3."""
+Perform comprehensive audit using the v2 schema knowledge. Flag P1 first, P2 second, P3 last.
+Pay special attention to: skip_reason breakdown, exit_category distribution, rotation verdicts, pending intelligence recommendations."""
 
     result = call_claude([{"role": "user", "content": audit_input}], system=AUDIT_SYSTEM)
     return store(dict(audit_result=result, question="Dashboard Audit"))
