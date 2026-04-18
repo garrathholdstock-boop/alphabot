@@ -398,6 +398,20 @@ def analyse_edge():
 
 
 # ── Near-miss tracking ────────────────────────────────────────
+def load_near_miss_tracker_from_db():
+    """
+    Called once on bot startup to rehydrate the in-memory tracker from DB.
+    Means near-miss follow-up data survives bot restarts / pkill.
+    """
+    try:
+        from data.database import db_load_near_miss_tracker
+        restored = db_load_near_miss_tracker(days_back=7)
+        if restored:
+            near_miss_tracker.update(restored)
+            log.info(f"[NEAR MISS] Rehydrated {len(restored)} near-misses from DB")
+    except Exception as e:
+        log.warning(f"[NEAR MISS] Rehydration failed (non-critical): {e}")
+
 def record_near_miss(symbol, score, price, crypto=False):
     today = datetime.now().date().isoformat()
     key   = f"{symbol}_{today}"
@@ -411,7 +425,18 @@ def record_near_miss(symbol, score, price, crypto=False):
         }
 
 def update_near_miss_prices():
+    """
+    Update prices_since for all tracked near-misses.
+    Now also persists to DB so data survives restarts.
+    Computes pct_move, MFE (max favourable excursion), MAE (max adverse excursion).
+    """
     from core.execution import fetch_latest_price
+    try:
+        from data.database import db_update_near_miss_prices
+        _db_writer = db_update_near_miss_prices
+    except Exception:
+        _db_writer = None
+
     for key, nm in list(near_miss_tracker.items()):
         try:
             miss_date  = datetime.fromisoformat(nm["date"]).date()
@@ -423,17 +448,46 @@ def update_near_miss_prices():
                 last = nm["prices_since"][-1] if nm["prices_since"] else None
                 if price != last:
                     nm["prices_since"].append(round(price, 4))
-        except:
+                # Compute running stats
+                pam = nm["price_at_miss"]
+                all_prices = [pam] + nm["prices_since"]
+                pct_move = round((all_prices[-1] - pam) / pam * 100, 2) if pam else None
+                mfe_pct  = round((max(all_prices) - pam) / pam * 100, 2) if pam else None
+                mae_pct  = round((min(all_prices) - pam) / pam * 100, 2) if pam else None
+                nm["pct_move"] = pct_move
+                nm["mfe_pct"]  = mfe_pct
+                nm["mae_pct"]  = mae_pct
+                # Persist to DB
+                if _db_writer:
+                    try:
+                        _db_writer(nm["symbol"], nm["date"], nm["prices_since"],
+                                   pct_move=pct_move, mfe_pct=mfe_pct, mae_pct=mae_pct)
+                    except Exception as e:
+                        log.debug(f"[NEAR MISS] DB price persist failed: {e}")
+        except Exception:
             pass
 
 def mark_near_miss_triggered(symbol):
+    """Mark a near-miss as triggered. Now also persists to DB."""
     from core.execution import fetch_latest_price
+    try:
+        from data.database import db_mark_near_miss_triggered
+        _db_trigger = db_mark_near_miss_triggered
+    except Exception:
+        _db_trigger = None
+
     for key, nm in near_miss_tracker.items():
         if nm["symbol"] == symbol and not nm["triggered"]:
+            trigger_price = fetch_latest_price(symbol, crypto=nm["crypto"])
             nm["triggered"]     = True
             nm["trigger_date"]  = datetime.now().date().isoformat()
-            nm["trigger_price"] = fetch_latest_price(symbol, crypto=nm["crypto"])
+            nm["trigger_price"] = trigger_price
             log.info(f"[NEAR MISS] {symbol} finally triggered!")
+            if _db_trigger:
+                try:
+                    _db_trigger(symbol, nm["date"], trigger_price)
+                except Exception as e:
+                    log.debug(f"[NEAR MISS] DB trigger persist failed: {e}")
 
 def build_sparkline_html(price_at_miss, prices_since):
     if not prices_since:
@@ -516,9 +570,13 @@ def simulate_near_miss_exit(entry_price, daily_bars):
 
     if exit_price is None: return None
 
-    pnl_pct  = ((exit_price - entry_price) / entry_price) * 100
+    pnl_pct   = ((exit_price - entry_price) / entry_price) * 100
     trade_val = 400
-    pnl_usd  = (pnl_pct / 100) * trade_val
+    pnl_usd   = (pnl_pct / 100) * trade_val
+    mfe_pct   = round(((trail_high - entry_price) / entry_price) * 100, 2)
+    # MAE: worst intraday low seen across all bars before exit
+    mae_price = min((b.get("l", b.get("c")) for b in daily_bars[:exit_day or 5]), default=entry_price)
+    mae_pct   = round(((mae_price - entry_price) / entry_price) * 100, 2)
 
     return {
         "entry_price":    entry_price,
@@ -529,7 +587,9 @@ def simulate_near_miss_exit(entry_price, daily_bars):
         "pnl_usd":        round(pnl_usd, 2),
         "profitable":     pnl_pct > 0,
         "trail_active":   trail_active,
-        "max_profit_pct": round(((trail_high - entry_price) / entry_price) * 100, 2),
+        "max_profit_pct": mfe_pct,
+        "mfe_pct":        mfe_pct,
+        "mae_pct":        mae_pct,
     }
 
 def fetch_near_miss_ohlc(symbol, from_date, days=5, crypto=False):
@@ -562,6 +622,16 @@ def fetch_near_miss_ohlc(symbol, from_date, days=5, crypto=False):
         return []
 
 def run_near_miss_simulations():
+    """
+    Run exit simulations on near-misses that have enough price data.
+    Now persists results to DB so they survive restarts.
+    """
+    try:
+        from data.database import db_update_near_miss_simulation
+        _db_sim = db_update_near_miss_simulation
+    except Exception:
+        _db_sim = None
+
     updated = 0
     for key, nm in near_miss_tracker.items():
         if len(nm.get("prices_since", [])) < 3: continue
@@ -573,10 +643,16 @@ def run_near_miss_simulations():
                 if sim:
                     nm["simulation"] = sim
                     updated += 1
+                    # Persist to DB
+                    if _db_sim:
+                        try:
+                            _db_sim(nm["symbol"], nm["date"], sim)
+                        except Exception as e:
+                            log.debug(f"[NEAR MISS SIM] DB persist failed for {nm['symbol']}: {e}")
         except Exception as e:
             log.debug(f"[NEAR MISS SIM] {nm['symbol']}: {e}")
     if updated:
-        log.info(f"[NEAR MISS SIM] Ran simulations on {updated} near-misses")
+        log.info(f"[NEAR MISS SIM] Ran simulations on {updated} near-misses, results persisted to DB")
 
 
 # ── Weekly near-miss report with Claude AI ────────────────────
