@@ -2225,6 +2225,475 @@ async def settings_save(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
+# INTELLIGENCE ROUTES
+# ═══════════════════════════════════════════════════════════════
+@app.get("/intelligence", response_class=HTMLResponse)
+async def intelligence_page(request: Request, triggered: str = None, error: str = None):
+    try:
+        return HTMLResponse(_build_intelligence_page(
+            run_triggered=(triggered == "1"),
+            run_error=error,
+        ))
+    except Exception as e:
+        log.error(f"[INTELLIGENCE PAGE] {e}")
+        return HTMLResponse(f"<pre style='color:#fff;background:#111;padding:40px'>Error: {e}</pre>", status_code=500)
+
+
+@app.post("/intelligence/run")
+async def intelligence_run(request: Request):
+    """PIN-gated — fire a background intelligence run immediately."""
+    try:
+        body = await request.json()
+        if body.get("pin") != KILL_PIN:
+            return JSONResponse({"status": "wrong_pin"})
+        import threading
+        def _bg():
+            try:
+                from data.intelligence import run_intelligence_analysis
+                run_id, cnt, _ = run_intelligence_analysis(triggered_by="manual")
+                log.info(f"[INTELLIGENCE] Manual run complete — {cnt} recs, run_id={run_id}")
+            except Exception as e:
+                log.error(f"[INTELLIGENCE] Manual run failed: {e}")
+        threading.Thread(target=_bg, daemon=True).start()
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+@app.post("/intelligence/apply")
+async def intelligence_apply(request: Request):
+    """PIN-gated — apply a recommendation and write to trading_config.json."""
+    try:
+        body = await request.json()
+        if body.get("pin") != KILL_PIN:
+            return JSONResponse({"status": "wrong_pin"})
+        rec_id    = int(body.get("rec_id", 0))
+        parameter = body.get("parameter", "")
+        value     = body.get("value")
+        if parameter and value is not None:
+            try:
+                numeric = float(value)
+                cfg_val = int(numeric) if numeric == int(numeric) else numeric
+            except (ValueError, TypeError):
+                cfg_val = value
+            if not _save_tcfg({parameter: cfg_val}):
+                return JSONResponse({"status": "error", "detail": "config write failed"})
+        db_apply_recommendation(rec_id)
+        log.info(f"[INTELLIGENCE] Applied rec {rec_id}: {parameter}={value}")
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+@app.post("/intelligence/dismiss")
+async def intelligence_dismiss(request: Request):
+    try:
+        body = await request.json()
+        db_dismiss_recommendation(int(body.get("rec_id", 0)))
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+@app.post("/intelligence/snooze")
+async def intelligence_snooze(request: Request):
+    try:
+        body = await request.json()
+        db_snooze_recommendation(int(body.get("rec_id", 0)), days=7)
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════
+# INTELLIGENCE PAGE BUILDER
+# ═══════════════════════════════════════════════════════════════
+def _build_intelligence_page(run_triggered=False, run_error=None):
+    pending    = db_get_pending_recommendations()
+    history    = db_get_recommendation_history(limit=20)
+    latest_run = db_get_latest_intelligence_run()
+    past_runs  = db_get_intelligence_runs(limit=8)
+
+    CONF_COL = {"HIGH": "#00ff88", "MEDIUM": "#ffcc00", "LOW": "#ff8800"}
+    CAT_COL  = {
+        "THRESHOLD":       "#00aaff",
+        "POSITION_LIMITS": "#aa88ff",
+        "STOP_LOSS":       "#ff4466",
+        "REGIME_GATE":     "#ffcc00",
+        "WATCHLIST":       "#00ff88",
+        "OBSERVATION":     "#475569",
+    }
+    CAT_ICON = {
+        "THRESHOLD": "🎯", "POSITION_LIMITS": "📦",
+        "STOP_LOSS": "🛑", "REGIME_GATE": "🌍",
+        "WATCHLIST": "📋", "OBSERVATION": "👁",
+    }
+    ACTION_COL = {
+        "RAISE": "#00ff88", "LOWER": "#ff4466", "ADD": "#00ff88",
+        "REMOVE": "#ff4466", "MONITOR": "#ffcc00", "NONE": "#475569",
+    }
+
+    # ── Header: last run info ─────────────────────────────────
+    if latest_run:
+        ts = (latest_run.get("created_at") or "")[:16].replace("T", " ")
+        cnt = latest_run.get("rec_count", 0)
+        trig = latest_run.get("triggered_by", "?")
+        last_run_html = (
+            f'<div style="font-size:13px;color:#475569">'
+            f'Last run: <span style="color:#e0e0e0">{ts}</span>'
+            f' · {cnt} recommendations · <span style="color:#888">{trig}</span></div>'
+        )
+    else:
+        last_run_html = (
+            '<div style="font-size:13px;color:#475569">'
+            'No analysis run yet — first run Sunday 7pm ET or trigger manually below.</div>'
+        )
+
+    pending_count = len(pending)
+    badge = (
+        f'<span style="background:#ff4466;color:#fff;border-radius:10px;'
+        f'padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px">'
+        f'{pending_count}</span>'
+    ) if pending_count else ""
+
+    run_status_html = ""
+    if run_triggered:
+        run_status_html = (
+            '<div style="background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);'
+            'border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#00ff88;font-weight:700">'
+            '✅ Intelligence run triggered — refresh in 60 seconds to see recommendations.</div>'
+        )
+    elif run_error:
+        run_status_html = (
+            f'<div style="background:rgba(255,68,102,0.08);border:1px solid rgba(255,68,102,0.3);'
+            f'border-radius:10px;padding:14px 18px;margin-bottom:20px;color:#ff4466;font-weight:700">'
+            f'❌ Run failed: {run_error}</div>'
+        )
+
+    # ── Pending recommendation cards ──────────────────────────
+    if pending:
+        rec_cards = ""
+        for r in pending:
+            rec_id    = r.get("id")
+            category  = r.get("category", "")
+            action    = r.get("action", "")
+            parameter = r.get("parameter", "")
+            discipline= r.get("discipline", "all")
+            cur_val   = r.get("current_value")
+            rec_val   = r.get("recommended_value")
+            evidence  = r.get("evidence", "")
+            confidence= r.get("confidence", "LOW")
+            sample_sz = r.get("sample_size")
+            created   = (r.get("created_at") or "")[:10]
+            is_obs    = category == "OBSERVATION"
+
+            cat_c  = CAT_COL.get(category, "#888")
+            cat_ic = CAT_ICON.get(category, "•")
+            conf_c = CONF_COL.get(confidence, "#888")
+            act_c  = ACTION_COL.get(action, "#888")
+
+            # Action summary line
+            if not is_obs and parameter and rec_val is not None:
+                action_line = (
+                    f'<div style="font-size:16px;font-weight:700;color:#e0e0e0;margin:12px 0 8px">'
+                    f'<span style="color:{act_c}">{action}</span> '
+                    f'<span style="color:{cat_c}">{parameter}</span>'
+                    f'{f" ({discipline})" if discipline and discipline != "all" else ""}'
+                    f': <span style="color:#475569;font-size:14px;text-decoration:line-through">{cur_val}</span>'
+                    f' → <span style="color:#00ff88;font-size:16px">{rec_val}</span>'
+                    f'</div>'
+                )
+            elif not is_obs and parameter:
+                action_line = (
+                    f'<div style="font-size:16px;font-weight:700;color:#e0e0e0;margin:12px 0 8px">'
+                    f'<span style="color:{act_c}">{action}</span> '
+                    f'<span style="color:{cat_c}">{parameter}</span></div>'
+                )
+            else:
+                action_line = ""
+
+            sample_html = (
+                f'<span style="font-size:11px;color:#475569;margin-left:8px">n={sample_sz}</span>'
+            ) if sample_sz else ""
+
+            # Buttons
+            btn_apply = ""
+            if not is_obs and parameter and rec_val is not None:
+                btn_apply = (
+                    f'<button onclick="applyRec({rec_id},\'{parameter}\',\'{rec_val}\')" '
+                    f'style="padding:10px 20px;background:rgba(0,255,136,0.12);'
+                    f'border:1px solid rgba(0,255,136,0.35);border-radius:8px;color:#00ff88;'
+                    f'font-family:\'JetBrains Mono\',monospace;font-size:13px;font-weight:700;'
+                    f'cursor:pointer;margin-right:8px">✅ Apply</button>'
+                )
+            btn_snooze = "" if is_obs else (
+                f'<button onclick="snoozeRec({rec_id})" '
+                f'style="padding:10px 16px;background:rgba(255,204,0,0.08);'
+                f'border:1px solid rgba(255,204,0,0.25);border-radius:8px;color:#ffcc00;'
+                f'font-family:\'JetBrains Mono\',monospace;font-size:13px;'
+                f'cursor:pointer;margin-right:8px">⏸ Snooze 7d</button>'
+            )
+            btn_dismiss = (
+                f'<button onclick="dismissRec({rec_id})" '
+                f'style="padding:10px 16px;background:rgba(255,68,102,0.08);'
+                f'border:1px solid rgba(255,68,102,0.25);border-radius:8px;color:#ff4466;'
+                f'font-family:\'JetBrains Mono\',monospace;font-size:13px;cursor:pointer">'
+                f'✕ Dismiss</button>'
+            )
+
+            rec_cards += f"""
+            <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);
+                        border-left:3px solid {cat_c};border-radius:12px;
+                        padding:20px 24px;margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                          flex-wrap:wrap;gap:8px;margin-bottom:4px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="font-size:18px">{cat_ic}</span>
+                  <span style="font-size:12px;font-weight:700;color:{cat_c};text-transform:uppercase;
+                               letter-spacing:1px;background:rgba(255,255,255,0.05);
+                               border:1px solid {cat_c}44;border-radius:4px;
+                               padding:2px 8px">{category}</span>
+                  <span style="font-size:11px;font-weight:700;color:{conf_c};
+                               text-transform:uppercase;letter-spacing:1px">● {confidence}</span>
+                  {sample_html}
+                </div>
+                <div style="font-size:11px;color:#333">{created}</div>
+              </div>
+              {action_line}
+              <div style="font-size:13px;color:#aaa;line-height:1.6;margin-bottom:16px;
+                          border-left:2px solid rgba(255,255,255,0.06);
+                          padding-left:12px;margin-top:8px">{evidence}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                {btn_apply}{btn_snooze}{btn_dismiss}
+              </div>
+            </div>"""
+
+        pending_section = f"""
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
+          <div class="section-title" style="color:#00aaff">
+            📬 Pending Recommendations{badge}
+          </div>
+          <div style="font-size:13px;color:#475569;margin-bottom:16px">
+            Review each recommendation and apply, snooze for 7 days, or dismiss.
+            Applied changes take effect within 60 seconds — no restart needed.
+          </div>
+          {rec_cards}
+        </div>"""
+    else:
+        pending_section = """
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,170,255,0.2)">
+          <div class="section-title" style="color:#00aaff">📬 Pending Recommendations</div>
+          <div style="color:#475569;font-size:14px;padding:20px 0;text-align:center">
+            No pending recommendations — runs Sunday 7pm ET or trigger manually above.
+          </div>
+        </div>"""
+
+    # ── Latest narrative ──────────────────────────────────────
+    narrative_html = ""
+    if latest_run and latest_run.get("narrative"):
+        narrative_html = f"""
+        <div class="card" style="margin-bottom:20px;border-color:rgba(0,255,136,0.1)">
+          <div class="section-title" style="color:#00ff88">📝 Latest Analysis Narrative</div>
+          <div style="font-size:14px;color:#ccc;line-height:1.8;white-space:pre-wrap">{latest_run['narrative']}</div>
+        </div>"""
+
+    # ── Decision history ──────────────────────────────────────
+    history_section = ""
+    if history:
+        hist_rows = ""
+        for r in history:
+            cat    = r.get("category", "")
+            param  = r.get("parameter", "")
+            cur    = r.get("current_value")
+            rec    = r.get("recommended_value")
+            disc   = r.get("discipline", "all")
+            status = r.get("status", "")
+            ts     = (r.get("actioned_at") or r.get("created_at") or "")[:10]
+            cat_c  = CAT_COL.get(cat, "#888")
+            cat_ic = CAT_ICON.get(cat, "•")
+            st_col = {"APPLIED": "#00ff88", "DISMISSED": "#ff4466", "SNOOZED": "#ffcc00"}.get(status, "#888")
+            change = f"{param}: {cur} → {rec}" if param and rec is not None else (param or cat)
+            hist_rows += (
+                f'<tr>'
+                f'<td style="color:{cat_c}">{cat_ic} {cat}</td>'
+                f'<td style="color:#e0e0e0;font-size:12px">{change}</td>'
+                f'<td style="color:#888;font-size:11px">{disc}</td>'
+                f'<td style="font-weight:700;color:{st_col}">{status}</td>'
+                f'<td style="color:#475569">{ts}</td>'
+                f'</tr>'
+            )
+        history_section = f"""
+        <div class="card" style="margin-bottom:20px">
+          <div class="section-title">📜 Decision History</div>
+          <div class="table-wrap">
+            <table><thead><tr>
+              <th>Category</th><th>Change</th><th>Discipline</th><th>Status</th><th>Date</th>
+            </tr></thead><tbody>{hist_rows}</tbody></table>
+          </div>
+        </div>"""
+
+    # ── Run archive ───────────────────────────────────────────
+    runs_section = ""
+    if past_runs:
+        run_rows = ""
+        for r in past_runs:
+            ts      = (r.get("created_at") or "")[:16].replace("T", " ")
+            trig    = r.get("triggered_by", "?")
+            cnt     = r.get("rec_count", 0)
+            narr    = r.get("narrative") or "—"
+            preview = (narr[:120] + "…") if len(narr) > 120 else narr
+            tc      = "#00aaff" if trig == "scheduled" else "#ffcc00"
+            run_rows += (
+                f'<tr>'
+                f'<td style="color:#475569;font-size:11px">{ts}</td>'
+                f'<td style="color:{tc};font-size:11px">{trig}</td>'
+                f'<td style="color:#ffcc00">{cnt}</td>'
+                f'<td style="color:#888;font-size:12px">{preview}</td>'
+                f'</tr>'
+            )
+        runs_section = f"""
+        <div class="card" style="margin-bottom:20px">
+          <div class="section-title">🗂 Intelligence Run Archive</div>
+          <div class="table-wrap">
+            <table><thead><tr>
+              <th>Time</th><th>Trigger</th><th>Recs</th><th>Summary</th>
+            </tr></thead><tbody>{run_rows}</tbody></table>
+          </div>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AlphaBot Intelligence</title>
+{BASE_CSS}
+<style>
+#pin-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center}}
+#pin-overlay.visible{{display:flex}}
+.pin-box{{background:#0d1117;border:1px solid rgba(0,255,136,0.3);border-radius:16px;padding:36px 40px;text-align:center;max-width:380px;width:90%}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div style="display:flex;align-items:center;gap:14px">
+    <a href="/" style="color:#475569;text-decoration:none;font-size:14px;
+                       font-family:'JetBrains Mono',monospace">← Dashboard</a>
+    <span style="color:#333">|</span>
+    <span style="font-size:20px;font-weight:700;color:#00aaff;
+                 font-family:'Syne',sans-serif">🧠 Intelligence</span>
+    {badge}
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    {last_run_html}
+    <button onclick="triggerRun()"
+      style="padding:9px 18px;background:rgba(0,170,255,0.12);
+             border:1px solid rgba(0,170,255,0.35);border-radius:8px;color:#00aaff;
+             font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;
+             cursor:pointer;letter-spacing:0.5px">⚡ Run Now</button>
+  </div>
+</div>
+
+<div class="controls-bar">
+  <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
+  <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
+  <a href="/intelligence" class="tab"
+     style="text-decoration:none;color:#00aaff;border-bottom:2px solid #00aaff">🧠 Intelligence</a>
+  <a href="/settings" class="tab" style="text-decoration:none">⚙️ Settings</a>
+</div>
+
+<div class="container">
+  {run_status_html}
+  {pending_section}
+  {narrative_html}
+  {history_section}
+  {runs_section}
+</div>
+
+<!-- PIN overlay for Apply -->
+<div id="pin-overlay" onclick="if(event.target===this)closePin()">
+  <div class="pin-box">
+    <div style="font-size:20px;font-weight:700;color:#00ff88;margin-bottom:8px">🔒 Confirm Apply</div>
+    <div id="pin-action-label" style="font-size:13px;color:#e0e0e0;margin-bottom:6px"></div>
+    <div style="font-size:12px;color:#475569;margin-bottom:20px">
+      Change takes effect within 60 seconds — no restart needed.
+    </div>
+    <input id="pin-input" type="password" maxlength="10" placeholder="••••"
+      style="background:#111;border:1px solid rgba(0,255,136,0.3);border-radius:8px;
+             color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:22px;
+             font-weight:700;padding:12px;width:100%;text-align:center;
+             letter-spacing:4px;margin-bottom:16px"
+      onkeydown="if(event.key==='Enter')submitApply()">
+    <div style="display:flex;gap:10px">
+      <button onclick="closePin()"
+        style="flex:1;background:#1a1a1a;border:1px solid #333;border-radius:8px;
+               color:#475569;padding:12px;cursor:pointer;
+               font-family:'JetBrains Mono',monospace;font-size:13px">Cancel</button>
+      <button onclick="submitApply()"
+        style="flex:2;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);
+               border-radius:8px;color:#00ff88;padding:12px;cursor:pointer;
+               font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700">
+        Apply Change</button>
+    </div>
+    <div id="pin-error" style="color:#ff4466;font-size:12px;margin-top:10px;display:none">
+      Wrong PIN</div>
+  </div>
+</div>
+
+<script>
+var _pendingRec = null;
+
+function applyRec(id, param, val) {{
+  _pendingRec = {{id:id, param:param, val:val}};
+  document.getElementById('pin-action-label').textContent = 'Apply: ' + param + ' → ' + val;
+  document.getElementById('pin-error').style.display = 'none';
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-overlay').classList.add('visible');
+  document.getElementById('pin-input').focus();
+}}
+function closePin() {{
+  document.getElementById('pin-overlay').classList.remove('visible');
+  _pendingRec = null;
+}}
+function submitApply() {{
+  if (!_pendingRec) return;
+  var pin = document.getElementById('pin-input').value;
+  fetch('/intelligence/apply', {{
+    method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{pin:pin, rec_id:_pendingRec.id,
+                           parameter:_pendingRec.param, value:_pendingRec.val}})
+  }}).then(r=>r.json()).then(d=>{{
+    if (d.status==='ok') {{ closePin(); location.reload(); }}
+    else if (d.status==='wrong_pin') {{ document.getElementById('pin-error').style.display='block'; }}
+    else {{ alert('Error: '+JSON.stringify(d)); }}
+  }});
+}}
+function dismissRec(id) {{
+  if (!confirm('Dismiss this recommendation permanently?')) return;
+  fetch('/intelligence/dismiss',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{rec_id:id}})}}).then(()=>location.reload());
+}}
+function snoozeRec(id) {{
+  fetch('/intelligence/snooze',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{rec_id:id}})}}).then(()=>location.reload());
+}}
+function triggerRun() {{
+  var pin = prompt('PIN to trigger intelligence run:');
+  if (pin===null) return;
+  fetch('/intelligence/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{pin:pin}})}})
+  .then(r=>r.json()).then(d=>{{
+    if (d.status==='ok') location.href='/intelligence?triggered=1';
+    else if (d.status==='wrong_pin') alert('Wrong PIN');
+    else alert('Error: '+JSON.stringify(d));
+  }});
+}}
+</script>
+</body></html>"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # SETTINGS PANEL
 # ═══════════════════════════════════════════════════════════════
 def _build_settings_page(msg=None, msg_type="ok"):
@@ -2271,7 +2740,8 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 </div>
 <div class="controls-bar">
   <a href="/" class="tab" style="text-decoration:none">← Dashboard</a>
-  <a href="/analytics" class="tab" style="text-decoration:none">📊 Intelligence</a>
+  <a href="/analytics" class="tab" style="text-decoration:none">📊 Analytics</a>
+  <a href="/intelligence" class="tab" style="text-decoration:none">🧠 Intelligence</a>
   <a href="/settings" class="tab" style="text-decoration:none;color:#ffcc00;border-bottom:2px solid #ffcc00">⚙️ Settings</a>
 </div>
 
