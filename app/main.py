@@ -1028,6 +1028,7 @@ def main():
                         "mode": crypto_regime.get("mode", "BULL"),
                         "btc_price": crypto_regime.get("btc_price"),
                         "btc_change": crypto_regime.get("btc_change"),
+                        "btc_ma20": crypto_regime.get("btc_ma20"),
                     },
                     "asx_regime": {
                         "mode": asx_regime.get("mode", "BULL"),
