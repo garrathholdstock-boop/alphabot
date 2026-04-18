@@ -1,6 +1,6 @@
 # AlphaBot Debug Agent - Persistent Context
 ## Last Updated
-17-Apr-2026 22:21 Paris (auto-updated by agent)
+18-Apr-2026 07:01 Paris (auto-updated by agent)
 
 ## Architecture
 - VPS: 178.104.170.58 (Hetzner), user: root, Paris = UTC+2
@@ -41,7 +41,7 @@
 
 ## Current Status
 - Bot running: YES
-- All-time P&L: $+0.06 (2 trades, 50% win rate)
+- All-time P&L: $-0.69 (11 trades, 18% win rate)
 - Open positions: HOOD x7540, TSLA x257, PLUG x70702 (check dashboard for live)
 
 ## KNOWN COSMETIC ERRORS — ALWAYS IGNORE
