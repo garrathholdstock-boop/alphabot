@@ -1649,14 +1649,6 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       <button type="submit" style="background:#0a0a1a;border:2px solid #7c3aed;color:#a78bfa;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">☀️ Morning Brief</button>
     </form>"""
 
-    quick += f"""<a href="{BASE}/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
-      <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
-    </a>"""
-
-    quick += f"""<a href="{BASE}/log" style="display:inline-block;margin:3px;text-decoration:none;">
-      <button style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">📋 Live Log</button>
-    </a>"""
-
     safe_files = ["app/main.py","app/dashboard.py","core/config.py","core/execution.py",
                   "core/risk.py","data/analytics.py","data/database.py","data/intelligence.py",
                   "ai_debug/main.py","start.sh",".env"]
@@ -1710,31 +1702,16 @@ details summary {{ cursor:pointer; }}
     <div class="logo">AlphaBot <span style="color:#64748b">Agent</span> <span style="font-size:11px;color:#7c3aed;background:#1e1e2e;padding:2px 6px;border-radius:4px;">v8</span></div>
     <div style="font-size:10px;color:#475569;margin-top:2px;">{mkt_html}</div>
   </div>
-  <div class="badge">BOT {st}</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+    <a href="{BASE}/maintenance" style="text-decoration:none;">
+      <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
+    </a>
+    <a href="{BASE}/log" style="text-decoration:none;">
+      <button style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700;">📋 Live Log</button>
+    </a>
+    <div class="badge">BOT {st}</div>
+  </div>
 </header>
-
-<!-- Stats strip -->
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
-  <div class="card" style="padding:10px 12px;">
-    <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">All-time P&L</div>
-    <div style="font-size:24px;font-weight:700;color:{'#00ff88' if total_pnl>=0 else '#ef4444'};font-family:'Syne',sans-serif;">${total_pnl:+,.0f}</div>
-    <div style="font-size:13px;color:#475569;">{total_trades} trades · {win_rate}% win</div>
-  </div>
-  <div class="card" style="padding:10px 12px;">
-    <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">Today P&L</div>
-    <div style="font-size:24px;font-weight:700;color:{'#00ff88' if today_pnl>=0 else '#ef4444'};font-family:'Syne',sans-serif;">${today_pnl:+,.0f}</div>
-    <div style="font-size:13px;color:#475569;">Trades today: {today_count}</div>
-  </div>
-  <div class="card" style="padding:10px 12px;">
-    <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">Queue</div>
-    <div style="font-size:24px;font-weight:700;color:{'#f59e0b' if pending else '#00ff88'};font-family:'Syne',sans-serif;">{len(pending)}</div>
-    <div style="font-size:13px;color:#475569;">items pending</div>
-  </div>
-  <div class="card" style="padding:10px 12px;">
-    <div style="font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:1px;">Telegram</div>
-    <div style="font-size:14px;font-weight:700;color:#{'00ff88' if TELEGRAM_CHAT_ID != 'YOUR_CHAT_ID' else 'f59e0b'};margin-top:4px;">{telegram_status}</div>
-  </div>
-</div>
 
 {queue_html}
 {autofix_html}
