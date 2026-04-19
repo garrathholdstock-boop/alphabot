@@ -85,6 +85,7 @@ from data.analytics import (
 from data.database import (
     db_record_trade, db_record_near_miss, db_record_report,
     db_record_rotation, db_get_pending_rotations, db_update_rotation_followup,
+    db_write_status,
 )
 from app.notifications import (
     tg, tg_trade_buy, tg_trade_sell, tg_hot_miss, tg_critical,
@@ -1466,6 +1467,7 @@ def main():
                 }
                 with open("/home/alphabot/app/status.json", "w") as _sf:
                     json.dump(status_snap, _sf, default=str)
+                db_write_status(status_snap)  # DB-backed — survives restarts
             except Exception as _se:
                 log.warning(f"[STATUS] {_se}")
 
