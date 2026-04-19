@@ -2029,6 +2029,7 @@ FILES_TO_BACKUP = [
     ("data/database.py",      "database.py"),
     ("data/intelligence.py",  "intelligence.py"),
     ("core/config.py",        "config.py"),
+    ("core/execution.py",     "execution.py"),
     ("ai_debug/main.py",      "agent_main.py"),
     ("trading_config.json",   "trading_config.json"),
     ("alphabot.db",           "alphabot.db"),
@@ -2322,84 +2323,73 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
 <div class="card" style="margin-bottom:20px;border-color:rgba(245,158,11,0.2)">
   <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#f59e0b;text-transform:uppercase;margin-bottom:16px">🛠 Maintenance Actions</div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+  <!-- Row 1: Service Restarts -->
+  <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase;margin-bottom:10px">⚡ Service Restarts</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+    <!-- Restart Bot -->
+    <div style="background:#0a1020;border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:16px">
+      <div style="font-size:14px;font-weight:700;color:#ef4444;margin-bottom:6px">🤖 Restart Bot</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Restarts the trading bot via systemd. Takes ~10s. Open positions are safe — bot recovers from IBKR on startup.
+      </div>
+      <button onclick="pinAction('restart-bot', 'Restart the trading bot? It will be offline for ~10 seconds.')"
+        class="btn" style="width:100%;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);color:#ef4444">
+        🔄 Restart Bot
+      </button>
+    </div>
+    <!-- Restart Dashboard -->
+    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.25);border-radius:10px;padding:16px">
+      <div style="font-size:14px;font-weight:700;color:#00aaff;margin-bottom:6px">📊 Restart Dashboard</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Restarts the dashboard service. Use if the dashboard becomes unresponsive or shows stale data.
+      </div>
+      <button onclick="pinAction('restart-dashboard', 'Restart the dashboard service?')"
+        class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.35);color:#00aaff">
+        🔄 Restart Dashboard
+      </button>
+    </div>
+    <!-- Restart Agent -->
+    <div style="background:#0a1020;border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:16px">
+      <div style="font-size:14px;font-weight:700;color:#f59e0b;margin-bottom:6px">🧠 Restart Agent</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Restarts this debug agent. Page will reload after 8 seconds. Use if agent feels stuck or slow.
+      </div>
+      <button onclick="pinAction('restart-agent', 'Restart the debug agent? This page will reload in 8 seconds.')"
+        class="btn" style="width:100%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);color:#f59e0b">
+        🔄 Restart Agent
+      </button>
+    </div>
+  </div>
 
-    <!-- Friday Backup -->
+  <!-- Row 2: Daily Tools -->
+  <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase;margin-bottom:10px">🔧 Daily Tools</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+    <!-- Pull from GitHub -->
     <div style="background:#0a1020;border:1px solid rgba(0,255,136,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">📦 Friday Backup</div>
+      <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">⬇️ Pull from GitHub</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Backs up all Python files, the database, and config to a dated folder on the VPS.
-        Run every Friday night before weekend work. Takes ~5 seconds.
+        Force-pulls latest code from GitHub. Resets all tracked files to match the repo.
+        Safe — never touches <code style="color:#ffcc00">.env</code> or <code style="color:#ffcc00">alphabot.db</code>.
+        PIN required. Restart bot after.
       </div>
-      <button onclick="runAction('backup')" class="btn" style="width:100%;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.35);color:#00ff88">
-        📦 Run Backup Now
+      <button onclick="pinAction('github-pull', 'Force pull from GitHub? All tracked files will be reset to the repo version.')"
+        class="btn" style="width:100%;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);color:#00ff88">
+        ⬇️ Pull from GitHub
       </button>
     </div>
-
-    <!-- Pre-Monday Check -->
-    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#00aaff;margin-bottom:6px">✅ Pre-Monday Check</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Checks all 3 screens running, no P1 alerts, config correct, intelligence reviewed,
-        open positions known. Run Sunday night before bed.
-      </div>
-      <button onclick="runAction('monday')" class="btn" style="width:100%;background:rgba(0,170,255,0.12);border:1px solid rgba(0,170,255,0.35);color:#00aaff">
-        ✅ Run Check Now
-      </button>
-    </div>
-
-    <!-- Clean Old Backups -->
-    <div style="background:#0a1020;border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#ef4444;margin-bottom:6px">🧹 Clean Old Backups</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Removes backup folders older than 28 days (keeps last 4 weeks).
-        Run monthly to keep disk usage in check.
-      </div>
-      <button onclick="pinAction('clean', 'Clean backups older than 28 days?')" class="btn" style="width:100%;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);color:#ef4444">
-        🧹 Clean Old Backups
-      </button>
-    </div>
-
-    <!-- View Disk Usage -->
+    <!-- Download from VPS -->
     <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:6px">💾 Disk Usage</div>
+      <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:6px">📥 Download from VPS</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Shows how much disk space the VPS is using — backups, logs, database.
-        Good to check monthly so you don't run out of space.
+        Download all app files as a zip — or pick individual files.
+        Use this to get a local copy of the current VPS state, especially before rebuilds.
       </div>
-      <button onclick="runAction('disk')" class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
-        💾 Check Disk Usage
-      </button>
-    </div>
-
-    <!-- Export DB -->
-    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#00aaff;margin-bottom:6px">📤 Export Database</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Downloads <code>alphabot.db</code> directly to your device — all trade history,
-        near-misses, intelligence runs. Off-site backup. Run weekly.
-      </div>
-      <a href="{BASE}/maintenance/export-db" style="text-decoration:none">
-        <button class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff">
-          📤 Download Database
+      <a href="{BASE}/maintenance/download" style="text-decoration:none">
+        <button class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
+          📥 Download Files
         </button>
       </a>
     </div>
-
-    <!-- Revert a File -->
-    <div style="background:#0a1020;border:1px solid rgba(255,204,0,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#ffcc00;margin-bottom:6px">↩ Revert a File</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Put up a dodgy file? Pick the file, see all dated backups for it,
-        choose the version you want. PIN required. Never touches the database.
-      </div>
-      <a href="{BASE}/maintenance/revert" style="text-decoration:none">
-        <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
-          ↩ Revert a File
-        </button>
-      </a>
-    </div>
-
     <!-- Refresh Small Caps -->
     <div style="background:#0a1020;border:1px solid rgba(139,92,246,0.3);border-radius:10px;padding:16px">
       <div style="font-size:15px;font-weight:700;color:#8b5cf6;margin-bottom:6px">🔬 Refresh Small Caps</div>
@@ -2420,80 +2410,89 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
       </div>
       <div id="sc-result" style="display:none;margin-top:12px;font-size:12px;color:#00ff88;background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.2);border-radius:6px;padding:10px;line-height:1.6"></div>
     </div>
+  </div>
 
-    <!-- Pull from GitHub -->
+  <!-- Row 3: Weekly Tasks -->
+  <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase;margin-bottom:10px">📅 Weekly Tasks</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+    <!-- Friday Backup -->
     <div style="background:#0a1020;border:1px solid rgba(0,255,136,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">⬇️ Pull from GitHub</div>
+      <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">📦 Friday Backup</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Force-pulls latest code from GitHub. Resets all tracked files to match the repo.
-        Safe — never touches <code style="color:#ffcc00">.env</code> or <code style="color:#ffcc00">alphabot.db</code>.
-        PIN required. Restart bot after.
+        Backs up all Python files, the database, and config to a dated folder on the VPS.
+        Run every Friday night before weekend work. Takes ~5 seconds.
       </div>
-      <button onclick="pinAction('github-pull', 'Force pull from GitHub? All tracked files will be reset to the repo version.')"
-        class="btn" style="width:100%;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);color:#00ff88">
-        ⬇️ Pull from GitHub
+      <button onclick="runAction('backup')" class="btn" style="width:100%;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.35);color:#00ff88">
+        📦 Run Backup Now
       </button>
     </div>
-
-    <!-- Download from VPS -->
-    <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.2);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:6px">📥 Download from VPS</div>
+    <!-- Pre-Monday Check -->
+    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#00aaff;margin-bottom:6px">✅ Pre-Monday Check</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Download all app files as a zip — or pick individual files.
-        Use this to get a local copy of the current VPS state, especially before rebuilds.
+        Checks all 3 screens running, no P1 alerts, config correct, intelligence reviewed,
+        open positions known. Run Sunday night before bed.
       </div>
-      <a href="{BASE}/maintenance/download" style="text-decoration:none">
-        <button class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
-          📥 Download Files
+      <button onclick="runAction('monday')" class="btn" style="width:100%;background:rgba(0,170,255,0.12);border:1px solid rgba(0,170,255,0.35);color:#00aaff">
+        ✅ Run Check Now
+      </button>
+    </div>
+    <!-- Export DB -->
+    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#00aaff;margin-bottom:6px">📤 Export Database</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Downloads <code>alphabot.db</code> directly to your device — all trade history,
+        near-misses, intelligence runs. Off-site backup. Run weekly.
+      </div>
+      <a href="{BASE}/maintenance/export-db" style="text-decoration:none">
+        <button class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff">
+          📤 Download Database
         </button>
       </a>
     </div>
-
   </div>
 
-  <!-- Service Restart Row -->
-  <div style="margin-top:20px;margin-bottom:10px;font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase">⚡ Service Restarts (systemd)</div>
+  <!-- Row 4: Advanced -->
+  <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase;margin-bottom:10px">🔩 Advanced</div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-
-    <!-- Restart Bot -->
-    <div style="background:#0a1020;border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:16px">
-      <div style="font-size:14px;font-weight:700;color:#ef4444;margin-bottom:6px">🤖 Restart Bot</div>
+    <!-- Clean Old Backups -->
+    <div style="background:#0a1020;border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#ef4444;margin-bottom:6px">🧹 Clean Old Backups</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Restarts the trading bot via systemd. Takes ~10s. Open positions are safe — bot recovers from IBKR on startup.
+        Removes backup folders older than 28 days (keeps last 4 weeks).
+        Run monthly to keep disk usage in check.
       </div>
-      <button onclick="pinAction('restart-bot', 'Restart the trading bot? It will be offline for ~10 seconds.')"
-        class="btn" style="width:100%;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);color:#ef4444">
-        🔄 Restart Bot
+      <button onclick="pinAction('clean', 'Clean backups older than 28 days?')" class="btn" style="width:100%;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);color:#ef4444">
+        🧹 Clean Old Backups
       </button>
     </div>
-
-    <!-- Restart Dashboard -->
-    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.25);border-radius:10px;padding:16px">
-      <div style="font-size:14px;font-weight:700;color:#00aaff;margin-bottom:6px">📊 Restart Dashboard</div>
+    <!-- View Disk Usage -->
+    <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#aa88ff;margin-bottom:6px">💾 Disk Usage</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Restarts the dashboard service. Use if the dashboard becomes unresponsive or shows stale data.
+        Shows how much disk space the VPS is using — backups, logs, database.
+        Good to check monthly so you don't run out of space.
       </div>
-      <button onclick="pinAction('restart-dashboard', 'Restart the dashboard service?')"
-        class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.35);color:#00aaff">
-        🔄 Restart Dashboard
+      <button onclick="runAction('disk')" class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
+        💾 Check Disk Usage
       </button>
     </div>
-
-    <!-- Restart Agent -->
-    <div style="background:#0a1020;border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:16px">
-      <div style="font-size:14px;font-weight:700;color:#f59e0b;margin-bottom:6px">🧠 Restart Agent</div>
+    <!-- Revert a File -->
+    <div style="background:#0a1020;border:1px solid rgba(255,204,0,0.2);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#ffcc00;margin-bottom:6px">↩ Revert a File</div>
       <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
-        Restarts this debug agent. Page will reload after 8 seconds. Use if agent feels stuck or slow.
+        Put up a dodgy file? Pick the file, see all dated backups for it,
+        choose the version you want. PIN required. Never touches the database.
       </div>
-      <button onclick="pinAction('restart-agent', 'Restart the debug agent? This page will reload in 8 seconds.')"
-        class="btn" style="width:100%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);color:#f59e0b">
-        🔄 Restart Agent
-      </button>
+      <a href="{BASE}/maintenance/revert" style="text-decoration:none">
+        <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
+          ↩ Revert a File
+        </button>
+      </a>
     </div>
-
   </div>
-</div>
 
+</div>
 {backup_list_html}
 
 <!-- Disk usage result -->
