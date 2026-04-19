@@ -2163,6 +2163,7 @@ def _do_monday_check():
 def _build_maintenance_page(msg=None, msg_type="ok", backup_result=None,
                              monday_result=None, backups=None):
     """Build the full maintenance page HTML."""
+    _base = os.environ.get("ROOT_PATH", "")
     now = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
 
     msg_html = ""
@@ -2628,6 +2629,7 @@ async def export_db():
 @app.get("/maintenance/revert", response_class=HTMLResponse)
 async def revert_page(file: str = None, msg: str = None):
     """Pick a file, see its dated backups, choose one to restore."""
+    _base = os.environ.get("ROOT_PATH", "")
     import html as _html
     now_str    = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
     revertable = [v for _, v in FILES_TO_BACKUP if v != "alphabot.db"]
@@ -2749,6 +2751,7 @@ function submitPin(){{
 @app.get("/maintenance/download", response_class=HTMLResponse)
 async def download_page():
     """Pick individual files to download, or grab the whole app as a zip."""
+    _base = os.environ.get("ROOT_PATH", "")
     import html as _html
     now_str = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
 
