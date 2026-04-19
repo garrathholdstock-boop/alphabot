@@ -32,11 +32,11 @@ from core.config import (
     SMALLCAP_MIN_PRICE, SMALLCAP_MAX_PRICE,
     NEWS_API_KEY,
     state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, asx_state, ftse_state,
-    asx_state, ftse_state,
+    asx_state, ftse_state, bear_state,
     global_risk, perf, kill_switch, circuit_breaker,
     market_regime, crypto_regime, asx_regime, ftse_regime, news_state, near_miss_tracker,
     exchange_stops, account_info, smallcap_pool,
-    CRYPTO_WATCHLIST, US_WATCHLIST, ASX_WATCHLIST, FTSE_WATCHLIST,
+    CRYPTO_WATCHLIST, US_WATCHLIST, ASX_WATCHLIST, FTSE_WATCHLIST, BEAR_WATCHLIST,
     _state_lock,
     MAX_DAILY_LOSS_PCT, MAX_DAILY_SPEND_PCT, MAX_EXPOSURE_PCT,
     DAILY_PROFIT_TARGET_PCT, MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT,
@@ -947,6 +947,172 @@ def update_ftse_regime():
     except Exception as e:
         log.warning(f"[FTSE REGIME] update failed: {e}")
 
+def run_bear_cycle(st):
+    """
+    Bear discipline — inverse ETF intraday plays on confirmed BEAR days.
+    - Only fires when market_regime = BEAR
+    - Buys SQQQ, SPXU, SDOW, FAZ on signal — all 4 allowed during testing
+    - Score threshold: 4.0 (lean in aggressively on bear days)
+    - Force-sells ALL positions at 3:45pm ET (15 min before close) every day
+    - Single-day only — never holds overnight
+    """
+    from core.config import BEAR_MIN_SCORE
+    st.check_reset()
+    if st.shutoff: return
+    if kill_switch["active"]: return
+    if not is_market_open(): return
+
+    # Only run in BEAR regime
+    if market_regime.get("mode") != "BEAR":
+        return
+
+    st.running = True
+    st.last_cycle = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
+    st.cycle_count += 1
+    log.info(f"[BEAR] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Positions: {len(st.positions)}")
+
+    # ── EOD force-sell: exit all positions at 3:45pm ET ──────────
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    if et_now.hour == 15 and et_now.minute >= 45:
+        if st.positions:
+            log.info("[BEAR] EOD force-sell — closing all bear positions before market close")
+        for sym in list(st.positions.keys()):
+            pos  = st.positions[sym]
+            live = fetch_latest_price(sym, crypto=False)
+            if not live:
+                live = pos["entry_price"]
+            qty  = pos["qty"]
+            pnl  = (live - pos["entry_price"]) * qty
+            order, fill = place_order(sym, "sell", qty, crypto=False, estimated_price=live)
+            fill = fill or live
+            pnl_actual = (fill - pos["entry_price"]) * qty
+            log.info(f"[BEAR] EOD SELL {sym} x{qty} @ ${fill:.2f} | P&L: ${pnl_actual:+.2f}")
+            st.daily_pnl += pnl_actual
+            st.trades.insert(0, {
+                "symbol": sym, "side": "SELL", "qty": qty,
+                "price": fill, "pnl": pnl_actual, "reason": "Bear EOD",
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "entry_ts": pos.get("entry_ts"), "score": pos.get("signal_score"),
+                "rsi": None, "vol_ratio": None, "breakdown": "Bear EOD forced exit",
+            })
+            try:
+                db_record_trade(sym, "SELL", qty, fill, pnl_actual,
+                                pos.get("signal_score", 0), None, None,
+                                (datetime.now() - datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600
+                                if pos.get("entry_ts") else 0,
+                                "Bear EOD", "Bear EOD forced exit",
+                                market="stock", discipline="bear_swing",
+                                exit_category="BEAR_EOD")
+            except Exception as e:
+                log.debug(f"[BEAR] DB record failed: {e}")
+            del st.positions[sym]
+        return
+
+    # ── Stop-loss check on existing positions ────────────────────
+    check_stop_losses(st, crypto=False)
+    if st.shutoff: return
+
+    # ── Scan for new entries ─────────────────────────────────────
+    # All 4 bear symbols allowed — max positions = 4 during testing
+    bear_min_score = getattr(cfg, "BEAR_MIN_SCORE", 4.0)
+    bars_cache = fetch_bars_batch(BEAR_WATCHLIST)
+
+    for sym in BEAR_WATCHLIST:
+        if sym in st.positions:
+            continue  # already holding
+        if len(st.positions) >= 4:
+            break  # all 4 slots used
+
+        bars = bars_cache.get(sym)
+        if not bars or len(bars) < 22:
+            continue
+
+        closes  = [b["c"] for b in bars]
+        volumes = [b.get("v", 0) for b in bars]
+        price   = closes[-1]
+        if price <= 0:
+            continue
+
+        signal, e_fast, e_slow, rsi = get_signal(closes, volumes)
+        if signal != "BUY":
+            continue
+
+        vol_ratio = 1.0
+        if len(volumes) >= 11:
+            avg_vol = sum(volumes[-11:-1]) / 10
+            vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+
+        # Score using standard scorer — bear ETFs benefit from
+        # breakout, volume, momentum signals same as normal stocks
+        score = score_signal(sym, price, 0, rsi, vol_ratio, closes, bars=bars)
+
+        log.info(f"[BEAR] {sym} score:{score} | price:${price:.2f} | rsi:{rsi:.1f if rsi else 'N/A'} | vol:{vol_ratio:.1f}x")
+
+        if score < bear_min_score:
+            log.info(f"[BEAR] SKIP {sym} score:{score} below bear threshold {bear_min_score}")
+            continue
+
+        # Size the trade
+        qty = max(1, int(MAX_TRADE_VALUE / price))
+        trade_val = qty * price
+
+        if st.daily_spend + trade_val > MAX_DAILY_SPEND:
+            log.info(f"[BEAR] SKIP {sym} — daily spend limit")
+            continue
+
+        stop_pct  = STOP_LOSS_PCT
+        stop_price = price * (1 - stop_pct / 100)
+
+        # ATR stop if available
+        _use_atr  = getattr(cfg, "USE_ATR_STOPS", True)
+        _atr_mult = float(getattr(cfg, "ATR_STOP_MULTIPLIER", 2.0))
+        if _use_atr and bars and len(bars) >= 16:
+            _atr_val = calc_atr(bars, period=14)
+            if _atr_val and _atr_val > 0:
+                atr_stop = price - (_atr_val * _atr_mult)
+                min_stop = price * (1 - (stop_pct * 2) / 100)
+                stop_price = max(atr_stop, min_stop)
+                log.info(f"[BEAR] ATR stop for {sym}: ${stop_price:.2f}")
+
+        take_profit = price * 1.05  # 5% TP on bear plays
+
+        log.info(f"[BEAR] ✅ BUY {sym} x{qty} @ ~${price:.2f} | score:{score} | stop:${stop_price:.2f}")
+        order, fill_price = place_order(sym, "buy", qty, crypto=False, estimated_price=price)
+
+        if not order or not fill_price:
+            log.warning(f"[BEAR] ORDER FAILED for {sym}")
+            continue
+
+        now_ts = datetime.now().isoformat()
+        actual_stop = fill_price * (1 - stop_pct / 100)
+        if _use_atr and bars and len(bars) >= 16:
+            _atr_val2 = calc_atr(bars, period=14)
+            if _atr_val2 and _atr_val2 > 0:
+                actual_stop = max(fill_price - (_atr_val2 * _atr_mult),
+                                  fill_price * (1 - (stop_pct * 2) / 100))
+
+        st.positions[sym] = {
+            "qty": qty, "entry_price": fill_price,
+            "stop_price": actual_stop, "highest_price": fill_price,
+            "take_profit_price": take_profit,
+            "entry_date": datetime.now().date().isoformat(),
+            "entry_ts": now_ts, "days_held": 0,
+            "signal_score": score, "entry_breakdown": f"Bear play score:{score}",
+            "_atr_entry": None,
+        }
+        st.daily_spend += trade_val
+        st.trades_today += 1
+        st.trades.insert(0, {
+            "symbol": sym, "side": "BUY", "qty": qty,
+            "price": fill_price, "pnl": None, "reason": "Bear Signal",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "entry_ts": now_ts, "score": score,
+        })
+        log.info(f"[BEAR] Position opened: {sym} x{qty} @ ${fill_price:.2f} | stop:${actual_stop:.2f}")
+
+    st.running = False
+
+
 def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
     """Run a scan cycle for an international market (ASX or FTSE)."""
     if not market_open_fn(): return
@@ -1139,14 +1305,19 @@ def main():
         if smallcap_pool["symbols"] and is_market_open():
             run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
 
+    # ── Thread 7: Bear discipline (60s — inverse ETFs on BEAR days) ──
+    def _bear_thread():
+        run_bear_cycle(bear_state)
+
     # Start all trading threads as daemons
     trading_threads = [
-        ("US-Swing",   _us_stocks_thread,  60),
+        ("US-Swing",    _us_stocks_thread,   60),
         ("Crypto-Swing", _crypto_swing_thread, 60),
-        ("FTSE",       _ftse_thread,        60),
-        ("ASX",        _asx_thread,         60),
-        ("Intraday",   _intraday_thread,    30),
-        ("Smallcap",   _smallcap_thread,   120),
+        ("FTSE",        _ftse_thread,         60),
+        ("ASX",         _asx_thread,          60),
+        ("Intraday",    _intraday_thread,     30),
+        ("Smallcap",    _smallcap_thread,    120),
+        ("Bear",        _bear_thread,         60),
     ]
     for name, fn, interval in trading_threads:
         t = threading.Thread(target=_run_thread, args=(name, fn, interval), daemon=True, name=name)
@@ -1199,7 +1370,8 @@ def main():
                 snap = {}
                 for label, st in [("Stock", state), ("Crypto", crypto_state),
                                    ("SmCap", smallcap_state), ("ID", intraday_state),
-                                   ("CrypID", crypto_intraday_state), ("ASX", asx_state), ("FTSE", ftse_state)]:
+                                   ("CrypID", crypto_intraday_state), ("ASX", asx_state),
+                                   ("FTSE", ftse_state), ("Bear", bear_state)]:
                     for sym, pos in st.positions.items():
                         snap[sym] = {**pos, "_type": label, "_live": cfg.live_prices.get(sym)}
                 with open("/home/alphabot/app/positions.json", "w") as _f:
@@ -1318,7 +1490,7 @@ def main():
                             place_order(sym, "sell", pos["qty"], crypto=True, estimated_price=pos["entry_price"])
                         state.positions.clear()
                         crypto_state.positions.clear()
-                        for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state]:
+                        for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, bear_state]:
                             st.shutoff = True
                         circuit_breaker["active"] = True
                         circuit_breaker["reason"] = f"PANIC: Portfolio -{abs(drawdown_pct):.1f}% today"
@@ -1326,10 +1498,11 @@ def main():
 
             # Near-miss + regime updates
             update_near_miss_prices()
-            if not IS_LIVE or is_market_open():
+            _is_weekend = datetime.utcnow().weekday() >= 5
+            if not _is_weekend and (not IS_LIVE or is_market_open()):
                 update_market_regime()
                 check_circuit_breaker()
-            update_crypto_regime()
+            update_crypto_regime()  # crypto runs 24/7 including weekends
 
             # Weekly Binance watchlist refresh (Monday 9am ET)
             et_now = datetime.now(ZoneInfo("America/New_York"))
