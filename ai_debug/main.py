@@ -2562,10 +2562,11 @@ function submitPin() {{
     }} else {{
       closePin();
       if (d.reload) {{
-        // Agent is restarting — show countdown then reload
-        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;font-family:JetBrains Mono,monospace;background:#0a0a0f;color:#f59e0b"><div style="font-size:22px;font-weight:700">🔄 Agent Restarting...</div><div id="cd" style="font-size:48px;font-weight:800;color:#fff">' + d.reload + '</div><div style="color:#94a3b8">Page will reload automatically</div></div>';
+        var lbl = d.reload_label || '🔄 Restarting...';
+        var dst = d.reload_url || BASE+'/';
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;font-family:JetBrains Mono,monospace;background:#0a0a0f;color:#f59e0b"><div style="font-size:22px;font-weight:700">' + lbl + '</div><div id="cd" style="font-size:48px;font-weight:800;color:#fff">' + d.reload + '</div><div style="color:#94a3b8">Page will reload automatically</div></div>';
         let secs = d.reload;
-        const iv = setInterval(() => {{ secs--; const el = document.getElementById('cd'); if(el) el.textContent = secs; if(secs <= 0) {{ clearInterval(iv); window.location.href = BASE+'/'; }} }}, 1000);
+        const iv = setInterval(() => {{ secs--; const el = document.getElementById('cd'); if(el) el.textContent = secs; if(secs <= 0) {{ clearInterval(iv); window.location.href = dst; }} }}, 1000);
       }} else {{
         window.location.href = BASE+'/maintenance?msg=' + encodeURIComponent(d.message || 'Done');
       }}
@@ -2703,13 +2704,13 @@ async def maintenance_action(request: Request):
             _log_agent(f"Manual restart: bot — {'OK' if running else 'FAILED'}")
             status = "ok" if running else "error"
             msg = "✅ Bot restarted successfully — trading resumed." if running else f"🔴 Bot restart may have failed — check Termius.\n{out}"
-            return JR({"status": status, "message": msg})
+            return JR({"status": status, "message": msg, "reload": 8, "reload_label": "🤖 Bot Restarting...", "reload_url": BASE + "/maintenance"})
 
         elif action == "restart-dashboard":
             out = run_cmd("systemctl restart alphabot-dashboard", timeout=15)
             time.sleep(3)
             _log_agent("Manual restart: dashboard")
-            return JR({"status": "ok", "message": "✅ Dashboard restarted. Reload :8080 in a few seconds."})
+            return JR({"status": "ok", "message": "✅ Dashboard restarted.", "reload": 6, "reload_label": "📊 Dashboard Restarting...", "reload_url": BASE + "/maintenance"})
 
         elif action == "restart-agent":
             # Restart self — schedule it so we can return the response first
