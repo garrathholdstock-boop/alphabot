@@ -152,7 +152,10 @@ def _load_status():
     global _status_cache
     try:
         with open("/home/alphabot/app/status.json") as f:
-            _status_cache = json.load(f)
+            data = json.load(f)
+        # Only update cache if we got real data — never cache empty results
+        if data and data.get("account"):
+            _status_cache = data
     except:
         pass
     return _status_cache
@@ -2112,7 +2115,9 @@ function pinAction(path,label){{
   if(status)status.textContent='Sending...';
   fetch(path+'?pin='+encodeURIComponent(pin),{{method:'POST'}})
   .then(r=>r.json()).then(d=>{{
-    if(status)status.textContent=d.status==='wrong_pin'?'❌ Wrong PIN':'✅ Done';
+    if(d.status==='wrong_pin'){{if(status)status.textContent='❌ Wrong PIN';return;}}
+    if(status)status.textContent='✅ Done — reloading...';
+    setTimeout(()=>location.reload(),1500);
   }}).catch(()=>{{if(status)status.textContent='❌ Error';}});
 }}
 </script>
@@ -2757,7 +2762,9 @@ function pinAction(path,label){{
   if(status)status.textContent='Sending...';
   fetch(path+'?pin='+encodeURIComponent(pin),{{method:'POST'}})
   .then(r=>r.json()).then(d=>{{
-    if(status)status.textContent=d.status==='wrong_pin'?'❌ Wrong PIN':'✅ Done';
+    if(d.status==='wrong_pin'){{if(status)status.textContent='❌ Wrong PIN';return;}}
+    if(status)status.textContent='✅ Done — reloading...';
+    setTimeout(()=>location.reload(),1500);
   }}).catch(()=>{{if(status)status.textContent='❌ Error';}});
 }}
 </script>
@@ -2969,7 +2976,9 @@ function pinAction(path,label){{
   if(status)status.textContent='Sending...';
   fetch(path+'?pin='+encodeURIComponent(pin),{{method:'POST'}})
   .then(r=>r.json()).then(d=>{{
-    if(status)status.textContent=d.status==='wrong_pin'?'❌ Wrong PIN':'✅ Done';
+    if(d.status==='wrong_pin'){{if(status)status.textContent='❌ Wrong PIN';return;}}
+    if(status)status.textContent='✅ Done — reloading...';
+    setTimeout(()=>location.reload(),1500);
   }}).catch(()=>{{if(status)status.textContent='❌ Error';}});
 }}
 </script>
