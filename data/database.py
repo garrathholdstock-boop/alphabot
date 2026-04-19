@@ -194,9 +194,57 @@ def init_db():
         created_at   TEXT DEFAULT (datetime('now'))
     )""")
 
+    # Bot status snapshot — replaces status.json, survives restarts
+    c.execute("""CREATE TABLE IF NOT EXISTS bot_status (
+        id         INTEGER PRIMARY KEY CHECK (id = 1),
+        snapshot   TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    )""")
+
     conn.commit()
     conn.close()
     return True
+
+
+# ═══════════════════════════════════════════════════════════════
+# BOT STATUS SNAPSHOT — replaces status.json, survives restarts
+# ═══════════════════════════════════════════════════════════════
+def db_write_status(snapshot: dict) -> bool:
+    """Write bot status snapshot to DB (upsert, always row id=1)."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO bot_status (id, snapshot, updated_at)
+            VALUES (1, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+                snapshot   = excluded.snapshot,
+                updated_at = excluded.updated_at
+        """, (_json.dumps(snapshot, default=str),))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        try: conn.close()
+        except: pass
+        return False
+
+
+def db_read_status() -> dict:
+    """Read latest bot status snapshot from DB. Returns {} if none yet."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT snapshot FROM bot_status WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return _json.loads(row[0])
+        return {}
+    except:
+        return {}
 
 
 # ═══════════════════════════════════════════════════════════════
