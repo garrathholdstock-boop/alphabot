@@ -11,7 +11,7 @@ AlphaBot Debug Agent v8
 """
 
 from fastapi import FastAPI, Form, Response, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 import os, subprocess, sqlite3, json, anthropic, base64, html, re, uuid
 import threading, time, requests, logging
 from datetime import datetime, timezone, timedelta
