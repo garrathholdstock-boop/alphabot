@@ -2859,7 +2859,7 @@ async def refresh_smallcaps():
     from fastapi.responses import JSONResponse as JR
     try:
         import anthropic as _ac
-        client = _ac.Anthropic()
+        client = _ac.Anthropic(api_key=CLAUDE_API_KEY)
 
         prompt = """You are AlphaBot's smallcap research assistant. Today is """ + datetime.now(PARIS).strftime("%Y-%m-%d") + """.
 
