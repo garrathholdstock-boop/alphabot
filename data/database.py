@@ -201,9 +201,64 @@ def init_db():
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
+    # Smallcap watchlists — written by Refresh Small Caps, read on bot startup
+    c.execute("""CREATE TABLE IF NOT EXISTS smallcap_watchlists (
+        id         INTEGER PRIMARY KEY CHECK (id = 1),
+        us         TEXT NOT NULL DEFAULT '[]',
+        ftse       TEXT NOT NULL DEFAULT '[]',
+        asx        TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT DEFAULT (datetime('now'))
+    )""")
+
     conn.commit()
     conn.close()
     return True
+
+
+# ═══════════════════════════════════════════════════════════════
+# SMALLCAP WATCHLISTS — DB-backed, written by agent Refresh button
+# ═══════════════════════════════════════════════════════════════
+def db_write_smallcap_watchlists(us: list, ftse: list, asx: list) -> bool:
+    """Write smallcap watchlists to DB (upsert, always row id=1)."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO smallcap_watchlists (id, us, ftse, asx, updated_at)
+            VALUES (1, ?, ?, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+                us = excluded.us, ftse = excluded.ftse,
+                asx = excluded.asx, updated_at = excluded.updated_at
+        """, (_json.dumps(us), _json.dumps(ftse), _json.dumps(asx)))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        try: conn.close()
+        except: pass
+        return False
+
+
+def db_read_smallcap_watchlists() -> dict:
+    """Read smallcap watchlists from DB. Returns None if not yet written."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT us, ftse, asx, updated_at FROM smallcap_watchlists WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return {
+                "us":   _json.loads(row[0]),
+                "ftse": _json.loads(row[1]),
+                "asx":  _json.loads(row[2]),
+                "updated_at": row[3],
+            }
+        return None
+    except:
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════
