@@ -2966,16 +2966,23 @@ async def download_file(name: str = ""):
 # LIVE BOT LOG — true live feed, polls every 3s, no page reload
 # ═══════════════════════════════════════════════════════════════
 @app.get("/log/lines")
-async def log_lines(since_line: int = 0):
-    """Return new log lines from screen buffer."""
+async def log_lines(since_byte: int = 0):
+    """Return new log lines using byte position — reliable across restarts."""
     try:
-        subprocess.run(["/usr/bin/screen", "-S", "alphabot", "-X", "hardcopy", "-h", "/tmp/scr.txt"], capture_output=True)
-        with open("/tmp/scr.txt", "r", errors="replace") as f:
-            all_lines = [l.rstrip() for l in f.readlines() if l.strip()]
-        new_lines = all_lines[since_line:] if since_line < len(all_lines) else []
-        return JSONResponse({"lines": new_lines, "next_line": len(all_lines)})
+        if not os.path.exists(LOG_PATH):
+            return JSONResponse({"lines": [], "next_byte": 0})
+        file_size = os.path.getsize(LOG_PATH)
+        if since_byte >= file_size:
+            return JSONResponse({"lines": [], "next_byte": file_size})
+        with open(LOG_PATH, "r", errors="replace") as f:
+            f.seek(since_byte)
+            raw = f.read()
+        # Filter out uvicorn HTTP access log lines — only show bot logs
+        lines = [l.rstrip() for l in raw.splitlines()
+                 if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+        return JSONResponse({"lines": lines, "next_byte": file_size})
     except Exception as e:
-        return JSONResponse({"lines": [], "next_line": since_line, "error": str(e)})
+        return JSONResponse({"lines": [], "next_byte": since_byte, "error": str(e)})
 
 
 @app.get("/log", response_class=HTMLResponse)
@@ -3059,7 +3066,7 @@ function colourLine(line) {{
 
 function poll() {{
   if (paused) return;
-  fetch(BASE + '/log/lines?since_line=' + nextByte)
+  fetch(BASE + '/log/lines?since_byte=' + nextByte)
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.lines && d.lines.length > 0) {{
@@ -3076,7 +3083,7 @@ function poll() {{
         }}
         if (autoScroll) wrap.scrollTop = wrap.scrollHeight;
       }}
-      nextByte = d.next_line || nextByte;
+      nextByte = d.next_byte || nextByte;
       document.getElementById('status').textContent = 'Live · ' + new Date().toLocaleTimeString();
     }})
     .catch(function() {{
