@@ -1451,7 +1451,8 @@ def main():
                     },
                     "candidates": {
                         "us": state.candidates[:50],
-                        "crypto": crypto_intraday_state.candidates[:50],
+                        "crypto_id": crypto_intraday_state.candidates[:50],
+                        "crypto_swing": crypto_state.candidates[:50],
                         "asx": asx_state.candidates[:50],
                         "ftse": ftse_state.candidates[:50],
                         "smallcap": smallcap_state.candidates[:50],
