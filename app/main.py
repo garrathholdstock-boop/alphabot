@@ -1485,6 +1485,11 @@ def main():
                     except: pass
 
                 total_pv    = ibkr_pv + binance_pv
+                # Persist last known good portfolio value for dashboard fallback
+                try:
+                    with open(os.path.join(_os.path.dirname(__file__), "..", "last_portfolio.json"), "w") as _pf:
+                        json.dump({"total_pv": total_pv, "ibkr_pv": ibkr_pv, "binance_pv": binance_pv, "ts": time.time()}, _pf)
+                except: pass
                 crypto_base = binance_pv if binance_pv > 0 else ibkr_pv * 0.20
 
                 cfg.MAX_DAILY_LOSS         = total_pv * cfg.MAX_DAILY_LOSS_PCT / 100
