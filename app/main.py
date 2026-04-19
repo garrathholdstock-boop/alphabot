@@ -41,12 +41,14 @@ from core.config import (
     INTRADAY_EMA_SLOW, INTRADAY_RSI_LIMIT, INTRADAY_VOL_RATIO,
     SMALLCAP_MIN_PRICE, SMALLCAP_MAX_PRICE,
     NEWS_API_KEY,
-    state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, asx_state, ftse_state,
+    state, crypto_state, smallcap_state, smallcap_asx_state, smallcap_ftse_state,
+    intraday_state, crypto_intraday_state, asx_state, ftse_state,
     asx_state, ftse_state, bear_state,
     global_risk, perf, kill_switch, circuit_breaker,
     market_regime, crypto_regime, asx_regime, ftse_regime, news_state, near_miss_tracker,
     exchange_stops, account_info, smallcap_pool,
     CRYPTO_WATCHLIST, US_WATCHLIST, ASX_WATCHLIST, FTSE_WATCHLIST, BEAR_WATCHLIST,
+    US_SMALLCAP_WATCHLIST, FTSE_SMALLCAP_WATCHLIST, ASX_SMALLCAP_WATCHLIST,
     _state_lock,
     MAX_DAILY_LOSS_PCT, MAX_DAILY_SPEND_PCT, MAX_EXPOSURE_PCT,
     DAILY_PROFIT_TARGET_PCT, MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT,
@@ -96,47 +98,20 @@ except ImportError:
 
 
 # ── Small cap pool management ─────────────────────────────────
-def refresh_smallcap_pool():
-    global smallcap_pool
-    log.info("[SMALLCAP] Refreshing small cap pool...")
-    try:
-        candidates = [{"symbol": s} for s in US_WATCHLIST]
-        log.info(f"[SMALLCAP] {len(candidates)} candidates from US_WATCHLIST")
-        scored = []
-        checked = 0
-        for asset in candidates:
-            sym = asset.get("symbol","")
-            if not sym or sym in US_WATCHLIST: continue
-            bars = fetch_bars(sym)
-            if not bars or len(bars) < 10: continue
-            price = bars[-1]["c"]
-            if not (SMALLCAP_MIN_PRICE <= price <= SMALLCAP_MAX_PRICE): continue
-            volumes = [b["v"] for b in bars]
-            avg_vol = sum(volumes[-10:]) / min(10, len(volumes))
-            if avg_vol < 50000: continue
-            closes   = [b["c"] for b in bars]
-            momentum = (closes[-1] - closes[-5]) / closes[-5] * 100 if len(closes) >= 5 else 0
-            sc       = avg_vol * (1 + abs(momentum) / 100)
-            scored.append({"symbol": sym, "price": price, "avg_vol": avg_vol, "momentum": momentum, "score": sc})
-            checked += 1
-            if checked >= 300: break
-            time.sleep(0.1)
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        from core.config import SMALLCAP_POOL_SIZE
-        pool = [s["symbol"] for s in scored[:SMALLCAP_POOL_SIZE]]
-        smallcap_pool["symbols"]          = pool
-        smallcap_pool["last_refresh"]     = datetime.now().strftime("%Y-%m-%d %H:%M")
-        smallcap_pool["last_refresh_day"] = datetime.now().date()
-        log.info(f"[SMALLCAP] Pool refreshed: {len(pool)} stocks | Top 5: {pool[:5]}")
-    except Exception as e:
-        log.error(f"[SMALLCAP] Pool refresh error: {e}")
-
-def should_refresh_smallcap():
-    from core.config import SMALLCAP_REFRESH_DAYS
-    if not smallcap_pool["symbols"]: return True
-    if not smallcap_pool["last_refresh_day"]: return True
-    days_since = (datetime.now().date() - smallcap_pool["last_refresh_day"]).days
-    return days_since >= SMALLCAP_REFRESH_DAYS
+def update_smallcap_watchlists(us=None, ftse=None, asx=None):
+    """Update smallcap watchlists — called on startup and by agent Refresh Small Caps."""
+    import core.config as _cfg
+    if us:
+        smallcap_pool["us"]   = us
+        _cfg.US_SMALLCAP_WATCHLIST[:] = us
+    if ftse:
+        smallcap_pool["ftse"] = ftse
+        _cfg.FTSE_SMALLCAP_WATCHLIST[:] = ftse
+    if asx:
+        smallcap_pool["asx"]  = asx
+        _cfg.ASX_SMALLCAP_WATCHLIST[:] = asx
+    smallcap_pool["last_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    log.info(f"[SMALLCAP] Watchlists updated | US:{len(smallcap_pool['us'])} FTSE:{len(smallcap_pool['ftse'])} ASX:{len(smallcap_pool['asx'])}")
 
 
 # ── Intraday position manager ─────────────────────────────────
@@ -583,19 +558,30 @@ def run_cycle(watchlist, st, crypto=False):
 
 
 # ── Small cap cycle ───────────────────────────────────────────
-def run_cycle_smallcap(watchlist, st):
+def run_cycle_smallcap(watchlist, st, market="us"):
+    """Smallcap cycle — works for US, FTSE, and ASX markets.
+    market: 'us' | 'ftse' | 'asx'
+    """
     st.check_reset()
     if st.shutoff: return
-    if not is_market_open(): return
+    if kill_switch["active"]: return
+    if is_loss_streak_paused(): return
+
+    # Market-appropriate open check
+    if market == "us"   and not is_market_open(): return
+    if market == "ftse" and not is_ftse_open(): return
+    if market == "asx"  and not is_asx_open(): return
     if market_regime["mode"] == "BEAR":
-        log.info("[SMALLCAP] BEAR MODE — pausing all small cap buys")
+        log.info(f"[SMALLCAP_{market.upper()}] BEAR MODE — pausing buys")
         return
 
+    label = f"SMALLCAP_{market.upper()}"
     st.running    = True
     st.last_cycle = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
     st.cycle_count += 1
-    log.info(f"[SMALLCAP] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Pool: {len(watchlist)} stocks")
+    log.info(f"[{label}] Cycle {st.cycle_count} | P&L: ${st.daily_pnl:+.2f} | Pool: {len(watchlist)}")
 
+    # ── Manage existing positions ──
     for sym, pos in list(st.positions.items()):
         live = fetch_latest_price(sym)
         if not live: continue
@@ -607,14 +593,17 @@ def run_cycle_smallcap(watchlist, st):
                 pos["stop_price"] = new_stop
         pct    = ((live - pos["entry_price"]) / pos["entry_price"]) * 100
         reason = None
-        if live <= pos["stop_price"]:   reason = f"Stop-Loss ({pct:.1f}%)"
-        elif live >= pos.get("take_profit_price", pos["entry_price"] * 1.05): reason = f"Take-Profit (+{pct:.1f}%)"
-        elif pos.get("days_held", 0) >= cfg.MAX_HOLD_DAYS: reason = "Max Hold"
+        if live <= pos["stop_price"]:
+            reason = f"Stop-Loss ({pct:.1f}%)"
+        elif live >= pos.get("take_profit_price", pos["entry_price"] * 1.05):
+            reason = f"Take-Profit (+{pct:.1f}%)"
+        elif pos.get("days_held", 0) >= cfg.MAX_HOLD_DAYS:
+            reason = "Max Hold"
         if reason:
             pnl      = (live - pos["entry_price"]) * pos["qty"]
             entry_ts = pos.get("entry_ts")
-            hold_hours = round((now - datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")) if datetime.fromisoformat(entry_ts).tzinfo is None else now - datetime.fromisoformat(entry_ts)).total_seconds() / 3600, 1) if entry_ts else None
-            log.info(f"[SMALLCAP] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
+            hold_hours = round((now - (datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")) if datetime.fromisoformat(entry_ts).tzinfo is None else datetime.fromisoformat(entry_ts))).total_seconds() / 3600, 1) if entry_ts else None
+            log.info(f"[{label}] SELL {sym} @ ${live:.4f} | {reason} | P&L:${pnl:+.2f}")
             place_order(sym, "sell", pos["qty"])
             del st.positions[sym]
             st.daily_pnl += pnl
@@ -623,16 +612,17 @@ def run_cycle_smallcap(watchlist, st):
                 "time": now.strftime("%H:%M:%S"), "hold_hours": hold_hours})
             db_record_trade(sym, "SELL", pos["qty"], live, pnl,
                 pos.get("signal_score"), None, None, hold_hours, reason, "", "stock",
-                discipline="stock_swing",
+                discipline=f"smallcap_{market}",
                 exit_category=("STOP" if "Stop" in reason else "TP" if "Take-Profit" in reason else "MAXHOLD"))
             if st.daily_pnl <= -MAX_DAILY_LOSS: st.shutoff = True; break
     if st.shutoff: st.running = False; return
 
+    # ── Scan for new signals ──
     results = []
     for sym in watchlist:
-        if sym in news_state["skip_list"]: continue
+        if sym in news_state.get("skip_list", {}): continue
         bars = fetch_bars(sym)
-        if not bars: continue
+        if not bars or len(bars) < 15: continue
         closes  = [b["c"] for b in bars]
         volumes = [b["v"] for b in bars]
         price   = closes[-1]
@@ -642,19 +632,23 @@ def run_cycle_smallcap(watchlist, st):
         avg_vol   = sum(volumes[-10:]) / min(10, len(volumes))
         vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
         signal, e9, e21, rsi = get_signal_smallcap(closes, volumes)
+        sig_score = score_signal(sym, price, change, rsi, vol_ratio, closes, bars=bars)
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": e9, "sma21": e21, "rsi": rsi,
-            "vol_ratio": vol_ratio, "smallcap": True})
+            "vol_ratio": vol_ratio, "score": sig_score, "smallcap": True})
 
-    results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
+    results.sort(key=lambda x: (-x.get("score", 0), {"BUY":0,"HOLD":1,"SELL":2}.get(x["signal"], 1)))
     st.candidates = results
-    buys = sum(1 for r in results if r["signal"] == "BUY")
-    log.info(f"[SMALLCAP] {buys} BUY signals from {len(results)} scanned")
+    buys = sum(1 for r in results if r["signal"] == "BUY" and r.get("score", 0) >= MIN_SIGNAL_SCORE)
+    log.info(f"[{label}] {buys} qualified BUY / {len(results)} scanned")
 
+    # ── Open new positions (max 2 per market to leave room for other disciplines) ──
+    SMALLCAP_MAX_POS = 2
     pos_count = len(st.positions)
     for s in results:
         if s["signal"] != "BUY": continue
-        if pos_count >= MAX_POSITIONS: break
+        if s.get("score", 0) < MIN_SIGNAL_SCORE: continue
+        if pos_count >= SMALLCAP_MAX_POS: break
         if s["symbol"] in st.positions: continue
         if st.daily_pnl >= DAILY_PROFIT_TARGET: break
         if total_exposure(st) >= MAX_PORTFOLIO_EXPOSURE: break
@@ -663,7 +657,7 @@ def run_cycle_smallcap(watchlist, st):
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
         stop_price        = s["price"] * (1 - SMALLCAP_STOP_LOSS / 100)
         take_profit_price = s["price"] * (1 + TAKE_PROFIT_PCT / 100)
-        log.info(f"[SMALLCAP] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} = ${trade_val:.0f}")
+        log.info(f"[{label}] BUY {s['symbol']} @ ${s['price']:.4f} x{qty} = ${trade_val:.0f} score:{s['score']:.1f}")
         order, fill_price = place_order(s["symbol"], "buy", qty, estimated_price=s["price"])
         if order:
             now_str = datetime.now().isoformat()
@@ -672,20 +666,24 @@ def run_cycle_smallcap(watchlist, st):
                 "take_profit_price": take_profit_price,
                 "entry_date": datetime.now().date().isoformat(),
                 "entry_ts": now_str, "days_held": 0,
-                "signal_score": s.get("score", sig_score)}
+                "signal_score": s["score"]}
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
                 "price": fill_price, "pnl": None, "reason": "Signal",
                 "time": datetime.now().strftime("%H:%M:%S"), "entry_ts": now_str})
+            db_record_trade(s["symbol"], "BUY", qty, fill_price, None,
+                s["score"], None, None, None, "Signal", "", "stock",
+                discipline=f"smallcap_{market}")
             pos_count += 1
 
+    # ── Signal-based sells ──
     for s in results:
         if s["signal"] != "SELL" or s["symbol"] not in st.positions: continue
         pos = st.positions[s["symbol"]]
         pnl = (s["price"] - pos["entry_price"]) * pos["qty"]
         entry_ts = pos.get("entry_ts")
         hold_hours = round((datetime.now(ZoneInfo("UTC")) - (datetime.fromisoformat(entry_ts) if datetime.fromisoformat(entry_ts).tzinfo else datetime.fromisoformat(entry_ts).replace(tzinfo=ZoneInfo("UTC")))).total_seconds() / 3600, 1) if entry_ts else None
-        log.info(f"[SMALLCAP] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
+        log.info(f"[{label}] SELL {s['symbol']} @ ${s['price']:.4f} P&L:${pnl:+.2f}")
         place_order(s["symbol"], "sell", pos["qty"])
         del st.positions[s["symbol"]]
         st.daily_pnl += pnl
@@ -694,7 +692,7 @@ def run_cycle_smallcap(watchlist, st):
             "time": datetime.now().strftime("%H:%M:%S"), "hold_hours": hold_hours})
         db_record_trade(s["symbol"], "SELL", pos["qty"], s["price"], pnl,
             pos.get("signal_score"), None, None, hold_hours, "Signal", "", "stock",
-            discipline="stock_swing")
+            discipline=f"smallcap_{market}")
         if st.daily_pnl >= DAILY_PROFIT_TARGET: st.shutoff = True; break
         if st.daily_pnl <= -MAX_DAILY_LOSS:     st.shutoff = True; break
     st.running = False
@@ -1326,24 +1324,33 @@ def main():
         if not (USE_BINANCE and time.time() < (cfg._binance_ban_until + 300)):
             run_crypto_intraday_cycle(CRYPTO_WATCHLIST, crypto_intraday_state)
 
-    # ── Thread 6: Smallcap cycle (120s) ──
-    def _smallcap_thread():
-        if smallcap_pool["symbols"] and is_market_open():
-            run_cycle_smallcap(smallcap_pool["symbols"], smallcap_state)
+    # ── Thread 6: Smallcap US (120s) ──
+    def _smallcap_us_thread():
+        run_cycle_smallcap(smallcap_pool["us"], smallcap_state, market="us")
 
-    # ── Thread 7: Bear discipline (60s — inverse ETFs on BEAR days) ──
+    # ── Thread 7: Smallcap FTSE (120s) ──
+    def _smallcap_ftse_thread():
+        run_cycle_smallcap(smallcap_pool["ftse"], smallcap_ftse_state, market="ftse")
+
+    # ── Thread 8: Smallcap ASX (120s) ──
+    def _smallcap_asx_thread():
+        run_cycle_smallcap(smallcap_pool["asx"], smallcap_asx_state, market="asx")
+
+    # ── Thread 9: Bear discipline (60s — inverse ETFs on BEAR days) ──
     def _bear_thread():
         run_bear_cycle(bear_state)
 
     # Start all trading threads as daemons
     trading_threads = [
-        ("US-Swing",    _us_stocks_thread,   60),
-        ("Crypto-Swing", _crypto_swing_thread, 60),
-        ("FTSE",        _ftse_thread,         60),
-        ("ASX",         _asx_thread,          60),
-        ("Intraday",    _intraday_thread,     30),
-        ("Smallcap",    _smallcap_thread,    120),
-        ("Bear",        _bear_thread,         60),
+        ("US-Swing",       _us_stocks_thread,      60),
+        ("Crypto-Swing",   _crypto_swing_thread,   60),
+        ("FTSE",           _ftse_thread,            60),
+        ("ASX",            _asx_thread,             60),
+        ("Intraday",       _intraday_thread,        30),
+        ("Smallcap-US",    _smallcap_us_thread,    120),
+        ("Smallcap-FTSE",  _smallcap_ftse_thread,  120),
+        ("Smallcap-ASX",   _smallcap_asx_thread,   120),
+        ("Bear",           _bear_thread,            60),
     ]
     for name, fn, interval in trading_threads:
         t = threading.Thread(target=_run_thread, args=(name, fn, interval), daemon=True, name=name)
@@ -1437,6 +1444,8 @@ def main():
                         "asx": {"cycle": asx_state.cycle_count, "pnl": asx_state.daily_pnl, "positions": len(asx_state.positions), "running": asx_state.running, "shutoff": asx_state.shutoff},
                         "ftse": {"cycle": ftse_state.cycle_count, "pnl": ftse_state.daily_pnl, "positions": len(ftse_state.positions), "running": ftse_state.running, "shutoff": ftse_state.shutoff},
                         "smallcap": {"cycle": smallcap_state.cycle_count, "pnl": smallcap_state.daily_pnl, "positions": len(smallcap_state.positions), "running": smallcap_state.running, "shutoff": smallcap_state.shutoff},
+                        "smallcap_ftse": {"cycle": smallcap_ftse_state.cycle_count, "pnl": smallcap_ftse_state.daily_pnl, "positions": len(smallcap_ftse_state.positions), "running": smallcap_ftse_state.running, "shutoff": smallcap_ftse_state.shutoff},
+                        "smallcap_asx": {"cycle": smallcap_asx_state.cycle_count, "pnl": smallcap_asx_state.daily_pnl, "positions": len(smallcap_asx_state.positions), "running": smallcap_asx_state.running, "shutoff": smallcap_asx_state.shutoff},
                         "intraday": {"cycle": intraday_state.cycle_count, "pnl": intraday_state.daily_pnl, "positions": len(intraday_state.positions), "running": intraday_state.running, "shutoff": intraday_state.shutoff},
                         "crypto_id": {"cycle": crypto_intraday_state.cycle_count, "pnl": crypto_intraday_state.daily_pnl, "positions": len(crypto_intraday_state.positions), "running": crypto_intraday_state.running, "shutoff": crypto_intraday_state.shutoff},
                     },
@@ -1446,6 +1455,8 @@ def main():
                         "asx": asx_state.candidates[:50],
                         "ftse": ftse_state.candidates[:50],
                         "smallcap": smallcap_state.candidates[:50],
+                        "smallcap_ftse": smallcap_ftse_state.candidates[:50],
+                        "smallcap_asx": smallcap_asx_state.candidates[:50],
                     },
                     "kill_switch": kill_switch,
                     "circuit_breaker": circuit_breaker,
@@ -1538,11 +1549,6 @@ def main():
                 if fresh:
                     CRYPTO_WATCHLIST[:] = fresh
                     log.info(f"[BINANCE] Watchlist updated: {len(CRYPTO_WATCHLIST)} coins")
-
-            # Small cap pool refresh
-            if should_refresh_smallcap() and is_market_open():
-                log.info("[SMALLCAP] Starting pool refresh in background...")
-                threading.Thread(target=refresh_smallcap_pool, daemon=True).start()
 
             # Morning news scan at 9:00am ET
             et = datetime.now(ZoneInfo("America/New_York"))
