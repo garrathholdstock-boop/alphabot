@@ -2966,14 +2966,22 @@ async def download_file(name: str = ""):
 # LIVE BOT LOG — true live feed, polls every 3s, no page reload
 # ═══════════════════════════════════════════════════════════════
 @app.get("/log/lines")
-async def log_lines(since_byte: int = 0):
-    """Return new log lines using byte position — reliable across restarts."""
+async def log_lines(since_byte: int = 0, tail: int = 0):
+    """Return new log lines using byte position — reliable across restarts.
+    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from."""
     try:
         if not os.path.exists(LOG_PATH):
             return JSONResponse({"lines": [], "next_byte": 0})
         file_size = os.path.getsize(LOG_PATH)
         if since_byte >= file_size:
             return JSONResponse({"lines": [], "next_byte": file_size})
+        # On first load (since_byte==0), jump to end and return last tail lines
+        if since_byte == 0 and tail > 0:
+            with open(LOG_PATH, "r", errors="replace") as f:
+                all_lines = [l.rstrip() for l in f.readlines()
+                             if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+            lines = all_lines[-tail:]
+            return JSONResponse({"lines": lines, "next_byte": file_size})
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             raw = f.read()
@@ -3066,7 +3074,7 @@ function colourLine(line) {{
 
 function poll() {{
   if (paused) return;
-  fetch(BASE + '/log/lines?since_byte=' + nextByte)
+  fetch(BASE + '/log/lines?since_byte=' + nextByte + (nextByte === 0 ? '&tail=200' : ''))
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.lines && d.lines.length > 0) {{
