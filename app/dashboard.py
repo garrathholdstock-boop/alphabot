@@ -148,13 +148,22 @@ def _db_recent_trades(limit=10):
 _status_cache = {}
 
 def _load_status():
-    """Load status.json written by bot process every cycle."""
+    """Load bot status — DB-backed (survives restarts), JSON as fallback."""
     global _status_cache
+    # Try DB first — always has last good snapshot
+    try:
+        from data.database import db_read_status
+        data = db_read_status()
+        if data and data.get("candidates"):
+            _status_cache = data
+            return _status_cache
+    except:
+        pass
+    # Fallback to JSON file
     try:
         with open("/home/alphabot/app/status.json") as f:
             data = json.load(f)
-        # Only update cache if we got real data — never cache empty results
-        if data and data.get("account"):
+        if data and data.get("candidates"):
             _status_cache = data
     except:
         pass
