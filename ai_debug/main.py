@@ -2928,11 +2928,21 @@ Replace any tickers above with better ones you find from your web search. Keep e
         if not us or not ftse or not asx:
             return JR({"status": "error", "message": f"Incomplete lists returned: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}"})
 
-        # Write to DB — atomic, survives restarts, no file corruption risk
-        from data.database import db_write_smallcap_watchlists
-        ok = db_write_smallcap_watchlists(us, ftse, asx)
-        if not ok:
-            return JR({"status": "error", "message": "DB write failed — lists not saved"})
+        # Write directly to DB via sqlite3 — no import path issues
+        try:
+            import sqlite3 as _sq, json as _js
+            conn = _sq.connect(DB_PATH)
+            conn.execute("""
+                INSERT INTO smallcap_watchlists (id, us, ftse, asx, updated_at)
+                VALUES (1, ?, ?, ?, datetime('now'))
+                ON CONFLICT(id) DO UPDATE SET
+                    us=excluded.us, ftse=excluded.ftse,
+                    asx=excluded.asx, updated_at=excluded.updated_at
+            """, (_js.dumps(us), _js.dumps(ftse), _js.dumps(asx)))
+            conn.commit()
+            conn.close()
+        except Exception as dbe:
+            return JR({"status": "error", "message": f"DB write failed: {dbe}"})
 
         _log_agent(f"Smallcap refresh: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}")
 
