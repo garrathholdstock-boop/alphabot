@@ -85,7 +85,7 @@ from data.analytics import (
 from data.database import (
     db_record_trade, db_record_near_miss, db_record_report,
     db_record_rotation, db_get_pending_rotations, db_update_rotation_followup,
-    db_write_status,
+    db_write_status, db_write_smallcap_watchlists, db_read_smallcap_watchlists,
 )
 from app.notifications import (
     tg, tg_trade_buy, tg_trade_sell, tg_hot_miss, tg_critical,
@@ -102,6 +102,21 @@ except ImportError:
 def update_smallcap_watchlists(us=None, ftse=None, asx=None):
     """Update smallcap watchlists — called on startup and by agent Refresh Small Caps."""
     import core.config as _cfg
+    # On startup with no args, try loading from DB first
+    if us is None and ftse is None and asx is None:
+        try:
+            saved = db_read_smallcap_watchlists()
+            if saved and saved.get("us"):
+                us   = saved["us"]
+                ftse = saved["ftse"]
+                asx  = saved["asx"]
+                log.info(f"[SMALLCAP] Loaded from DB (updated {saved.get('updated_at','?')}) | US:{len(us)} FTSE:{len(ftse)} ASX:{len(asx)}")
+            else:
+                log.info("[SMALLCAP] No DB watchlists found — using config defaults")
+                return
+        except Exception as e:
+            log.warning(f"[SMALLCAP] DB load failed: {e} — using config defaults")
+            return
     if us:
         smallcap_pool["us"]   = us
         _cfg.US_SMALLCAP_WATCHLIST[:] = us
@@ -1246,6 +1261,9 @@ def main():
     log.info("=" * 50)
 
     log.info("AlphaBot bot process starting — dashboard runs separately on port 8080")
+
+    # Load smallcap watchlists from DB (if Refresh Small Caps has been run)
+    update_smallcap_watchlists()
 
     # Verify IBKR connection
     cfg.account_info = ibkr_get_account() or {}
