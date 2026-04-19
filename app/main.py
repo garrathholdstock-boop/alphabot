@@ -1141,6 +1141,9 @@ def run_bear_cycle(st):
 def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
     """Run a scan cycle for an international market (ASX or FTSE)."""
     if not market_open_fn(): return
+    if kill_switch["active"]: return
+    if st.shutoff: return
+    if is_loss_streak_paused(): return
     if regime["mode"] == "BEAR": return
     discipline = "asx_swing" if label == "ASX" else "ftse_swing"
     results = []
@@ -1170,6 +1173,9 @@ def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
     for s in buys[:10]:
         sym = s["symbol"]
         if sym in st.positions: continue
+        if len(st.positions) >= MAX_POSITIONS: break
+        if all_positions_count() >= MAX_TOTAL_POSITIONS: break
+        if st.daily_pnl >= DAILY_PROFIT_TARGET: break
         qty = max(1, int(MAX_TRADE_VALUE / s["price"]))
         try:
             place_order._last_score = s["score"]
