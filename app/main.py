@@ -671,7 +671,8 @@ def run_cycle_smallcap(watchlist, st):
                 "stop_price": stop_price, "highest_price": fill_price,
                 "take_profit_price": take_profit_price,
                 "entry_date": datetime.now().date().isoformat(),
-                "entry_ts": now_str, "days_held": 0}
+                "entry_ts": now_str, "days_held": 0,
+                "signal_score": s.get("score", sig_score)}
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
                 "price": fill_price, "pnl": None, "reason": "Signal",
@@ -764,7 +765,7 @@ def run_intraday_cycle(watchlist, st):
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
         stop_price = s["price"] * (1 - INTRADAY_STOP_LOSS / 100)
         tp_price   = s["price"] * (1 + INTRADAY_TAKE_PROFIT / 100)
-        log.info(f"[INTRADAY] BUY {s['symbol']} @ ${s['price']:.2f} x{qty}")
+        log.info(f"[INTRADAY] BUY {s['symbol']} @ ${s['price']:.2f} x{qty} score:{s.get('score','?')}/10")
         order, fill_price = place_order(s["symbol"], "buy", qty, estimated_price=s["price"])
         if order:
             actual_stop = fill_price * (1 - INTRADAY_STOP_LOSS / 100)
@@ -776,7 +777,8 @@ def run_intraday_cycle(watchlist, st):
                 "stop_price": actual_stop, "highest_price": fill_price,
                 "take_profit_price": actual_tp,
                 "entry_date": datetime.now().date().isoformat(),
-                "entry_ts": now_ts, "days_held": 0}
+                "entry_ts": now_ts, "days_held": 0,
+                "signal_score": s.get("score", sig_score)}
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
                 "price": fill_price, "pnl": None, "reason": "[ID]Signal",
@@ -863,7 +865,7 @@ def run_crypto_intraday_cycle(watchlist, st):
         if st.daily_spend + trade_val > MAX_DAILY_SPEND: continue
         stop_price = s["price"] * (1 - CRYPTO_INTRADAY_SL / 100)
         tp_price   = s["price"] * (1 + CRYPTO_INTRADAY_TP / 100)
-        log.info(f"[CRYPTO_ID] BUY {s['symbol']} @ ${s['price']:.4f}")
+        log.info(f"[CRYPTO_ID] BUY {s['symbol']} @ ${s['price']:.4f} score:{s.get('score','?')}/10")
         order, fill_price = place_order(s["symbol"], "buy", qty, crypto=True, estimated_price=s["price"])
         if order:
             actual_stop = fill_price * (1 - CRYPTO_INTRADAY_SL / 100)
@@ -873,7 +875,8 @@ def run_crypto_intraday_cycle(watchlist, st):
                 "stop_price": actual_stop, "highest_price": fill_price,
                 "take_profit_price": actual_tp,
                 "entry_date": datetime.now().date().isoformat(),
-                "entry_ts": now_ts, "days_held": 0}
+                "entry_ts": now_ts, "days_held": 0,
+                "signal_score": s.get("score", sig_score)}
             st.daily_spend += trade_val
             st.trades.insert(0, {"symbol": s["symbol"], "side": "BUY", "qty": qty,
                 "price": fill_price, "pnl": None, "reason": "[ID]Signal",
