@@ -19,6 +19,16 @@ from zoneinfo import ZoneInfo
 from urllib.request import urlopen
 from urllib.error import URLError
 
+# ── Load .env automatically — works regardless of how screen starts ──
+_ENV_PATH = "/home/alphabot/app/.env"
+if os.path.exists(_ENV_PATH):
+    with open(_ENV_PATH) as _ef:
+        for _line in _ef:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 app = FastAPI()
 BASE = os.environ.get("ROOT_PATH", "")
 SESSIONS = {}
