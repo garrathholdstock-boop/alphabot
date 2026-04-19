@@ -4,6 +4,16 @@ Runs as a standalone uvicorn service on port 8080.
 Independent of the main bot process — never deadlocks.
 """
 
+# Self-load .env so this process works correctly after VPS reboot / systemd start
+import os as _os, pathlib as _pathlib
+_env_path = _pathlib.Path("/home/alphabot/app/.env")
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            _os.environ.setdefault(_k.strip(), _v.strip())
+
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 import json, sqlite3, html as html_module
