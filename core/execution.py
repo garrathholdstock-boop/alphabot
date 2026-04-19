@@ -70,6 +70,19 @@ def _get_client_id():
 def get_ib():
     """Get or create IB connection for the current thread.
     Each thread maintains its own dedicated connection."""
+    import datetime as _dt
+    # IBKR does weekend maintenance — don't attempt connections Sat/Sun
+    # ASX opens Sunday 1am Paris (Sat 11pm UTC) so allow connections from 11pm UTC Saturday
+    now_utc = _dt.datetime.utcnow()
+    weekday = now_utc.weekday()  # 5=Sat, 6=Sun
+    hour_utc = now_utc.hour
+    is_weekend_maintenance = (
+        (weekday == 5 and hour_utc < 23) or  # Saturday before 11pm UTC
+        (weekday == 6 and hour_utc < 23)     # Sunday before 11pm UTC (Mon ASX opens)
+    )
+    if is_weekend_maintenance:
+        return None
+
     thread_name = _threading.current_thread().name
     client_id = _get_client_id()
 
@@ -123,11 +136,6 @@ def record_api_success():
     api_health["last_success"] = datetime.now().isoformat()
 
 def record_api_failure(source="ibkr"):
-    # On weekends IBKR TWS is offline for maintenance — expected, not a kill-switch event.
-    # Log the failure but don't count it or trip the kill switch.
-    if datetime.utcnow().weekday() >= 5:
-        log.debug(f"[API] {source} failure ignored — weekend maintenance window")
-        return
     key = f"{source}_fails"
     api_health[key] = api_health.get(key, 0) + 1
     total_fails = api_health.get("ibkr_fails", 0) + api_health.get("data_fails", 0)
