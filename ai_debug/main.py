@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 from urllib.request import urlopen
 from urllib.error import URLError
 
-app = FastAPI()
+app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
 SESSIONS = {}
 
 # ── Config ────────────────────────────────────────────────────
@@ -1317,7 +1317,8 @@ def get_db_display():
 def store(data):
     sid = str(uuid.uuid4())[:8]
     SESSIONS[sid] = data
-    return RedirectResponse(f"/r/{sid}", status_code=303)
+    _base = os.environ.get("ROOT_PATH", "")
+    return RedirectResponse(f"{_base}/r/{sid}", status_code=303)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1327,6 +1328,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
            error="", question="", history="", complete=False, compressed=False,
            step_count=0, ctx_updated=False, audit_result="", **kwargs):
 
+    BASE = os.environ.get("ROOT_PATH", "")  # e.g. "" direct, or "/agent" via Nginx
     screen_status = run_cmd("/usr/bin/screen -ls")
     bot_ok = SCREEN_NAME in screen_status
     sc = "#00ff88" if bot_ok else "#ef4444"
@@ -1364,12 +1366,12 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
               <div style="font-size:13px;color:#475569;margin-bottom:8px;">{html.escape(item['detail'][:100])}</div>
               {briefing_html}
               <div style="display:flex;gap:8px;">
-                <form method="POST" action="/queue/investigate" style="flex:1">
+                <form method="POST" action="{BASE}/queue/investigate" style="flex:1">
                   <input type="hidden" name="item_id" value="{item['id']}">
                   <input type="hidden" name="event_type" value="{item['event_type']}">
                   <button type="submit" style="width:100%;background:#7c3aed;border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:700;padding:7px;cursor:pointer;">🔍 INVESTIGATE</button>
                 </form>
-                <form method="POST" action="/queue/dismiss" style="flex:1">
+                <form method="POST" action="{BASE}/queue/dismiss" style="flex:1">
                   <input type="hidden" name="item_id" value="{item['id']}">
                   <button type="submit" style="width:100%;background:#1e1e2e;border:1px solid #475569;border-radius:6px;color:#64748b;font-size:11px;font-weight:700;padding:7px;cursor:pointer;">✕ DISMISS</button>
                 </form>
@@ -1464,7 +1466,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       </div>
       <div style="max-height:320px;overflow-y:auto;">{feed_rows}</div>
     </div>
-    <form id="event-inv-form" method="POST" action="/event/investigate" style="display:none;">
+    <form id="event-inv-form" method="POST" action="{BASE}/event/investigate" style="display:none;">
       <input type="hidden" id="eif-type" name="event_type">
       <input type="hidden" id="eif-msg" name="message">
       <input type="hidden" id="eif-detail" name="detail">
@@ -1518,7 +1520,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
         # Feedback box
         agent_html += f"""<div style="background:#0d0d1a;border:1px solid #f59e0b;border-radius:10px;padding:14px;margin-bottom:12px;">
           <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#f59e0b;text-transform:uppercase;margin-bottom:8px;">Your Feedback</div>
-          <form method="POST" action="/feedback">
+          <form method="POST" action="{BASE}/feedback">
             <input type="hidden" name="question" value="{html.escape(question)}">
             <input type="hidden" name="history" value="{html.escape(history)}">
             <input type="hidden" name="step_count" value="{step_count}">
@@ -1545,7 +1547,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
                 </div>
                 <pre id="cmdbox" style="color:#00ff88;margin:0;font-size:12px;white-space:pre-wrap;">{html.escape(command)}</pre>
               </div>
-              <form method="POST" action="/approve">
+              <form method="POST" action="{BASE}/approve">
                 <input type="hidden" name="command" value="{html.escape(command)}">
                 <input type="hidden" name="question" value="{html.escape(question)}">
                 <input type="hidden" name="history" value="{html.escape(history)}">
@@ -1586,24 +1588,24 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
     ]
     quick = ""
     for label, q in quick_btns:
-        quick += f"""<form method="POST" action="/ask" style="display:inline-block;margin:3px;">
+        quick += f"""<form method="POST" action="{BASE}/ask" style="display:inline-block;margin:3px;">
           <input type="hidden" name="question" value="{html.escape(q)}">
           <button type="submit" style="background:#111118;border:1px solid #1e1e2e;color:#94a3b8;font-family:'JetBrains Mono',monospace;font-size:13px;padding:10px 14px;border-radius:6px;cursor:pointer;">{label}</button>
         </form>"""
 
-    quick += """<form method="POST" action="/audit" style="display:inline-block;margin:3px;">
+    quick += """<form method="POST" action="{BASE}/audit" style="display:inline-block;margin:3px;">
       <button type="submit" style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔍 Full Audit</button>
     </form>"""
 
-    quick += """<form method="POST" action="/morning" style="display:inline-block;margin:3px;">
+    quick += """<form method="POST" action="{BASE}/morning" style="display:inline-block;margin:3px;">
       <button type="submit" style="background:#0a0a1a;border:2px solid #7c3aed;color:#a78bfa;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">☀️ Morning Brief</button>
     </form>"""
 
-    quick += """<a href="/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
+    quick += """<a href="{_base}/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
       <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
     </a>"""
 
-    quick += """<a href="/log" style="display:inline-block;margin:3px;text-decoration:none;">
+    quick += """<a href="{_base}/log" style="display:inline-block;margin:3px;text-decoration:none;">
       <button style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">📋 Live Log</button>
     </a>"""
 
@@ -1619,7 +1621,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 
     err_html = f'<div style="background:#2d0a0a;border:1px solid #ef4444;border-radius:8px;padding:12px;margin-bottom:12px;color:#ef4444;font-size:13px;">{html.escape(error)}</div>' if error else ""
 
-    file_btns = "".join([f"""<form method="POST" action="/file" style="display:inline-block;margin:2px;">
+    file_btns = "".join([f"""<form method="POST" action="{BASE}/file" style="display:inline-block;margin:2px;">
       <input type="hidden" name="filename" value="{f}">
       <input type="hidden" name="question" value="{html.escape(question)}">
       <input type="hidden" name="history" value="{html.escape(history)}">
@@ -1635,6 +1637,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- auto-refresh via JS to avoid Safari form interference -->
 <title>AlphaBot Agent v8</title>
+<script>var BASE="{BASE}";</script>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
@@ -1695,7 +1698,7 @@ details summary {{ cursor:pointer; }}
 <!-- Ask Claude -->
 <div class="card">
   <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Ask Claude</div>
-  <form method="POST" action="/ask" id="ask-form" onsubmit="showThinking()">
+  <form method="POST" action="{BASE}/ask" id="ask-form" onsubmit="showThinking()">
     <textarea name="question" id="ask-q" placeholder="What's going on with the bot? Why aren't there any trades?...">{html.escape(question) if not complete and not audit_result else ''}</textarea>
     <button type="submit" id="ask-btn" class="ask-btn">ASK CLAUDE →</button>
   </form>
@@ -1787,7 +1790,7 @@ async def result(sid: str, response: Response):
 @app.post("/ask")
 async def ask(question: str = Form("")):
     if not question.strip():
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(os.environ.get("ROOT_PATH","")+"/", status_code=303)
     log, screen, db = get_bot_context()
     context = load_context()
     messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM: {question}"}]
@@ -1806,7 +1809,7 @@ async def ask(question: str = Form("")):
 async def feedback(feedback: str = Form(""), question: str = Form(""),
                    history: str = Form(""), step_count: int = Form(0)):
     if not feedback.strip():
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(os.environ.get("ROOT_PATH","")+"/", status_code=303)
     steps = dec(history)
     steps.append({"role": "user", "content": f"USER FEEDBACK (prioritise this): {feedback}"})
     step_count += 1
@@ -1932,7 +1935,7 @@ async def queue_dismiss(item_id: str = Form("")):
             if item["id"] == item_id:
                 item["status"] = "dismissed"
                 break
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(os.environ.get("ROOT_PATH","")+"/", status_code=303)
 
 
 @app.post("/event/investigate")
@@ -2147,6 +2150,7 @@ def _do_monday_check():
 def _build_maintenance_page(msg=None, msg_type="ok", backup_result=None,
                              monday_result=None, backups=None):
     """Build the full maintenance page HTML."""
+    _base = os.environ.get("ROOT_PATH","")
     now = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
 
     msg_html = ""
@@ -2326,7 +2330,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Downloads <code>alphabot.db</code> directly to your device — all trade history,
         near-misses, intelligence runs. Off-site backup. Run weekly.
       </div>
-      <a href="/maintenance/export-db" style="text-decoration:none">
+      <a href="{_base}/maintenance/export-db" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff">
           📤 Download Database
         </button>
@@ -2340,7 +2344,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Put up a dodgy file? Pick the file, see all dated backups for it,
         choose the version you want. PIN required. Never touches the database.
       </div>
-      <a href="/maintenance/revert" style="text-decoration:none">
+      <a href="{_base}/maintenance/revert" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
           ↩ Revert a File
         </button>
@@ -2368,7 +2372,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Download all app files as a zip — or pick individual files.
         Use this to get a local copy of the current VPS state, especially before rebuilds.
       </div>
-      <a href="/maintenance/download" style="text-decoration:none">
+      <a href="{_base}/maintenance/download" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
           📥 Download Files
         </button>
@@ -2409,7 +2413,7 @@ var _pendingAction = null;
 
 function runAction(action) {{
   if (action === 'disk') {{
-    fetch('/maintenance/disk')
+    fetch(BASE+'/maintenance/disk')
       .then(r => r.json())
       .then(d => {{
         document.getElementById('disk-result').style.display = 'block';
@@ -2417,7 +2421,7 @@ function runAction(action) {{
       }});
     return;
   }}
-  window.location.href = '/maintenance/run?action=' + action;
+  window.location.href = BASE+'/maintenance/run?action=' + action;
 }}
 
 function pinAction(action, label) {{
@@ -2436,7 +2440,7 @@ function closePin() {{
 
 function submitPin() {{
   var pin = document.getElementById('pin-input').value;
-  fetch('/maintenance/action', {{
+  fetch(BASE+'/maintenance/action', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{pin: pin, action: _pendingAction}})
@@ -2445,7 +2449,7 @@ function submitPin() {{
       document.getElementById('pin-error').style.display = 'block';
     }} else {{
       closePin();
-      window.location.href = '/maintenance?msg=' + encodeURIComponent(d.message || 'Done');
+      window.location.href = BASE+'/maintenance?msg=' + encodeURIComponent(d.message || 'Done');
     }}
   }});
 }}
@@ -2605,6 +2609,7 @@ async def export_db():
 
 @app.get("/maintenance/revert", response_class=HTMLResponse)
 async def revert_page(file: str = None, msg: str = None):
+    _base = os.environ.get("ROOT_PATH","")
     """Pick a file, see its dated backups, choose one to restore."""
     import html as _html
     now_str    = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
@@ -2655,7 +2660,7 @@ async def revert_page(file: str = None, msg: str = None):
         sel = "rgba(255,204,0,0.6)" if f_name == file else "#1e1e2e"
         col = "#ffcc00" if f_name == file else "#94a3b8"
         file_btns += (
-            f'<a href="/maintenance/revert?file={_html.escape(f_name)}" style="text-decoration:none">'
+            f'<a href="{_base}/maintenance/revert?file={_html.escape(f_name)}" style="text-decoration:none">'
             f'<div style="background:#111118;border:1px solid {sel};border-radius:8px;'
             f'padding:10px 14px;font-size:12px;color:{col};cursor:pointer;'
             f'font-family:\'JetBrains Mono\',monospace">{_html.escape(f_name)}</div></a>'
@@ -2681,7 +2686,7 @@ td{{padding:8px;border-bottom:1px solid #0f0f18}}
     <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#ef4444">↩ Revert a File</div>
     <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now_str}</div>
   </div>
-  <a href="/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
+  <a href="{_base}/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
 </div>
 {msg_html}
 <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:18px;margin-bottom:16px">
@@ -2710,11 +2715,11 @@ var _d=null,_f=null;
 function doRevert(d,f){{_d=d;_f=f;document.getElementById('pl').textContent='Revert '+f+' to backup from '+d+'?';document.getElementById('pe').style.display='none';document.getElementById('pi').value='';document.getElementById('po').classList.add('v');document.getElementById('pi').focus();}}
 function closePin(){{document.getElementById('po').classList.remove('v');}}
 function submitPin(){{
-  fetch('/maintenance/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+  fetch(BASE+'/maintenance/action',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{pin:document.getElementById('pi').value,action:'revert-file:'+_d+':'+_f}})}})
   .then(r=>r.json()).then(d=>{{
     if(d.status==='wrong_pin'){{document.getElementById('pe').style.display='block';}}
-    else{{closePin();window.location.href='/maintenance/revert?msg='+encodeURIComponent(d.message||'Done');}}
+    else{{closePin();window.location.href=BASE+'/maintenance/revert?msg='+encodeURIComponent(d.message||'Done');}}
   }});
 }}
 </script>
@@ -2726,6 +2731,7 @@ function submitPin(){{
 # ═══════════════════════════════════════════════════════════════
 @app.get("/maintenance/download", response_class=HTMLResponse)
 async def download_page():
+    _base = os.environ.get("ROOT_PATH","")
     """Pick individual files to download, or grab the whole app as a zip."""
     import html as _html
     now_str = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
@@ -2745,7 +2751,7 @@ async def download_page():
                 f'<td style="color:#94a3b8;font-size:12px">{_html.escape(src_rel)}</td>'
                 f'<td style="color:#00aaff">{size_str}</td>'
                 f'<td style="color:#94a3b8;font-size:12px">{modified}</td>'
-                f'<td><a href="/maintenance/download/file?name={_html.escape(dst_name)}" '
+                f'<td><a href="{_base}/maintenance/download/file?name={_html.escape(dst_name)}" '
                 f'style="text-decoration:none">'
                 f'<button style="background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);'
                 f'border-radius:6px;color:#aa88ff;font-size:12px;padding:5px 12px;cursor:pointer">'
@@ -2770,7 +2776,7 @@ td{{padding:8px;border-bottom:1px solid #0f0f18;vertical-align:middle}}
     <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#aa88ff">📥 Download from VPS</div>
     <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now_str}</div>
   </div>
-  <a href="/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
+  <a href="{_base}/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
 </div>
 
 <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.25);border-radius:12px;padding:20px;margin-bottom:20px">
@@ -2780,7 +2786,7 @@ td{{padding:8px;border-bottom:1px solid #0f0f18;vertical-align:middle}}
     Does not include <code style="color:#ffcc00">.env</code>.
     Great to grab before a major rebuild session.
   </div>
-  <a href="/maintenance/download/zip" style="text-decoration:none">
+  <a href="{_base}/maintenance/download/zip" style="text-decoration:none">
     <button style="background:rgba(170,136,255,0.15);border:1px solid rgba(170,136,255,0.4);border-radius:8px;
                    color:#aa88ff;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;
                    padding:12px 28px;cursor:pointer">
@@ -2833,6 +2839,7 @@ async def download_file(name: str = ""):
 # ═══════════════════════════════════════════════════════════════
 @app.get("/log", response_class=HTMLResponse)
 async def live_log_page(lines: int = 200, screen: str = "alphabot"):
+    _base = os.environ.get("ROOT_PATH","")
     """Scrollable live bot log — works on iPad, auto-refreshes every 10s."""
     now_str = datetime.now(PARIS).strftime("%H:%M:%S Paris")
 
@@ -2862,7 +2869,7 @@ async def live_log_page(lines: int = 200, screen: str = "alphabot"):
     tabs = ""
     for s in screens:
         active = "border-color:rgba(0,255,136,0.6);color:#00ff88" if s == screen else "border-color:#1e1e2e;color:#94a3b8"
-        tabs += (f'<a href="/log?screen={s}&lines={lines}" style="text-decoration:none">'
+        tabs += (f'<a href="{_base}/log?screen={s}&lines={lines}" style="text-decoration:none">'
                  f'<button style="background:#111118;border:1px solid;{active};border-radius:6px;'
                  f'padding:6px 14px;font-size:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">'
                  f'{s}</button></a> ')
@@ -2871,7 +2878,7 @@ async def live_log_page(lines: int = 200, screen: str = "alphabot"):
     line_opts = ""
     for n in [50, 100, 200, 500]:
         sel = "color:#00ff88;font-weight:700" if n == lines else "color:#94a3b8"
-        line_opts += (f'<a href="/log?screen={screen}&lines={n}" '
+        line_opts += (f'<a href="{_base}/log?screen={screen}&lines={n}" '
                       f'style="text-decoration:none;{sel};font-size:12px;margin-right:10px">{n}</a>')
 
     return HTMLResponse(f"""<!DOCTYPE html>
