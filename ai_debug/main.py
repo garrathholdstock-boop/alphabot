@@ -1593,19 +1593,19 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
           <button type="submit" style="background:#111118;border:1px solid #1e1e2e;color:#94a3b8;font-family:'JetBrains Mono',monospace;font-size:13px;padding:10px 14px;border-radius:6px;cursor:pointer;">{label}</button>
         </form>"""
 
-    quick += """<form method="POST" action="{BASE}/audit" style="display:inline-block;margin:3px;">
+    quick += f"""<form method="POST" action="{BASE}/audit" style="display:inline-block;margin:3px;">
       <button type="submit" style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔍 Full Audit</button>
     </form>"""
 
-    quick += """<form method="POST" action="{BASE}/morning" style="display:inline-block;margin:3px;">
+    quick += f"""<form method="POST" action="{BASE}/morning" style="display:inline-block;margin:3px;">
       <button type="submit" style="background:#0a0a1a;border:2px solid #7c3aed;color:#a78bfa;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">☀️ Morning Brief</button>
     </form>"""
 
-    quick += """<a href="{_base}/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
+    quick += f"""<a href="{_base}/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
       <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
     </a>"""
 
-    quick += """<a href="{_base}/log" style="display:inline-block;margin:3px;text-decoration:none;">
+    quick += f"""<a href="{_base}/log" style="display:inline-block;margin:3px;text-decoration:none;">
       <button style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">📋 Live Log</button>
     </a>"""
 
