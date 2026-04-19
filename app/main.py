@@ -1464,6 +1464,11 @@ def main():
                     "circuit_breaker": circuit_breaker,
                     "global_risk": {k: str(v) if hasattr(v, "strftime") else v for k, v in global_risk.items()},
                     "perf": {k: v for k, v in perf.items() if k != "sharpe_daily"},
+                    "sizing": {
+                        "total_pv": float(cfg.account_info.get("portfolio_value", 0)) + cfg._binance_balance_cache.get("value", 0.0) if cfg.account_info else cfg._binance_balance_cache.get("value", 0.0),
+                        "ibkr_pv":  float(cfg.account_info.get("portfolio_value", 0)) if cfg.account_info else 0.0,
+                        "binance_pv": cfg._binance_balance_cache.get("value", 0.0),
+                    },
                 }
                 with open("/home/alphabot/app/status.json", "w") as _sf:
                     json.dump(status_snap, _sf, default=str)
