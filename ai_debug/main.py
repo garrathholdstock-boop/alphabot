@@ -2412,7 +2412,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
 
 <script>
 var _pendingAction = null;
-var BASE = "{BASE}";
+var BASE = "{_base}";
 
 function runAction(action) {{
   if (action === 'disk') {{
@@ -2841,44 +2841,31 @@ async def download_file(name: str = ""):
 
 
 # ═══════════════════════════════════════════════════════════════
-# LIVE BOT LOG — scrollable, auto-refresh, works on iPad
+# LIVE BOT LOG — true live feed, polls every 3s, no page reload
 # ═══════════════════════════════════════════════════════════════
+@app.get("/log/lines")
+async def log_lines(since_byte: int = 0):
+    """Return new log lines since a given byte offset. Used by live log JS poller."""
+    try:
+        if not os.path.exists(LOG_PATH):
+            return JSONResponse({"lines": [], "next_byte": 0, "size": 0})
+        size = os.path.getsize(LOG_PATH)
+        if since_byte <= 0 or since_byte > size:
+            # First load — return last 5KB
+            since_byte = max(0, size - 5120)
+        with open(LOG_PATH, "r", errors="replace") as f:
+            f.seek(since_byte)
+            new_text = f.read()
+        lines = [l for l in new_text.split("\n") if l.strip()]
+        return JSONResponse({"lines": lines, "next_byte": size, "size": size})
+    except Exception as e:
+        return JSONResponse({"lines": [], "next_byte": since_byte, "size": 0, "error": str(e)})
+
+
 @app.get("/log", response_class=HTMLResponse)
-async def live_log_page(lines: int = 200, screen: str = "alphabot"):
-    """Scrollable live bot log — works on iPad, auto-refreshes every 10s."""
+async def live_log_page():
+    """True live bot log — polls every 3s, appends new lines without page reload."""
     _base = os.environ.get("ROOT_PATH", "")
-    now_str = datetime.now(PARIS).strftime("%H:%M:%S Paris")
-
-    # Read from the persistent log file — always alphabot.log regardless of tab
-    log_content = run_cmd(f"tail -{lines} {LOG_PATH}", timeout=10)
-    if not log_content.strip():
-        log_content = run_cmd(f"tail -{lines} /home/alphabot/app/alphabot.log", timeout=10)
-
-    # Colour-code log lines
-    coloured = ""
-    for line in log_content.split("\n"):
-        if any(x in line for x in ["ERROR", "FAILED", "CRASH", "P1", "kill switch"]):
-            col = "#ef4444"
-        elif any(x in line for x in ["WARNING", "WARN", "⚠"]):
-            col = "#f59e0b"
-        elif any(x in line for x in ["✅", "BUY", "SELL", "FILLED", "profit"]):
-            col = "#00ff88"
-        elif any(x in line for x in ["SKIP", "HOLD", "near_miss"]):
-            col = "#94a3b8"
-        elif any(x in line for x in ["INTELLIGENCE", "ATR", "ROTATE", "STALE", "BEAR"]):
-            col = "#aa88ff"
-        else:
-            col = "#cbd5e1"
-        safe = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        coloured += f'<div style="color:{col};padding:1px 0;line-height:1.5">{safe}</div>'
-
-    # Lines selector
-    line_opts = ""
-    for n in [50, 100, 200, 500]:
-        sel = "color:#00ff88;font-weight:700" if n == lines else "color:#94a3b8"
-        line_opts += (f'<a href="{_base}/log?lines={n}" '
-                      f'style="text-decoration:none;{sel};font-size:12px;margin-right:10px">{n}</a>')
-
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
@@ -2890,49 +2877,112 @@ async def live_log_page(lines: int = 200, screen: str = "alphabot"):
 body{{background:#0a0a0f;color:#e2e8f0;font-family:'JetBrains Mono',monospace;
       font-size:12px;padding:0;margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}}
 #header{{padding:10px 14px;border-bottom:1px solid #1e1e2e;background:#0a0a0f;
-         display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0}}
+         display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}}
 #log-wrap{{flex:1;overflow-y:auto;padding:12px 14px;-webkit-overflow-scrolling:touch}}
-#log-content{{font-size:11px;line-height:1.5;word-break:break-all}}
+#log-content{{font-size:11px;line-height:1.6;word-break:break-all}}
 #footer{{padding:8px 14px;border-top:1px solid #1e1e2e;background:#0a0a0f;
          display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}}
-#countdown{{color:#94a3b8;font-size:11px}}
-.refresh-dot{{width:8px;height:8px;border-radius:50%;background:#00ff88;display:inline-block;animation:pulse 2s infinite}}
-@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:0.3}}}}
+.dot{{width:8px;height:8px;border-radius:50%;background:#00ff88;display:inline-block;animation:pulse 1.5s infinite}}
+@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:0.2}}}}
+.line{{padding:1px 0}}
+.err{{color:#ef4444}}.warn{{color:#f59e0b}}.good{{color:#00ff88}}
+.skip{{color:#94a3b8}}.intel{{color:#aa88ff}}.norm{{color:#cbd5e1}}
+#pause-btn{{background:#111118;border:1px solid #1e1e2e;color:#94a3b8;
+            border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;
+            font-family:'JetBrains Mono',monospace}}
+#pause-btn.paused{{border-color:rgba(245,158,11,0.5);color:#f59e0b}}
 </style>
 </head><body>
-
 <div id="header">
   <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:#00ff88">
     AlphaBot <span style="color:#64748b">Live Log</span>
   </div>
-  <a href="{_base}/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:12px">← Agent</a>
+  <button id="pause-btn" onclick="togglePause()">⏸ Pause</button>
+  <button onclick="clearLog()" style="background:#111118;border:1px solid #1e1e2e;color:#475569;
+    border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace">
+    🗑 Clear
+  </button>
+  <a href="{_base}/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Agent</a>
 </div>
 
 <div id="log-wrap">
-  <div id="log-content">{coloured if coloured else '<div style="color:#475569">No log output yet.</div>'}</div>
+  <div id="log-content"><div class="line norm" style="color:#475569">Connecting to live log...</div></div>
 </div>
 
 <div id="footer">
-  <span class="refresh-dot"></span>
-  <span style="color:#94a3b8;font-size:11px">Auto-refresh every 10s · {now_str} · Last {lines} lines</span>
-  <span style="margin-left:auto;color:#64748b;font-size:11px">Lines: {line_opts}</span>
-  <span id="countdown" style="font-size:11px;color:#475569"></span>
+  <span class="dot"></span>
+  <span id="status" style="color:#94a3b8;font-size:11px">Live · polling every 3s</span>
+  <span style="margin-left:auto;color:#475569;font-size:11px" id="line-count"></span>
 </div>
 
 <script>
-// Auto-scroll to bottom on load
-window.addEventListener('load', function() {{
-  var w = document.getElementById('log-wrap');
-  w.scrollTop = w.scrollHeight;
+var BASE = "{_base}";
+var nextByte = 0;
+var paused = false;
+var lineCount = 0;
+var autoScroll = true;
+
+var wrap = document.getElementById('log-wrap');
+var content = document.getElementById('log-content');
+
+// Detect if user scrolled up — stop auto-scroll
+wrap.addEventListener('scroll', function() {{
+  autoScroll = (wrap.scrollTop + wrap.clientHeight) >= (wrap.scrollHeight - 40);
 }});
 
-// Countdown + auto-refresh every 10s
-var secs = 10;
-var cd = document.getElementById('countdown');
-setInterval(function() {{
-  secs--;
-  if (cd) cd.textContent = 'Refreshing in ' + secs + 's';
-  if (secs <= 0) location.reload();
-}}, 1000);
+function colourLine(line) {{
+  var cls = 'norm';
+  if (/ERROR|FAILED|CRASH|P1|kill switch/.test(line)) cls = 'err';
+  else if (/WARNING|WARN/.test(line)) cls = 'warn';
+  else if (/BUY|SELL|FILLED|profit|✅/.test(line)) cls = 'good';
+  else if (/SKIP|HOLD|near_miss/.test(line)) cls = 'skip';
+  else if (/INTELLIGENCE|ATR|ROTATE|STALE|BEAR/.test(line)) cls = 'intel';
+  var safe = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return '<div class="line ' + cls + '">' + safe + '</div>';
+}}
+
+function poll() {{
+  if (paused) return;
+  fetch(BASE + '/log/lines?since_byte=' + nextByte)
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.lines && d.lines.length > 0) {{
+        // First load — clear placeholder
+        if (nextByte === 0) content.innerHTML = '';
+        var html = d.lines.map(colourLine).join('');
+        content.insertAdjacentHTML('beforeend', html);
+        lineCount += d.lines.length;
+        document.getElementById('line-count').textContent = lineCount + ' lines';
+        // Keep max 1000 lines in DOM to avoid memory issues
+        var all = content.querySelectorAll('.line');
+        if (all.length > 1000) {{
+          for (var i = 0; i < all.length - 1000; i++) all[i].remove();
+        }}
+        if (autoScroll) wrap.scrollTop = wrap.scrollHeight;
+      }}
+      nextByte = d.next_byte || nextByte;
+      document.getElementById('status').textContent = 'Live · ' + new Date().toLocaleTimeString();
+    }})
+    .catch(function() {{
+      document.getElementById('status').textContent = 'Connection error — retrying...';
+    }});
+}}
+
+function togglePause() {{
+  paused = !paused;
+  var btn = document.getElementById('pause-btn');
+  btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  btn.className = paused ? 'paused' : '';
+}}
+
+function clearLog() {{
+  content.innerHTML = '';
+  lineCount = 0;
+  document.getElementById('line-count').textContent = '';
+}}
+
+// Initial load then poll every 3s
+poll();
+setInterval(poll, 3000);
 </script>
 </body></html>""")
