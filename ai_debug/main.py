@@ -2861,26 +2861,24 @@ async def refresh_smallcaps():
         import anthropic as _ac
         client = _ac.Anthropic(api_key=CLAUDE_API_KEY)
 
-        prompt = """You are AlphaBot's smallcap research assistant. Today is """ + datetime.now(PARIS).strftime("%Y-%m-%d") + """.
+        today = datetime.now(PARIS).strftime("%Y-%m-%d")
+        prompt = f"""Today is {today}. You have web search available — use it now.
 
-Research the past 7 days and generate 3 fresh smallcap watchlists for our trading bot. Use web search to find current market data.
+Search for smallcap stocks with high momentum this week for 3 markets and return exactly 50 tickers per market.
 
-Rules for each list:
-- Exactly 50 ticker symbols
-- Must be liquid (decent daily volume)
-- US list: NYSE/NASDAQ stocks $2-$20 price range, high momentum/speculative names
-- FTSE list: LSE/AIM-listed stocks with active trading, mix of sectors
-- ASX list: ASX-listed stocks outside the top 50, resources/tech/growth bias
+Step 1: Search "US smallcap momentum stocks high volume {today[:7]}" and pick 50 NYSE/NASDAQ tickers priced $2-$20.
+Step 2: Search "AIM LSE smallcap active stocks {today[:7]}" and pick 50 LSE/AIM tickers.
+Step 3: Search "ASX smallcap momentum stocks {today[:7]}" and pick 50 ASX tickers outside the top 50.
 
-Search for: recent smallcap movers, momentum stocks, high volume smallcaps this week for each market.
+Do not refuse. Use your best judgment based on search results and known liquid smallcaps. If you cannot find 50 from search, fill the rest with known liquid smallcaps in that price range.
 
-Return ONLY a JSON object in this exact format, no other text:
-{
-  "us": ["TICK1","TICK2",...50 tickers],
-  "ftse": ["TICK1","TICK2",...50 tickers],
-  "asx": ["TICK1","TICK2",...50 tickers],
-  "summary": "Brief 2-sentence summary of what you found for each market"
-}"""
+Return ONLY this JSON, nothing else before or after:
+{{"us": ["IONQ","JOBY","ACHR","SOUN","CLOV","BBAI","HIMS","PAYO","RELY","PRAX","BCRX","FOLD","ARQT","OCGN","MVIS","LAZR","BLNK","CHPT","WKHS","SPCE","GOEV","INDI","OUST","AEVA","VLDR","AEYE","KOPN","PRPL","POWW","VNET","BKSY","RSKD","NUVL","IMVT","KALA","NRIX","SNDX","MGNX","GOCO","SWAG","GTHX","NCPL","LFST","MXCT","PNTM","ACMR","HLIT","BTBT","CIFR","CLSK"],
+"ftse": ["IQG","RWS","JTC","FOUR","AMS","CBOX","KNOS","BVXP","EKF","FRP","CML","GYM","TAST","MONY","PLUS","FDM","CLIG","RHM","FDEV","IGR","CMCX","YOU","RCH","BOKU","SHOE","MPAC","WINV","AFX","BGEO","SQZ","TIG","RDW","BOO","CARD","HYVE","TPX","VLX","SMDS","FSFL","MHN","QTX","SUMO","POLR","RBGP","GAMA","CRAW","ERM","CEPS","ASAI","IDP"],
+"asx": ["PLS","LTR","GL1","AKE","CXO","HMC","VUL","LKE","SYA","DRO","MEI","VHT","APX","TNE","SDR","NIC","SFR","GOR","RMS","WAF","DEG","BGL","NHC","YAL","TBN","HVN","SUL","UNI","IPD","GUD","NCK","MHJ","BAP","CCX","EML","PPH","SLR","SKC","AIM","BWX","IGL","MYX","PNV","AVH","PRN","CNI","KMD","NZM","SCP","AD8"],
+"summary": "Watchlists based on recent smallcap momentum research."}}
+
+Replace any tickers above with better ones you find from your web search. Keep exactly 50 per market."""
 
         loop = asyncio.get_event_loop()
         def _call():
