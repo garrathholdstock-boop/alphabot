@@ -1613,8 +1613,6 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
                   "core/risk.py","data/analytics.py","data/database.py","data/intelligence.py",
                   "ai_debug/main.py","start.sh",".env"]
     cmd_html = ""
-    cmd_html = ""
-    cmd_html = ""
     if cmd_output:
         cmd_html = f"""<div style="background:#0a0a14;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
           <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Output: {html.escape(cmd_run)}</div>
@@ -1747,7 +1745,10 @@ function showThinking() {{
 </div>
 <script>
 // Only auto-refresh on home page, not on result pages
-var _isResult = window.location.pathname.startsWith('/r/');
+var _base = "{BASE}";
+var _isResult = window.location.pathname === (_base+'/') === false &&
+                (window.location.pathname.startsWith('/r/') ||
+                 window.location.pathname.startsWith(_base+'/r/'));
 if (!_isResult) {{
   var _t=60;
   setInterval(function(){{
@@ -2412,6 +2413,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
 
 <script>
 var _pendingAction = null;
+var BASE = "{_base}";
 
 function runAction(action) {{
   if (action === 'disk') {{
