@@ -29,7 +29,7 @@ from core.config import (
     MAX_TRADE_VALUE, MAX_TOTAL_POSITIONS,
     VIX_HIGH_THRESHOLD, VIX_EXTREME, VIX_FEAR_THRESHOLD, BTC_CRASH_PCT,
     BEAR_TICKERS,
-    state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state,
+    state, crypto_state, smallcap_state, smallcap_asx_state, smallcap_ftse_state, intraday_state, crypto_intraday_state,
     asx_state, ftse_state,
     global_risk, perf, kill_switch, circuit_breaker,
     market_regime, crypto_regime, asx_regime, ftse_regime, news_state, smallcap_pool,
@@ -936,7 +936,9 @@ def build_dashboard():
     crypto_swing_scored  = score_candidates(st_candidates.get("crypto_swing", st_candidates.get("crypto", [])))
     asx_scored    = score_candidates(st_candidates.get("asx", []))
     ftse_scored   = score_candidates(st_candidates.get("ftse", []))
-    sc_scored     = score_candidates(st_candidates.get("smallcap", []))
+    sc_scored          = score_candidates(st_candidates.get("smallcap", []))
+    sc_ftse_scored     = score_candidates(st_candidates.get("smallcap_ftse", []))
+    sc_asx_scored      = score_candidates(st_candidates.get("smallcap_asx", []))
 
     # ── READY TO TRADE — traffic light gate rows ──
     def ready_to_trade_rows(scored, color, label, held_syms=set()):
@@ -1186,7 +1188,9 @@ def build_dashboard():
         + build_market_accordion("us","US Stocks","📈","#00aaff", market_open, us_scored, market_open)
         + build_market_accordion("ftse","FTSE","🎩","#cc88ff", ftse_open, ftse_scored, ftse_open)
         + build_market_accordion("asx","ASX","🦘","#ffaa00", asx_open, asx_scored, asx_open)
-        + build_market_accordion("smallcap","Small Cap","📊","#ffcc00", market_open, sc_scored, market_open)
+        + build_market_accordion("smallcap",     "Small Cap US",   "📊","#ffcc00", market_open, sc_scored,      market_open)
+        + build_market_accordion("smallcap_ftse","Small Cap FTSE", "📊","#cc88ff", ftse_open,   sc_ftse_scored, ftse_open)
+        + build_market_accordion("smallcap_asx", "Small Cap ASX",  "📊","#ffaa00", asx_open,    sc_asx_scored,  asx_open)
         + f'</div>'
     )
 
@@ -1386,9 +1390,11 @@ function pinCmd(path,label){{
     <div style="font-size:16px;font-weight:700;color:#ffcc00;margin-bottom:10px">📊 Small Cap</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:14px">
       <div><span style="color:#94a3b8">Status </span><span class="dot" style="background:{'#00ff88' if st_states.get('smallcap',{}).get('running') else ('#ff4466' if st_states.get('smallcap',{}).get('shutoff') else '#ffcc00')}"></span>{_status(st_states.get('smallcap',{}))}</div>
-      <div><span style="color:#94a3b8">Pool </span>{len(smallcap_pool.get('symbols',[]))}</div>
+      <div><span style="color:#94a3b8">Pool </span>{len(smallcap_pool.get('us',[]))}</div>
       <div><span style="color:#94a3b8">Positions </span><b>{st_states.get('smallcap',{}).get('positions',0)}</b></div>
       <div><span style="color:#94a3b8">Cycle </span>#{st_states.get('smallcap',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">FTSE SC </span>{st_states.get('smallcap_ftse',{}).get('positions',0)} pos / #{st_states.get('smallcap_ftse',{}).get('cycle',0)}</div>
+      <div><span style="color:#94a3b8">ASX SC </span>{st_states.get('smallcap_asx',{}).get('positions',0)} pos / #{st_states.get('smallcap_asx',{}).get('cycle',0)}</div>
     </div>
   </div>
   <div class="card" style="border-color:rgba(170,136,255,0.2)">
@@ -2233,7 +2239,7 @@ async def kill(request: Request):
         return JSONResponse({"status": "wrong_pin"})
     kill_switch.update({"active": True, "reason": "Manual kill from dashboard",
                         "activated_at": datetime.now(PARIS).strftime("%H:%M:%S")})
-    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
+    for st in [state, crypto_state, smallcap_state, smallcap_asx_state, smallcap_ftse_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
         st.shutoff = True
     log.warning("[KILL SWITCH] Manual kill activated from dashboard")
     return JSONResponse({"status": "killed"})
@@ -2244,7 +2250,7 @@ async def resume(request: Request):
     if params.get("pin") != KILL_PIN:
         return JSONResponse({"status": "wrong_pin"})
     kill_switch.update({"active": False, "reason": "", "activated_at": None})
-    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
+    for st in [state, crypto_state, smallcap_state, smallcap_asx_state, smallcap_ftse_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
         st.shutoff = False
     log.info("[KILL SWITCH] Resumed from dashboard")
     return JSONResponse({"status": "resumed"})
@@ -2262,7 +2268,7 @@ async def close_all(request: Request):
     state.positions.clear(); crypto_state.positions.clear()
     kill_switch.update({"active": True, "reason": "Close all — liquidated from dashboard",
                         "activated_at": datetime.now(PARIS).strftime("%H:%M:%S")})
-    for st in [state, crypto_state, smallcap_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
+    for st in [state, crypto_state, smallcap_state, smallcap_asx_state, smallcap_ftse_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
         st.shutoff = True
     return JSONResponse({"status": "closed"})
 
