@@ -1610,6 +1610,7 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
     safe_files = ["app/main.py","app/dashboard.py","core/config.py","core/execution.py",
                   "core/risk.py","data/analytics.py","data/database.py","data/intelligence.py",
                   "ai_debug/main.py","start.sh",".env"]
+    cmd_html = ""
     if cmd_output:
         cmd_html = f"""<div style="background:#0a0a14;border:1px solid #1e1e2e;border-radius:10px;padding:14px;margin-bottom:12px;">
           <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Output: {html.escape(cmd_run)}</div>
