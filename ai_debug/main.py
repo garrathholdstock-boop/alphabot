@@ -297,6 +297,17 @@ def analyse_log_patterns(hours=6):
 
 
 def is_bot_running():
+    # Check systemd first (post-migration), fall back to screen session check
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-active", "alphabot"],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.stdout.strip() == "active":
+            return True
+    except Exception:
+        pass
+    # Fallback: screen session (pre-systemd / manual start)
     r = subprocess.run(["/usr/bin/screen", "-ls"], capture_output=True, text=True)
     return SCREEN_NAME in r.stdout
 
@@ -370,24 +381,51 @@ def is_cosmetic(line):
 def auto_restart_bot():
     """Restart bot if down. Returns True if restarted."""
     try:
+        # Try systemd first (post-migration)
+        systemd_check = subprocess.run(
+            ["systemctl", "is-active", "alphabot"],
+            capture_output=True, text=True, timeout=5
+        )
+        use_systemd = True  # always attempt systemd; falls through to screen if not found
+
+        result = subprocess.run(
+            ["systemctl", "restart", "alphabot"],
+            capture_output=True, text=True, timeout=15
+        )
+        time.sleep(5)
+        if is_bot_running():
+            msg = (f"✅ <b>AlphaBot Auto-Restarted</b>\n"
+                   f"Time: {datetime.now(PARIS).strftime('%H:%M Paris')}\n"
+                   f"Status: systemd service confirmed active")
+            send_telegram(msg, "P1")
+            db_log_event("P1", "bot_down", "Bot was down", "Auto-restarted via systemd")
+            auto_fixed_log.insert(0, {
+                "time": datetime.now(PARIS).strftime("%H:%M"),
+                "action": "Bot restarted (systemd)",
+                "result": "✅ Running"
+            })
+            _log_agent("Auto-restarted bot via systemd successfully")
+            return True
+
+        # Fallback: screen + start.sh (pre-systemd)
+        _log_agent("systemd restart did not confirm — falling back to start.sh")
         subprocess.run("pkill -9 -f 'python3 -m app.main'", shell=True, timeout=5)
         subprocess.run("/usr/bin/screen -wipe", shell=True, timeout=5)
         time.sleep(2)
-        subprocess.run(f"bash /home/alphabot/start.sh", shell=True, timeout=10,
-                      cwd=APP_PATH)
+        subprocess.run(f"bash /home/alphabot/start.sh", shell=True, timeout=10, cwd=APP_PATH)
         time.sleep(5)
         if is_bot_running():
             msg = (f"✅ <b>AlphaBot Auto-Restarted</b>\n"
                    f"Time: {datetime.now(PARIS).strftime('%H:%M Paris')}\n"
                    f"Status: Screen session confirmed running")
             send_telegram(msg, "P1")
-            db_log_event("P1", "bot_down", "Bot was down", "Auto-restarted successfully")
+            db_log_event("P1", "bot_down", "Bot was down", "Auto-restarted via start.sh fallback")
             auto_fixed_log.insert(0, {
                 "time": datetime.now(PARIS).strftime("%H:%M"),
-                "action": "Bot restarted",
+                "action": "Bot restarted (start.sh fallback)",
                 "result": "✅ Running"
             })
-            _log_agent("Auto-restarted bot successfully")
+            _log_agent("Auto-restarted bot via start.sh fallback")
             return True
         else:
             send_telegram("🔴 <b>P1 CRITICAL: Bot restart FAILED</b>\nManual intervention required.", "P1")
@@ -2074,13 +2112,34 @@ def _do_monday_check():
     """Run the pre-Monday readiness check. Returns list of (status, message) tuples."""
     checks = []
 
-    # 1. All 3 screens alive?
-    screens = run_cmd("/usr/bin/screen -ls")
-    for name in ["alphabot", "dashboard", "agent"]:
-        if name in screens:
-            checks.append(("✅", f"Screen '{name}' is running"))
-        else:
-            checks.append(("🔴", f"Screen '{name}' is DOWN — restart needed"))
+    # 1. All 3 services alive?
+    service_map = {
+        "alphabot": "alphabot",
+        "alphabot-dashboard": "dashboard",
+        "alphabot-agent": "agent",
+    }
+    for svc, label in service_map.items():
+        try:
+            r = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True, text=True, timeout=5
+            )
+            if r.stdout.strip() == "active":
+                checks.append(("✅", f"Service '{label}' is running (systemd)"))
+            else:
+                # Fallback: check screen
+                screens = run_cmd("/usr/bin/screen -ls")
+                screen_name = "alphabot" if label == "alphabot" else ("dashboard" if label == "dashboard" else "agent")
+                if screen_name in screens:
+                    checks.append(("⚠️", f"Service '{label}' not in systemd but screen session found — systemd not set up yet"))
+                else:
+                    checks.append(("🔴", f"Service '{label}' is DOWN — restart needed"))
+        except Exception:
+            screens = run_cmd("/usr/bin/screen -ls")
+            if label in screens:
+                checks.append(("⚠️", f"Service '{label}': systemd check failed, screen session found"))
+            else:
+                checks.append(("🔴", f"Service '{label}' check failed — may be DOWN"))
 
     # 2. Last log entry recent?
     try:
@@ -2275,7 +2334,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
     <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#f59e0b">🔧 AlphaBot <span style="color:#94a3b8">Maintenance</span></div>
     <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now}</div>
   </div>
-  <a href="/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Back to Agent</a>
+  <a href="{BASE}/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Back to Agent</a>
 </div>
 
 {msg_html}
