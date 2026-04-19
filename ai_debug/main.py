@@ -2892,19 +2892,36 @@ Return ONLY a JSON object in this exact format, no other text:
             )
         response = await loop.run_in_executor(None, _call)
 
-        # Extract text from response
+        # Extract text from all content blocks including tool results
         text = ""
         for block in response.content:
             if hasattr(block, "text"):
                 text += block.text
+            elif hasattr(block, "content") and isinstance(block.content, list):
+                for sub in block.content:
+                    if hasattr(sub, "text"):
+                        text += sub.text
 
-        # Parse JSON
+        # Parse JSON — find the outermost { } containing our keys
         import re
-        json_match = re.search(r'\{[\s\S]*\}', text)
+        json_match = re.search(r'\{\s*"us"\s*:', text)
         if not json_match:
-            return JR({"status": "error", "message": "Could not parse Claude response"})
-
-        data = json.loads(json_match.group())
+            return JR({"status": "error", "message": f"Could not find JSON in response. Got: {text[:200]}"})
+        try:
+            # Find matching closing brace
+            start = json_match.start()
+            depth = 0
+            end = start
+            for i, ch in enumerate(text[start:]):
+                if ch == '{': depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = start + i + 1
+                        break
+            data = json.loads(text[start:end])
+        except Exception as je:
+            return JR({"status": "error", "message": f"JSON parse error: {je}. Text: {text[:300]}"})
         us   = data.get("us", [])[:50]
         ftse = data.get("ftse", [])[:50]
         asx  = data.get("asx", [])[:50]
@@ -2913,26 +2930,11 @@ Return ONLY a JSON object in this exact format, no other text:
         if not us or not ftse or not asx:
             return JR({"status": "error", "message": f"Incomplete lists returned: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}"})
 
-        # Write to config file so it persists across restarts
-        config_path = os.path.join(APP_PATH, "core/config.py")
-        with open(config_path, "r") as f:
-            cfg_txt = f.read()
-
-        def _replace_list(txt, var_name, new_list):
-            pattern = rf"{var_name}\s*=\s*\[[\s\S]*?\]"
-            items = ", ".join(f'"{s}"' for s in new_list)
-            # Format into groups of 10
-            groups = [new_list[i:i+10] for i in range(0, len(new_list), 10)]
-            lines = ",\n    ".join(", ".join(f'"{s}"' for s in g) for g in groups)
-            replacement = f"{var_name} = [\n    {lines},\n]"
-            return re.sub(pattern, replacement, txt, count=1)
-
-        cfg_txt = _replace_list(cfg_txt, "US_SMALLCAP_WATCHLIST", us)
-        cfg_txt = _replace_list(cfg_txt, "FTSE_SMALLCAP_WATCHLIST", ftse)
-        cfg_txt = _replace_list(cfg_txt, "ASX_SMALLCAP_WATCHLIST", asx)
-
-        with open(config_path, "w") as f:
-            f.write(cfg_txt)
+        # Write to DB — atomic, survives restarts, no file corruption risk
+        from data.database import db_write_smallcap_watchlists
+        ok = db_write_smallcap_watchlists(us, ftse, asx)
+        if not ok:
+            return JR({"status": "error", "message": "DB write failed — lists not saved"})
 
         _log_agent(f"Smallcap refresh: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}")
 
