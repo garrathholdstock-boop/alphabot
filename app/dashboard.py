@@ -287,7 +287,18 @@ def build_dashboard():
     st_perf = st_data.get("perf", perf)
 
     acc = st_account
-    port_val = float(acc.get("portfolio_value", 1000000)) if acc else 1000000
+    port_val = float(acc.get("portfolio_value", 0)) if acc else 0
+    if not port_val:
+        # IBKR offline — use last known good value from file
+        try:
+            import os as _os2
+            _pf = _os2.path.join(_os2.path.dirname(__file__), "..", "last_portfolio.json")
+            with open(_pf) as _f:
+                _pd = json.load(_f)
+                port_val = float(_pd.get("total_pv", 0))
+        except: pass
+    if not port_val:
+        port_val = 1000000  # absolute last resort
     portfolio = f"${port_val:,.2f}"
     now_paris = datetime.now(PARIS)
     now_date = now_paris.strftime("%A %d %B %Y")
