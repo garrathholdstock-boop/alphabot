@@ -123,6 +123,11 @@ def record_api_success():
     api_health["last_success"] = datetime.now().isoformat()
 
 def record_api_failure(source="ibkr"):
+    # On weekends IBKR TWS is offline for maintenance — expected, not a kill-switch event.
+    # Log the failure but don't count it or trip the kill switch.
+    if datetime.utcnow().weekday() >= 5:
+        log.debug(f"[API] {source} failure ignored — weekend maintenance window")
+        return
     key = f"{source}_fails"
     api_health[key] = api_health.get(key, 0) + 1
     total_fails = api_health.get("ibkr_fails", 0) + api_health.get("data_fails", 0)
