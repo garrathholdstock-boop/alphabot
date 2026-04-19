@@ -136,6 +136,13 @@ def record_api_success():
     api_health["last_success"] = datetime.now().isoformat()
 
 def record_api_failure(source="ibkr"):
+    # Don't count IBKR failures on weekends — we intentionally block connections
+    if source == "ibkr":
+        import datetime as _dt
+        now_utc = _dt.datetime.utcnow()
+        wd, hr = now_utc.weekday(), now_utc.hour
+        if (wd == 5 and hr < 23) or (wd == 6 and hr < 23):
+            return
     key = f"{source}_fails"
     api_health[key] = api_health.get(key, 0) + 1
     total_fails = api_health.get("ibkr_fails", 0) + api_health.get("data_fails", 0)
