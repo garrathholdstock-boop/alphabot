@@ -213,7 +213,7 @@ def run_cycle(watchlist, st, crypto=False):
             bars = bars_cache[sym]
         else:
             bars = fetch_bars(sym, crypto=crypto)
-        if not bars or len(bars) < 22: continue
+        if not bars or len(bars) < (15 if crypto else 22): continue
 
         closes  = [b["c"] for b in bars]
         volumes = [b.get("v", 0) for b in bars]
@@ -1442,8 +1442,7 @@ def main():
                     },
                     "candidates": {
                         "us": state.candidates[:50],
-                        "crypto_id": crypto_intraday_state.candidates[:50],
-                        "crypto_swing": crypto_state.candidates[:50],
+                        "crypto": crypto_intraday_state.candidates[:50],
                         "asx": asx_state.candidates[:50],
                         "ftse": ftse_state.candidates[:50],
                         "smallcap": smallcap_state.candidates[:50],
