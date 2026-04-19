@@ -2452,6 +2452,48 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
     </div>
 
   </div>
+
+  <!-- Service Restart Row -->
+  <div style="margin-top:20px;margin-bottom:10px;font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase">⚡ Service Restarts (systemd)</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+
+    <!-- Restart Bot -->
+    <div style="background:#0a1020;border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:16px">
+      <div style="font-size:14px;font-weight:700;color:#ef4444;margin-bottom:6px">🤖 Restart Bot</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Restarts the trading bot via systemd. Takes ~10s. Open positions are safe — bot recovers from IBKR on startup.
+      </div>
+      <button onclick="pinAction('restart-bot', 'Restart the trading bot? It will be offline for ~10 seconds.')"
+        class="btn" style="width:100%;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);color:#ef4444">
+        🔄 Restart Bot
+      </button>
+    </div>
+
+    <!-- Restart Dashboard -->
+    <div style="background:#0a1020;border:1px solid rgba(0,170,255,0.25);border-radius:10px;padding:16px">
+      <div style="font-size:14px;font-weight:700;color:#00aaff;margin-bottom:6px">📊 Restart Dashboard</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Restarts the dashboard service. Use if the dashboard becomes unresponsive or shows stale data.
+      </div>
+      <button onclick="pinAction('restart-dashboard', 'Restart the dashboard service?')"
+        class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.35);color:#00aaff">
+        🔄 Restart Dashboard
+      </button>
+    </div>
+
+    <!-- Restart Agent -->
+    <div style="background:#0a1020;border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:16px">
+      <div style="font-size:14px;font-weight:700;color:#f59e0b;margin-bottom:6px">🧠 Restart Agent</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Restarts this debug agent. Page will reload after 8 seconds. Use if agent feels stuck or slow.
+      </div>
+      <button onclick="pinAction('restart-agent', 'Restart the debug agent? This page will reload in 8 seconds.')"
+        class="btn" style="width:100%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);color:#f59e0b">
+        🔄 Restart Agent
+      </button>
+    </div>
+
+  </div>
 </div>
 
 {backup_list_html}
@@ -2522,7 +2564,14 @@ function submitPin() {{
       document.getElementById('pin-error').style.display = 'block';
     }} else {{
       closePin();
-      window.location.href = BASE+'/maintenance?msg=' + encodeURIComponent(d.message || 'Done');
+      if (d.reload) {{
+        // Agent is restarting — show countdown then reload
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;font-family:JetBrains Mono,monospace;background:#0a0a0f;color:#f59e0b"><div style="font-size:22px;font-weight:700">🔄 Agent Restarting...</div><div id="cd" style="font-size:48px;font-weight:800;color:#fff">' + d.reload + '</div><div style="color:#94a3b8">Page will reload automatically</div></div>';
+        let secs = d.reload;
+        const iv = setInterval(() => {{ secs--; const el = document.getElementById('cd'); if(el) el.textContent = secs; if(secs <= 0) {{ clearInterval(iv); window.location.href = BASE+'/'; }} }}, 1000);
+      }} else {{
+        window.location.href = BASE+'/maintenance?msg=' + encodeURIComponent(d.message || 'Done');
+      }}
     }}
   }});
 }}
@@ -2600,6 +2649,30 @@ async def maintenance_action(request: Request):
             msg = f"Removed {len(removed)} old backup(s): {', '.join(removed)}" if removed else "No backups older than 28 days found"
             _log_agent(f"Maintenance clean: {msg}")
             return JR({"status": "ok", "message": msg})
+
+        elif action == "restart-bot":
+            out = run_cmd("systemctl restart alphabot", timeout=15)
+            time.sleep(5)
+            running = is_bot_running()
+            _log_agent(f"Manual restart: bot — {'OK' if running else 'FAILED'}")
+            status = "ok" if running else "error"
+            msg = "✅ Bot restarted successfully — trading resumed." if running else f"🔴 Bot restart may have failed — check Termius.\n{out}"
+            return JR({"status": status, "message": msg})
+
+        elif action == "restart-dashboard":
+            out = run_cmd("systemctl restart alphabot-dashboard", timeout=15)
+            time.sleep(3)
+            _log_agent("Manual restart: dashboard")
+            return JR({"status": "ok", "message": "✅ Dashboard restarted. Reload :8080 in a few seconds."})
+
+        elif action == "restart-agent":
+            # Restart self — schedule it so we can return the response first
+            def _do_restart():
+                time.sleep(2)
+                run_cmd("systemctl restart alphabot-agent", timeout=15)
+            threading.Thread(target=_do_restart, daemon=True).start()
+            _log_agent("Manual restart: agent (self)")
+            return JR({"status": "ok", "message": "✅ Agent restarting — this page will reload in 8 seconds.", "reload": 8})
 
         elif action == "github-pull":
             # Safe force pull — resets tracked files to remote, never touches .env or DB
