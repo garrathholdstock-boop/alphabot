@@ -34,7 +34,15 @@ BASE = os.environ.get("ROOT_PATH", "")
 SESSIONS = {}
 
 # ── Config ────────────────────────────────────────────────────
-CLAUDE_API_KEY    = os.environ.get("CLAUDE_API_KEY", "")
+_KEY_FILE = "/home/alphabot/app/.claude_api_key"
+def _load_claude_key():
+    try:
+        with open(_KEY_FILE) as _f:
+            k = _f.read().strip()
+            if k.startswith("sk-ant"): return k
+    except: pass
+    return os.environ.get("CLAUDE_API_KEY", "")
+CLAUDE_API_KEY    = _load_claude_key()
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "8749498685:AAHIlJrx6Hf8SxyF5R0oXPJGYoFN5JnEg5c")
 TELEGRAM_CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")  # swap in when you have it
 DB_PATH           = "/home/alphabot/app/alphabot.db"
@@ -2484,16 +2492,31 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Put up a dodgy file? Pick the file, see all dated backups for it,
         choose the version you want. PIN required. Never touches the database.
       </div>
-      <a href="{BASE}/maintenance/revert" style="text-decoration:none">
+      <a href="{{BASE}}/maintenance/revert" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
           ↩ Revert a File
         </button>
       </a>
     </div>
+
+    <!-- Update API Key -->
+    <div style="background:#0a1020;border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#f59e0b;margin-bottom:6px">🔑 Update API Key</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;line-height:1.6">
+        Paste a new Anthropic API key. Saved to VPS, agent restarts. PIN required.
+      </div>
+      <input id="api-key-input" type="password" placeholder="sk-ant-..."
+        style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:8px 10px;color:#f8fafc;font-family:monospace;font-size:12px;margin-bottom:10px">
+      <button onclick="updateApiKey()" class="btn" style="width:100%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);color:#f59e0b">
+        🔑 Save New Key
+      </button>
+      <div id="api-key-result" style="display:none;margin-top:10px;font-size:12px;border-radius:6px;padding:8px"></div>
+    </div>
+
   </div>
 
 </div>
-{backup_list_html}
+{{backup_list_html}}
 
 <!-- Disk usage result -->
 <div id="disk-result" style="display:none" class="card">
@@ -2555,7 +2578,7 @@ function submitPin() {{
   fetch(BASE+'/maintenance/action', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{pin: pin, action: _pendingAction}})
+    body: JSON.stringify({{pin: pin, action: _pendingAction, api_key: _pendingApiKey}})
   }}).then(r => r.json()).then(d => {{
     if (d.status === 'wrong_pin') {{
       document.getElementById('pin-error').style.display = 'block';
@@ -2631,6 +2654,25 @@ function refreshSmallCaps() {{
       btn.style.opacity = '1';
     }});
 }}
+
+function updateApiKey() {{
+  var key = document.getElementById('api-key-input').value.trim();
+  var result = document.getElementById('api-key-result');
+  if (!key.startsWith('sk-ant')) {{
+    result.style.display = 'block';
+    result.style.color = '#ef4444';
+    result.textContent = 'Key must start with sk-ant';
+    return;
+  }}
+  _pendingApiKey = key;
+  document.getElementById('pin-label').textContent = 'Save new Anthropic API key and restart agent?';
+  document.getElementById('pin-error').style.display = 'none';
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-overlay').classList.add('visible');
+  document.getElementById('pin-input').focus();
+  _pendingAction = 'update-api-key';
+}}
+var _pendingApiKey = '';
 </script>
 </body></html>"""
 
@@ -2719,7 +2761,21 @@ async def maintenance_action(request: Request):
                 run_cmd("systemctl restart alphabot-agent", timeout=15)
             threading.Thread(target=_do_restart, daemon=True).start()
             _log_agent("Manual restart: agent (self)")
-            return JR({"status": "ok", "message": "✅ Agent restarting — this page will reload in 8 seconds.", "reload": 8})
+            return JR({"status": "ok", "message": "✅ Agent restarting — this page will reload in 8 seconds.", "reload": 8, "reload_label": "🧠 Agent Restarting...", "reload_url": BASE + "/"})
+
+        elif action == "update-api-key":
+            new_key = body.get("api_key", "").strip()
+            if not new_key.startswith("sk-ant"):
+                return JR({"status": "error", "message": "❌ Invalid key — must start with sk-ant"})
+            with open("/home/alphabot/app/.claude_api_key", "w") as _kf:
+                _kf.write(new_key)
+            os.chmod("/home/alphabot/app/.claude_api_key", 0o600)
+            _log_agent("Claude API key updated via maintenance page")
+            def _restart_agent():
+                import time as _t; _t.sleep(2)
+                run_cmd("systemctl restart alphabot-agent", timeout=15)
+            threading.Thread(target=_restart_agent, daemon=True).start()
+            return JR({"status": "ok", "message": "✅ API key saved.", "reload": 8, "reload_label": "🔑 Saving API Key...", "reload_url": BASE + "/maintenance"})
 
         elif action == "github-pull":
             # Safe force pull — resets tracked files to remote, never touches .env or DB
