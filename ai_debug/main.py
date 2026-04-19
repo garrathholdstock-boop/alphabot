@@ -19,7 +19,8 @@ from zoneinfo import ZoneInfo
 from urllib.request import urlopen
 from urllib.error import URLError
 
-app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
+app = FastAPI()
+BASE = os.environ.get("ROOT_PATH", "")
 SESSIONS = {}
 
 # ── Config ────────────────────────────────────────────────────
@@ -1318,7 +1319,7 @@ def store(data):
     sid = str(uuid.uuid4())[:8]
     SESSIONS[sid] = data
     _base = os.environ.get("ROOT_PATH", "")
-    return RedirectResponse(f"{BASE}/r/{sid}", status_code=303)
+    return RedirectResponse(os.environ.get("ROOT_PATH","")+f"/r/{sid}", status_code=303)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1328,7 +1329,6 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
            error="", question="", history="", complete=False, compressed=False,
            step_count=0, ctx_updated=False, audit_result="", **kwargs):
 
-    BASE = os.environ.get("ROOT_PATH", "")  # e.g. "" direct, or "/agent" via Nginx
     screen_status = run_cmd("/usr/bin/screen -ls")
     bot_ok = SCREEN_NAME in screen_status
     sc = "#00ff88" if bot_ok else "#ef4444"
