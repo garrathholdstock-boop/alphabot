@@ -2423,7 +2423,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
 
 <script>
 var _pendingAction = null;
-var BASE = "{_base}";
+var BASE = "/agent";
 
 function runAction(action) {{
   if (action === 'disk') {{
@@ -2929,8 +2929,8 @@ body{{background:#0a0a0f;color:#e2e8f0;font-family:'JetBrains Mono',monospace;
 </div>
 
 <script>
-var BASE = "{_base}";
-var nextByte = 0;
+var BASE = "/agent";
+var nextByte = 0; // repurposed as line counter
 var paused = false;
 var lineCount = 0;
 var autoScroll = true;
@@ -2956,7 +2956,7 @@ function colourLine(line) {{
 
 function poll() {{
   if (paused) return;
-  fetch(BASE + '/log/lines?since_byte=' + nextByte)
+  fetch(BASE + '/log/lines?since_line=' + nextByte)
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.lines && d.lines.length > 0) {{
@@ -2973,7 +2973,7 @@ function poll() {{
         }}
         if (autoScroll) wrap.scrollTop = wrap.scrollHeight;
       }}
-      nextByte = d.next_byte || nextByte;
+      nextByte = d.next_line || nextByte;
       document.getElementById('status').textContent = 'Live · ' + new Date().toLocaleTimeString();
     }})
     .catch(function() {{
