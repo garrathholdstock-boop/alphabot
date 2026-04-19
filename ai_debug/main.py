@@ -2400,6 +2400,27 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
       </a>
     </div>
 
+    <!-- Refresh Small Caps -->
+    <div style="background:#0a1020;border:1px solid rgba(139,92,246,0.3);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#8b5cf6;margin-bottom:6px">🔬 Refresh Small Caps</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Researches the past week and generates fresh watchlists of 50 stocks for
+        <strong style="color:#f8fafc">US, FTSE, and ASX</strong> smallcap discipline.
+        Run weekly — usually Sunday. Takes ~30 seconds. No PIN needed.
+      </div>
+      <button id="sc-btn" onclick="refreshSmallCaps()"
+        class="btn" style="width:100%;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.4);color:#8b5cf6">
+        🔬 Refresh Small Caps
+      </button>
+      <div id="sc-bar" style="display:none;margin-top:12px">
+        <div style="height:4px;background:rgba(139,92,246,0.15);border-radius:2px;overflow:hidden">
+          <div id="sc-progress" style="height:100%;width:0%;background:linear-gradient(90deg,#8b5cf6,#a78bfa);border-radius:2px;transition:width 0.4s ease"></div>
+        </div>
+        <div id="sc-status" style="font-size:11px;color:#8b5cf6;margin-top:6px;text-align:center">Researching markets...</div>
+      </div>
+      <div id="sc-result" style="display:none;margin-top:12px;font-size:12px;color:#00ff88;background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.2);border-radius:6px;padding:10px;line-height:1.6"></div>
+    </div>
+
     <!-- Pull from GitHub -->
     <div style="background:#0a1020;border:1px solid rgba(0,255,136,0.2);border-radius:10px;padding:16px">
       <div style="font-size:15px;font-weight:700;color:#00ff88;margin-bottom:6px">⬇️ Pull from GitHub</div>
@@ -2560,6 +2581,55 @@ function restoreBackup(dateStr) {{
   document.getElementById('pin-input').value = '';
   document.getElementById('pin-overlay').classList.add('visible');
   document.getElementById('pin-input').focus();
+}}
+
+function refreshSmallCaps() {{
+  var btn = document.getElementById('sc-btn');
+  var bar = document.getElementById('sc-bar');
+  var progress = document.getElementById('sc-progress');
+  var status = document.getElementById('sc-status');
+  var result = document.getElementById('sc-result');
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+  bar.style.display = 'block';
+  result.style.display = 'none';
+  var pct = 0;
+  var msgs = ['Researching US smallcap movers...','Scanning FTSE AIM listings...','Analysing ASX SmallCap candidates...','Scoring momentum and volume...','Writing watchlists to bot...'];
+  var msgIdx = 0;
+  status.textContent = msgs[0];
+  var iv = setInterval(function() {{
+    pct = Math.min(pct + 2, 90);
+    progress.style.width = pct + '%';
+    if (pct % 18 === 0 && msgIdx < msgs.length - 1) {{
+      msgIdx++;
+      status.textContent = msgs[msgIdx];
+    }}
+  }}, 600);
+  fetch(BASE+'/maintenance/refresh-smallcaps', {{method:'POST'}})
+    .then(r => r.json())
+    .then(d => {{
+      clearInterval(iv);
+      progress.style.width = '100%';
+      status.textContent = '✅ Done';
+      setTimeout(function() {{
+        bar.style.display = 'none';
+        progress.style.width = '0%';
+        result.style.display = 'block';
+        result.innerHTML = d.message || 'Watchlists updated.';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }}, 600);
+    }})
+    .catch(function(e) {{
+      clearInterval(iv);
+      bar.style.display = 'none';
+      result.style.display = 'block';
+      result.style.color = '#ef4444';
+      result.style.borderColor = 'rgba(239,68,68,0.2)';
+      result.textContent = 'Error: ' + e;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }});
 }}
 </script>
 </body></html>"""
@@ -2724,6 +2794,105 @@ async def maintenance_action(request: Request):
         return JR({"status": "error", "message": "Unknown action"})
     except Exception as e:
         return JR({"status": "error", "message": str(e)})
+
+
+@app.post("/maintenance/refresh-smallcaps")
+async def refresh_smallcaps():
+    """Use Claude API with web search to generate fresh smallcap watchlists for all 3 markets."""
+    import asyncio
+    from fastapi.responses import JSONResponse as JR
+    try:
+        import anthropic as _ac
+        client = _ac.Anthropic()
+
+        prompt = """You are AlphaBot's smallcap research assistant. Today is """ + datetime.now(PARIS).strftime("%Y-%m-%d") + """.
+
+Research the past 7 days and generate 3 fresh smallcap watchlists for our trading bot. Use web search to find current market data.
+
+Rules for each list:
+- Exactly 50 ticker symbols
+- Must be liquid (decent daily volume)
+- US list: NYSE/NASDAQ stocks $2-$20 price range, high momentum/speculative names
+- FTSE list: LSE/AIM-listed stocks with active trading, mix of sectors
+- ASX list: ASX-listed stocks outside the top 50, resources/tech/growth bias
+
+Search for: recent smallcap movers, momentum stocks, high volume smallcaps this week for each market.
+
+Return ONLY a JSON object in this exact format, no other text:
+{
+  "us": ["TICK1","TICK2",...50 tickers],
+  "ftse": ["TICK1","TICK2",...50 tickers],
+  "asx": ["TICK1","TICK2",...50 tickers],
+  "summary": "Brief 2-sentence summary of what you found for each market"
+}"""
+
+        loop = asyncio.get_event_loop()
+        def _call():
+            return client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[{"role": "user", "content": prompt}]
+            )
+        response = await loop.run_in_executor(None, _call)
+
+        # Extract text from response
+        text = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                text += block.text
+
+        # Parse JSON
+        import re
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if not json_match:
+            return JR({"status": "error", "message": "Could not parse Claude response"})
+
+        data = json.loads(json_match.group())
+        us   = data.get("us", [])[:50]
+        ftse = data.get("ftse", [])[:50]
+        asx  = data.get("asx", [])[:50]
+        summary = data.get("summary", "")
+
+        if not us or not ftse or not asx:
+            return JR({"status": "error", "message": f"Incomplete lists returned: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}"})
+
+        # Write to config file so it persists across restarts
+        config_path = os.path.join(APP_PATH, "core/config.py")
+        with open(config_path, "r") as f:
+            cfg_txt = f.read()
+
+        def _replace_list(txt, var_name, new_list):
+            pattern = rf"{var_name}\s*=\s*\[[\s\S]*?\]"
+            items = ", ".join(f'"{s}"' for s in new_list)
+            # Format into groups of 10
+            groups = [new_list[i:i+10] for i in range(0, len(new_list), 10)]
+            lines = ",\n    ".join(", ".join(f'"{s}"' for s in g) for g in groups)
+            replacement = f"{var_name} = [\n    {lines},\n]"
+            return re.sub(pattern, replacement, txt, count=1)
+
+        cfg_txt = _replace_list(cfg_txt, "US_SMALLCAP_WATCHLIST", us)
+        cfg_txt = _replace_list(cfg_txt, "FTSE_SMALLCAP_WATCHLIST", ftse)
+        cfg_txt = _replace_list(cfg_txt, "ASX_SMALLCAP_WATCHLIST", asx)
+
+        with open(config_path, "w") as f:
+            f.write(cfg_txt)
+
+        _log_agent(f"Smallcap refresh: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}")
+
+        msg = (
+            f"<strong>✅ Watchlists updated and saved</strong><br>"
+            f"🇺🇸 US: {len(us)} stocks — {', '.join(us[:5])}...<br>"
+            f"🇬🇧 FTSE: {len(ftse)} stocks — {', '.join(ftse[:5])}...<br>"
+            f"🇦🇺 ASX: {len(asx)} stocks — {', '.join(asx[:5])}...<br>"
+            f"<br><em>{summary}</em><br>"
+            f"<br>Restart the bot to apply new watchlists."
+        )
+        return JR({"status": "ok", "message": msg})
+
+    except Exception as e:
+        _log_agent(f"Smallcap refresh error: {e}")
+        return JR({"status": "error", "message": f"Error: {str(e)}"})
 
 
 @app.get("/maintenance/export-db")
