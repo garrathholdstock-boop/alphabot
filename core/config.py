@@ -141,6 +141,10 @@ CRYPTO_TRAIL_PCT    = 3.0
 USE_ATR_STOPS        = True
 ATR_STOP_MULTIPLIER  = 2.0
 
+# ── Bear discipline ───────────────────────────────────────────
+# Minimum signal score for inverse ETF bear plays (lower = more aggressive)
+BEAR_MIN_SCORE       = 4.0
+
 # ── Position & Trade Limits ───────────────────────────────────
 MAX_POSITIONS             = int(os.getenv("MAX_POSITIONS", "3"))
 MAX_TOTAL_POSITIONS       = int(os.getenv("MAX_TOTAL_POSITIONS", "15"))
@@ -241,6 +245,12 @@ US_WATCHLIST = [
     "CBRE","BIPC","VRT","ANET","EQIX",
 ]
 
+# ── Bear discipline watchlist — inverse ETFs ──────────────────
+# Activated only when market_regime = BEAR
+# Single-day trades only — force-sold at EOD every day
+# Score threshold: 4.0 (aggressive — lean in on confirmed bear days)
+BEAR_WATCHLIST = ["SQQQ", "SPXU", "SDOW", "FAZ"]
+
 CRYPTO_WATCHLIST_BINANCE = [
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT",
     "AVAXUSDT","DOGEUSDT","DOTUSDT","LINKUSDT","LTCUSDT",
@@ -312,6 +322,7 @@ intraday_state        = BotState("INTRADAY")
 crypto_intraday_state = BotState("CRYPTO_ID")
 asx_state             = BotState("ASX")
 ftse_state            = BotState("FTSE")
+bear_state            = BotState("BEAR")
 account_info          = {}
 
 # ── Global risk state ─────────────────────────────────────────
@@ -424,6 +435,7 @@ def load_trading_config():
     global MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT, MAX_SECTOR_POSITIONS
     global LOSS_STREAK_LIMIT, VIX_HIGH_THRESHOLD, VIX_EXTREME
     global USE_ATR_STOPS, ATR_STOP_MULTIPLIER
+    global BEAR_MIN_SCORE
     try:
         with open(CONFIG_JSON_PATH) as f:
             c = _json.load(f)
@@ -455,6 +467,7 @@ def load_trading_config():
         VIX_EXTREME               = float(c.get("VIX_EXTREME", VIX_EXTREME))
         USE_ATR_STOPS             = bool(c.get("USE_ATR_STOPS", USE_ATR_STOPS))
         ATR_STOP_MULTIPLIER       = float(c.get("ATR_STOP_MULTIPLIER", ATR_STOP_MULTIPLIER))
+        BEAR_MIN_SCORE            = float(c.get("BEAR_MIN_SCORE", BEAR_MIN_SCORE))
     except FileNotFoundError:
         pass  # config.json not yet created — use defaults
     except Exception as e:
