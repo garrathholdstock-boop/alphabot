@@ -1318,7 +1318,7 @@ def store(data):
     sid = str(uuid.uuid4())[:8]
     SESSIONS[sid] = data
     _base = os.environ.get("ROOT_PATH", "")
-    return RedirectResponse(f"{_base}/r/{sid}", status_code=303)
+    return RedirectResponse(f"{BASE}/r/{sid}", status_code=303)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1601,11 +1601,11 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
       <button type="submit" style="background:#0a0a1a;border:2px solid #7c3aed;color:#a78bfa;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">☀️ Morning Brief</button>
     </form>"""
 
-    quick += f"""<a href="{_base}/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
+    quick += f"""<a href="{BASE}/maintenance" style="display:inline-block;margin:3px;text-decoration:none;">
       <button style="background:#0a1020;border:2px solid #f59e0b;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">🔧 Maintenance</button>
     </a>"""
 
-    quick += f"""<a href="{_base}/log" style="display:inline-block;margin:3px;text-decoration:none;">
+    quick += f"""<a href="{BASE}/log" style="display:inline-block;margin:3px;text-decoration:none;">
       <button style="background:#0a1a0f;border:2px solid #00ff88;color:#00ff88;font-family:'JetBrains Mono',monospace;font-size:11px;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:700;">📋 Live Log</button>
     </a>"""
 
@@ -2153,7 +2153,6 @@ def _do_monday_check():
 def _build_maintenance_page(msg=None, msg_type="ok", backup_result=None,
                              monday_result=None, backups=None):
     """Build the full maintenance page HTML."""
-    _base = os.environ.get("ROOT_PATH","")
     now = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
 
     msg_html = ""
@@ -2333,7 +2332,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Downloads <code>alphabot.db</code> directly to your device — all trade history,
         near-misses, intelligence runs. Off-site backup. Run weekly.
       </div>
-      <a href="{_base}/maintenance/export-db" style="text-decoration:none">
+      <a href="{BASE}/maintenance/export-db" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(0,170,255,0.1);border:1px solid rgba(0,170,255,0.3);color:#00aaff">
           📤 Download Database
         </button>
@@ -2347,7 +2346,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Put up a dodgy file? Pick the file, see all dated backups for it,
         choose the version you want. PIN required. Never touches the database.
       </div>
-      <a href="{_base}/maintenance/revert" style="text-decoration:none">
+      <a href="{BASE}/maintenance/revert" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
           ↩ Revert a File
         </button>
@@ -2375,7 +2374,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Download all app files as a zip — or pick individual files.
         Use this to get a local copy of the current VPS state, especially before rebuilds.
       </div>
-      <a href="{_base}/maintenance/download" style="text-decoration:none">
+      <a href="{BASE}/maintenance/download" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);color:#aa88ff">
           📥 Download Files
         </button>
@@ -2413,7 +2412,7 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
 
 <script>
 var _pendingAction = null;
-var BASE = "{_base}";
+var BASE = "{BASE}";
 
 function runAction(action) {{
   if (action === 'disk') {{
@@ -2613,7 +2612,6 @@ async def export_db():
 
 @app.get("/maintenance/revert", response_class=HTMLResponse)
 async def revert_page(file: str = None, msg: str = None):
-    _base = os.environ.get("ROOT_PATH","")
     """Pick a file, see its dated backups, choose one to restore."""
     import html as _html
     now_str    = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
@@ -2664,7 +2662,7 @@ async def revert_page(file: str = None, msg: str = None):
         sel = "rgba(255,204,0,0.6)" if f_name == file else "#1e1e2e"
         col = "#ffcc00" if f_name == file else "#94a3b8"
         file_btns += (
-            f'<a href="{_base}/maintenance/revert?file={_html.escape(f_name)}" style="text-decoration:none">'
+            f'<a href="{BASE}/maintenance/revert?file={_html.escape(f_name)}" style="text-decoration:none">'
             f'<div style="background:#111118;border:1px solid {sel};border-radius:8px;'
             f'padding:10px 14px;font-size:12px;color:{col};cursor:pointer;'
             f'font-family:\'JetBrains Mono\',monospace">{_html.escape(f_name)}</div></a>'
@@ -2690,7 +2688,7 @@ td{{padding:8px;border-bottom:1px solid #0f0f18}}
     <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#ef4444">↩ Revert a File</div>
     <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now_str}</div>
   </div>
-  <a href="{_base}/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
+  <a href="{BASE}/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
 </div>
 {msg_html}
 <div style="background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:18px;margin-bottom:16px">
@@ -2735,7 +2733,6 @@ function submitPin(){{
 # ═══════════════════════════════════════════════════════════════
 @app.get("/maintenance/download", response_class=HTMLResponse)
 async def download_page():
-    _base = os.environ.get("ROOT_PATH","")
     """Pick individual files to download, or grab the whole app as a zip."""
     import html as _html
     now_str = datetime.now(PARIS).strftime("%A %d %B %Y · %H:%M Paris")
@@ -2755,7 +2752,7 @@ async def download_page():
                 f'<td style="color:#94a3b8;font-size:12px">{_html.escape(src_rel)}</td>'
                 f'<td style="color:#00aaff">{size_str}</td>'
                 f'<td style="color:#94a3b8;font-size:12px">{modified}</td>'
-                f'<td><a href="{_base}/maintenance/download/file?name={_html.escape(dst_name)}" '
+                f'<td><a href="{BASE}/maintenance/download/file?name={_html.escape(dst_name)}" '
                 f'style="text-decoration:none">'
                 f'<button style="background:rgba(170,136,255,0.1);border:1px solid rgba(170,136,255,0.3);'
                 f'border-radius:6px;color:#aa88ff;font-size:12px;padding:5px 12px;cursor:pointer">'
@@ -2780,7 +2777,7 @@ td{{padding:8px;border-bottom:1px solid #0f0f18;vertical-align:middle}}
     <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#aa88ff">📥 Download from VPS</div>
     <div style="font-size:11px;color:#94a3b8;margin-top:2px">{now_str}</div>
   </div>
-  <a href="{_base}/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
+  <a href="{BASE}/maintenance" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:13px">← Maintenance</a>
 </div>
 
 <div style="background:#0a1020;border:1px solid rgba(170,136,255,0.25);border-radius:12px;padding:20px;margin-bottom:20px">
@@ -2790,7 +2787,7 @@ td{{padding:8px;border-bottom:1px solid #0f0f18;vertical-align:middle}}
     Does not include <code style="color:#ffcc00">.env</code>.
     Great to grab before a major rebuild session.
   </div>
-  <a href="{_base}/maintenance/download/zip" style="text-decoration:none">
+  <a href="{BASE}/maintenance/download/zip" style="text-decoration:none">
     <button style="background:rgba(170,136,255,0.15);border:1px solid rgba(170,136,255,0.4);border-radius:8px;
                    color:#aa88ff;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;
                    padding:12px 28px;cursor:pointer">
@@ -2843,7 +2840,6 @@ async def download_file(name: str = ""):
 # ═══════════════════════════════════════════════════════════════
 @app.get("/log", response_class=HTMLResponse)
 async def live_log_page(lines: int = 200, screen: str = "alphabot"):
-    _base = os.environ.get("ROOT_PATH","")
     """Scrollable live bot log — works on iPad, auto-refreshes every 10s."""
     now_str = datetime.now(PARIS).strftime("%H:%M:%S Paris")
 
@@ -2873,7 +2869,7 @@ async def live_log_page(lines: int = 200, screen: str = "alphabot"):
     tabs = ""
     for s in screens:
         active = "border-color:rgba(0,255,136,0.6);color:#00ff88" if s == screen else "border-color:#1e1e2e;color:#94a3b8"
-        tabs += (f'<a href="{_base}/log?screen={s}&lines={lines}" style="text-decoration:none">'
+        tabs += (f'<a href="{BASE}/log?screen={s}&lines={lines}" style="text-decoration:none">'
                  f'<button style="background:#111118;border:1px solid;{active};border-radius:6px;'
                  f'padding:6px 14px;font-size:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">'
                  f'{s}</button></a> ')
@@ -2882,7 +2878,7 @@ async def live_log_page(lines: int = 200, screen: str = "alphabot"):
     line_opts = ""
     for n in [50, 100, 200, 500]:
         sel = "color:#00ff88;font-weight:700" if n == lines else "color:#94a3b8"
-        line_opts += (f'<a href="{_base}/log?screen={screen}&lines={n}" '
+        line_opts += (f'<a href="{BASE}/log?screen={screen}&lines={n}" '
                       f'style="text-decoration:none;{sel};font-size:12px;margin-right:10px">{n}</a>')
 
     return HTMLResponse(f"""<!DOCTYPE html>
