@@ -252,6 +252,31 @@ US_WATCHLIST = [
 # Score threshold: 4.0 (aggressive — lean in on confirmed bear days)
 BEAR_WATCHLIST = ["SQQQ", "SPXU", "SDOW", "FAZ"]
 
+# ── Smallcap Watchlists (refreshed weekly via agent Refresh Small Caps) ──
+US_SMALLCAP_WATCHLIST = [
+    "IONQ","JOBY","ACHR","SOUN","CLOV","WKHS","SPCE","GOEV","BLNK","CHPT",
+    "PTRA","BBAI","AITX","GFAI","INDI","OUST","LIDR","AEVA","MVIS","LAZR",
+    "VLDR","AEYE","KOPN","PRPL","POWW","HIMS","OCGN","VNET","BKSY","RSKD",
+    "PAYO","RELY","PNTM","NUVL","IMVT","KALA","NRIX","SNDX","BCRX","PRAX",
+    "FOLD","ARQT","GOCO","SWAG","GTHX","MGNX","NCPL","SBFG","LFST","MXCT",
+]
+
+FTSE_SMALLCAP_WATCHLIST = [
+    "IQG","RWS","GAMA","JTC","FOUR","AMS","CBOX","KNOS","BVXP","EKF",
+    "FRP","POLR","CML","GYM","TAST","RBGP","MONY","PLUS","FDM","CLIG",
+    "RHM","CEPS","CRAW","ERM","FDEV","IGR","CMCX","YOU","RCH","BOKU",
+    "SHOE","MPAC","WINV","IDP","AFX","BGEO","SQZ","TIG","ASAI","RDW",
+    "BOO","CARD","HYVE","TPX","VLX","SMDS","FSFL","MHN","QTX","SUMO",
+]
+
+ASX_SMALLCAP_WATCHLIST = [
+    "PLS","LTR","GL1","AKE","CXO","HMC","VUL","LKE","SYA","DRO",
+    "MEI","VHT","APX","TNE","SDR","NIC","SFR","GOR","RMS","WAF",
+    "DEG","BGL","NHC","YAL","TBN","HVN","SUL","UNI","IPD","GUD",
+    "NCK","MHJ","BAP","CCX","EML","PPH","SLR","SKC","AIM","BWX",
+    "IGL","MYX","PNV","AVH","PRN","CNI","KMD","NZM","SCP","AD8",
+]
+
 CRYPTO_WATCHLIST_BINANCE = [
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT",
     "AVAXUSDT","DOGEUSDT","DOTUSDT","LINKUSDT","LTCUSDT",
@@ -318,7 +343,9 @@ class BotState:
 # Bot instances — imported by all other modules
 state                 = BotState("STOCKS")
 crypto_state          = BotState("CRYPTO")
-smallcap_state        = BotState("SMALLCAP")
+smallcap_state        = BotState("SMALLCAP_US")
+smallcap_asx_state    = BotState("SMALLCAP_ASX")
+smallcap_ftse_state   = BotState("SMALLCAP_FTSE")
 intraday_state        = BotState("INTRADAY")
 crypto_intraday_state = BotState("CRYPTO_ID")
 asx_state             = BotState("ASX")
@@ -392,9 +419,10 @@ kill_switch = {
 
 # ── Small cap pool ────────────────────────────────────────────
 smallcap_pool = {
-    "symbols":          [],
-    "last_refresh":     None,
-    "last_refresh_day": None,
+    "us":           US_SMALLCAP_WATCHLIST[:],
+    "ftse":         FTSE_SMALLCAP_WATCHLIST[:],
+    "asx":          ASX_SMALLCAP_WATCHLIST[:],
+    "last_refresh": None,
 }
 
 # ── Exchange stop order tracking ──────────────────────────────
