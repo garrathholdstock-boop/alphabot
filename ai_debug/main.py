@@ -2857,22 +2857,16 @@ async def download_file(name: str = ""):
 # LIVE BOT LOG — true live feed, polls every 3s, no page reload
 # ═══════════════════════════════════════════════════════════════
 @app.get("/log/lines")
-async def log_lines(since_byte: int = 0):
-    """Return new log lines since a given byte offset. Used by live log JS poller."""
+async def log_lines(since_line: int = 0):
+    """Return new log lines from screen buffer."""
     try:
-        if not os.path.exists(LOG_PATH):
-            return JSONResponse({"lines": [], "next_byte": 0, "size": 0})
-        size = os.path.getsize(LOG_PATH)
-        if since_byte <= 0 or since_byte > size:
-            # First load — return last 50KB to get recent activity
-            since_byte = max(0, size - 51200)
-        with open(LOG_PATH, "r", errors="replace") as f:
-            f.seek(since_byte)
-            new_text = f.read()
-        lines = [l for l in new_text.split("\n") if l.strip()]
-        return JSONResponse({"lines": lines, "next_byte": size, "size": size})
+        subprocess.run(["/usr/bin/screen", "-S", "alphabot", "-X", "hardcopy", "-h", "/tmp/scr.txt"], capture_output=True)
+        with open("/tmp/scr.txt", "r", errors="replace") as f:
+            all_lines = [l.rstrip() for l in f.readlines() if l.strip()]
+        new_lines = all_lines[since_line:] if since_line < len(all_lines) else []
+        return JSONResponse({"lines": new_lines, "next_line": len(all_lines)})
     except Exception as e:
-        return JSONResponse({"lines": [], "next_byte": since_byte, "size": 0, "error": str(e)})
+        return JSONResponse({"lines": [], "next_line": since_line, "error": str(e)})
 
 
 @app.get("/log", response_class=HTMLResponse)
