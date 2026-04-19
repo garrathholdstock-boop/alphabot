@@ -1320,36 +1320,36 @@ function pinCmd(path,label){{
     <div class="lbl" style="color:#00aaff">TODAY</div>
     <div style="font-size:26px;font-weight:700;color:{_col(d0["pnl"])};margin:6px 0">{d0["pct"]:+.2f}%</div>
     <div style="font-size:13px;font-weight:600;color:{_col(d0["pnl"])};margin-bottom:4px">{_fmt(d0["pnl"])}</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{d0["t"]}</b> &nbsp;·&nbsp; Win <b style="color:{_wrcol(d0['wr'])}">{d0["wr"]}%</b></div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Avg <b style="color:{_col(d0["avg"])}">{_fmt(d0["avg"])}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{d0["t"]}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Win <b style="color:{_wrcol(d0['wr'])}">{d0["wr"]}%</b> &nbsp;·&nbsp; Avg <b style="color:{_col(d0["avg"])}">{_fmt(d0["avg"])}</b></div>
   </div>
   <div class="card">
     <div class="lbl">{d1["name"]}</div>
     <div style="font-size:26px;font-weight:700;color:{_col(d1["pnl"])};margin:6px 0">{d1["pct"]:+.2f}%</div>
     <div style="font-size:13px;font-weight:600;color:{_col(d1["pnl"])};margin-bottom:4px">{_fmt(d1["pnl"])}</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{d1["t"]}</b> &nbsp;·&nbsp; Win <b style="color:{_wrcol(d1['wr'])}">{d1["wr"]}%</b></div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Avg <b style="color:{_col(d1["avg"])}">{_fmt(d1["avg"])}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{d1["t"]}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Win <b style="color:{_wrcol(d1['wr'])}">{d1["wr"]}%</b> &nbsp;·&nbsp; Avg <b style="color:{_col(d1["avg"])}">{_fmt(d1["avg"])}</b></div>
   </div>
   <div class="card">
     <div class="lbl">{d2["name"]}</div>
     <div style="font-size:26px;font-weight:700;color:{_col(d2["pnl"])};margin:6px 0">{d2["pct"]:+.2f}%</div>
     <div style="font-size:13px;font-weight:600;color:{_col(d2["pnl"])};margin-bottom:4px">{_fmt(d2["pnl"])}</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{d2["t"]}</b> &nbsp;·&nbsp; Win <b style="color:{_wrcol(d2['wr'])}">{d2["wr"]}%</b></div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Avg <b style="color:{_col(d2["avg"])}">{_fmt(d2["avg"])}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{d2["t"]}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Win <b style="color:{_wrcol(d2['wr'])}">{d2["wr"]}%</b> &nbsp;·&nbsp; Avg <b style="color:{_col(d2["avg"])}">{_fmt(d2["avg"])}</b></div>
   </div>
   <div class="card">
     <div class="lbl" style="color:#00aaff">LAST 7 DAYS</div>
     <div style="font-size:26px;font-weight:700;color:{_col(week_pnl)};margin:6px 0">{_fmtpct(_pct(week_pnl, port_val))}</div>
     <div style="font-size:13px;font-weight:600;color:{_col(week_pnl)};margin-bottom:4px">{_fmt(week_pnl)}</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{week_t}</b> &nbsp;·&nbsp; Win <b style="color:{_wrcol(week_wr)}">{week_wr}%</b></div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Best <b style="color:#00ff88">{week_best}</b> &nbsp;·&nbsp; Worst <b style="color:#ff4466">{week_worst}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{week_t}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Win <b style="color:{_wrcol(week_wr)}">{week_wr}%</b> &nbsp;·&nbsp; Avg <b style="color:{_col(week_pnl/week_t if week_t else 0)}">{_fmt(week_pnl/week_t if week_t else 0)}</b></div>
   </div>
   <div class="card">
     <div class="lbl">ALL TIME</div>
     <div style="font-size:26px;font-weight:700;color:{_col(total_pnl_db)};margin:6px 0">{_fmtpct(_pct(total_pnl_db, port_val))}</div>
     <div style="font-size:13px;font-weight:600;color:{_col(total_pnl_db)};margin-bottom:4px">{_fmt(total_pnl_db)}</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{total_t}</b> &nbsp;·&nbsp; Win <b style="color:{_wrcol(win_rate)}">{win_rate}%</b></div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Avg Score <b style="color:#f8fafc">{avg_sc_db:.1f}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:2px">Trades <b style="color:#f8fafc">{total_t}</b></div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:3px">Win <b style="color:{_wrcol(win_rate)}">{win_rate}%</b> &nbsp;·&nbsp; Avg Score <b style="color:#f8fafc">{avg_sc_db:.1f}</b></div>
   </div>
 </div>
 
