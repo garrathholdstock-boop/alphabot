@@ -2864,8 +2864,8 @@ async def log_lines(since_byte: int = 0):
             return JSONResponse({"lines": [], "next_byte": 0, "size": 0})
         size = os.path.getsize(LOG_PATH)
         if since_byte <= 0 or since_byte > size:
-            # First load — return last 5KB
-            since_byte = max(0, size - 5120)
+            # First load — return last 50KB to get recent activity
+            since_byte = max(0, size - 51200)
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             new_text = f.read()
