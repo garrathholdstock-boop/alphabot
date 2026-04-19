@@ -738,18 +738,23 @@ def run_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
+        sig_score = score_signal(sym, price, change, rsi_val, vol_ratio, closes, bars=bars) if signal == "BUY" else 0
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True,
+            "score": sig_score})
 
-    results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
+    results.sort(key=lambda x: {("BUY"):0,"HOLD":1,"SELL":2}[x["signal"]])
     st.candidates = results
-    buys = sum(1 for r in results if r["signal"] == "BUY")
+    buys = sum(1 for r in results if r["signal"] == "BUY" and r.get("score", 0) >= MIN_SIGNAL_SCORE)
     log.info(f"[INTRADAY] {buys} BUY / {len(results)} scanned")
 
     pos_count = len(st.positions)
     for s in results:
         if s["signal"] != "BUY": continue
+        if s.get("score", 0) < MIN_SIGNAL_SCORE:
+            log.info(f"[INTRADAY] SKIP {s['symbol']} score:{s.get('score',0):.1f} below threshold {MIN_SIGNAL_SCORE}")
+            continue
         if pos_count >= INTRADAY_MAX_POSITIONS: break
         if s["symbol"] in st.positions: continue
         if st.daily_pnl >= DAILY_PROFIT_TARGET: break
@@ -844,19 +849,27 @@ def run_crypto_intraday_cycle(watchlist, st):
         vwap_pos = vwap_signal(bars)
         if signal == "BUY" and vwap_pos == "BELOW":
             signal = "HOLD"
+        sig_score = score_signal(sym, price, change, rsi_val, vol_ratio, closes, bars=bars) if signal == "BUY" else 0
         results.append({"symbol": sym, "price": price, "change": change,
             "signal": signal, "sma9": ef, "sma21": es, "rsi": rsi_val,
-            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True})
+            "vol_ratio": vol_ratio, "vwap": vwap_pos, "intraday": True,
+            "score": sig_score})
 
-    results.sort(key=lambda x: {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]])
+    results.sort(key=lambda x: (-x.get("score", 0), {"BUY":0,"HOLD":1,"SELL":2}[x["signal"]]))
     st.candidates = results
-    buys = sum(1 for r in results if r["signal"] == "BUY")
+    buys = sum(1 for r in results if r["signal"] == "BUY" and r.get("score", 0) >= MIN_SIGNAL_SCORE)
     log.info(f"[CRYPTO_ID] {buys} BUY / {len(results)} scanned")
 
     pos_count = len(st.positions)
     for s in results:
         if s["signal"] != "BUY": continue
+        if s.get("score", 0) < MIN_SIGNAL_SCORE:
+            log.info(f"[CRYPTO_ID] SKIP {s['symbol']} score:{s.get('score',0):.1f} below threshold {MIN_SIGNAL_SCORE}")
+            continue
         if pos_count >= CRYPTO_INTRADAY_MAX_POS: break
+        if all_positions_count() >= MAX_TOTAL_POSITIONS:
+            log.info(f"[CRYPTO_ID] Global position cap ({MAX_TOTAL_POSITIONS}) reached — skipping")
+            break
         if s["symbol"] in st.positions: continue
         if st.daily_pnl >= DAILY_PROFIT_TARGET: break
         if total_exposure(st) >= CRYPTO_MAX_EXPOSURE: break
