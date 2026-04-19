@@ -2499,8 +2499,13 @@ async def maintenance_run(action: str = "backup"):
 @app.get("/maintenance/disk")
 async def maintenance_disk():
     """Return disk usage summary as JSON."""
-    output = run_cmd("df -h /home && echo '---' && du -sh /home/alphabot/backups/ 2>/dev/null && du -sh /home/alphabot/app/alphabot.db && du -sh /home/alphabot/app/alphabot.log")
-    return JSONResponse({"output": output})
+    import asyncio
+    loop = asyncio.get_event_loop()
+    output = await loop.run_in_executor(None, lambda: run_cmd(
+        "df -h / && echo '---' && du -sh /home/alphabot/backups/ 2>/dev/null || echo 'No backups yet' && echo '---' && du -sh /home/alphabot/app/alphabot.db 2>/dev/null && du -sh /home/alphabot/app/alphabot.log 2>/dev/null",
+        timeout=10
+    ))
+    return JSONResponse({"output": output or "No output"})
 
 
 @app.post("/maintenance/action")
@@ -2841,10 +2846,13 @@ async def download_file(name: str = ""):
 @app.get("/log", response_class=HTMLResponse)
 async def live_log_page(lines: int = 200, screen: str = "alphabot"):
     """Scrollable live bot log — works on iPad, auto-refreshes every 10s."""
+    _base = os.environ.get("ROOT_PATH", "")
     now_str = datetime.now(PARIS).strftime("%H:%M:%S Paris")
 
-    # Read from the persistent log file
+    # Read from the persistent log file — always alphabot.log regardless of tab
     log_content = run_cmd(f"tail -{lines} {LOG_PATH}", timeout=10)
+    if not log_content.strip():
+        log_content = run_cmd(f"tail -{lines} /home/alphabot/app/alphabot.log", timeout=10)
 
     # Colour-code log lines
     coloured = ""
@@ -2857,28 +2865,18 @@ async def live_log_page(lines: int = 200, screen: str = "alphabot"):
             col = "#00ff88"
         elif any(x in line for x in ["SKIP", "HOLD", "near_miss"]):
             col = "#94a3b8"
-        elif any(x in line for x in ["INTELLIGENCE", "ATR", "ROTATE", "STALE"]):
+        elif any(x in line for x in ["INTELLIGENCE", "ATR", "ROTATE", "STALE", "BEAR"]):
             col = "#aa88ff"
         else:
             col = "#cbd5e1"
         safe = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         coloured += f'<div style="color:{col};padding:1px 0;line-height:1.5">{safe}</div>'
 
-    # Screen tab buttons
-    screens = ["alphabot", "dashboard", "agent"]
-    tabs = ""
-    for s in screens:
-        active = "border-color:rgba(0,255,136,0.6);color:#00ff88" if s == screen else "border-color:#1e1e2e;color:#94a3b8"
-        tabs += (f'<a href="{BASE}/log?screen={s}&lines={lines}" style="text-decoration:none">'
-                 f'<button style="background:#111118;border:1px solid;{active};border-radius:6px;'
-                 f'padding:6px 14px;font-size:12px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">'
-                 f'{s}</button></a> ')
-
     # Lines selector
     line_opts = ""
     for n in [50, 100, 200, 500]:
         sel = "color:#00ff88;font-weight:700" if n == lines else "color:#94a3b8"
-        line_opts += (f'<a href="{BASE}/log?screen={screen}&lines={n}" '
+        line_opts += (f'<a href="{_base}/log?lines={n}" '
                       f'style="text-decoration:none;{sel};font-size:12px;margin-right:10px">{n}</a>')
 
     return HTMLResponse(f"""<!DOCTYPE html>
@@ -2907,8 +2905,7 @@ body{{background:#0a0a0f;color:#e2e8f0;font-family:'JetBrains Mono',monospace;
   <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:#00ff88">
     AlphaBot <span style="color:#64748b">Live Log</span>
   </div>
-  <div style="display:flex;gap:6px">{tabs}</div>
-  <a href="/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:12px">← Agent</a>
+  <a href="{_base}/" style="margin-left:auto;color:#94a3b8;text-decoration:none;font-size:12px">← Agent</a>
 </div>
 
 <div id="log-wrap">
