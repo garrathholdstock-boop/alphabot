@@ -48,13 +48,17 @@ import core.config as cfg
 import threading as _threading
 
 _THREAD_CLIENT_IDS = {
-    "MainThread":    1,
-    "US-Swing":      2,
-    "Intraday":      3,
-    "FTSE":          4,
-    "ASX":           5,
-    "Smallcap":      6,
-    "Crypto-Swing":  7,
+    "MainThread":      1,
+    "US-Swing":        2,
+    "Intraday":        3,
+    "FTSE":            4,
+    "ASX":             5,
+    "Smallcap":        6,
+    "Smallcap-US":     6,
+    "Smallcap-FTSE":   7,
+    "Smallcap-ASX":    8,
+    "Crypto-Swing":    9,
+    "Bear":           10,
 }
 _DEFAULT_CLIENT_ID = 1
 
