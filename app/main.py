@@ -63,6 +63,7 @@ from core.execution import (
     fetch_latest_price, fetch_intraday_bars, fetch_intraday_bars_batch,
     place_order,
     update_exchange_stop, binance_get_top_coins, update_live_prices,
+    start_ibkr_manager,
 )
 from core.risk import (
     total_exposure, all_positions_count, all_symbols_held, sectors_held,
@@ -86,6 +87,9 @@ from data.database import (
     db_record_trade, db_record_near_miss, db_record_report,
     db_record_rotation, db_get_pending_rotations, db_update_rotation_followup,
     db_write_status, db_write_smallcap_watchlists, db_read_smallcap_watchlists,
+    db_read_watchlist, db_write_watchlist, db_read_all_watchlists,
+    db_write_positions, db_read_positions,
+    db_write_portfolio, db_read_portfolio,
 )
 from app.notifications import (
     tg, tg_trade_buy, tg_trade_sell, tg_hot_miss, tg_critical,
@@ -99,6 +103,67 @@ except ImportError:
 
 
 # ── Small cap pool management ─────────────────────────────────
+def load_all_watchlists_from_db():
+    """Load all watchlists from DB on startup. Any market without a DB entry
+    keeps its config.py default. Also updates _INTL_MARKET for exchange routing."""
+    import core.config as _cfg
+    from core.execution import _INTL_MARKET
+    try:
+        all_wl = db_read_all_watchlists()
+    except Exception as e:
+        log.warning(f"[WATCHLIST] DB load failed: {e} — using config defaults")
+        return
+
+    if not all_wl:
+        log.info("[WATCHLIST] No DB watchlists — using config defaults")
+        return
+
+    # Main markets — if DB has them, replace config lists in place
+    loaded = []
+    if "us" in all_wl:
+        _cfg.US_WATCHLIST[:] = all_wl["us"]["tickers"]
+        loaded.append(f"US:{len(all_wl['us']['tickers'])}")
+    if "ftse" in all_wl:
+        _cfg.FTSE_WATCHLIST[:] = all_wl["ftse"]["tickers"]
+        for s in all_wl["ftse"]["tickers"]:
+            _INTL_MARKET[s] = ("LSE", "GBP")
+        loaded.append(f"FTSE:{len(all_wl['ftse']['tickers'])}")
+    if "asx" in all_wl:
+        _cfg.ASX_WATCHLIST[:] = all_wl["asx"]["tickers"]
+        for s in all_wl["asx"]["tickers"]:
+            _INTL_MARKET[s] = ("ASX", "AUD")
+        loaded.append(f"ASX:{len(all_wl['asx']['tickers'])}")
+    if "crypto" in all_wl:
+        _cfg.CRYPTO_WATCHLIST[:] = all_wl["crypto"]["tickers"]
+        loaded.append(f"CRYPTO:{len(all_wl['crypto']['tickers'])}")
+    if "bear" in all_wl:
+        _cfg.BEAR_WATCHLIST[:] = all_wl["bear"]["tickers"]
+        loaded.append(f"BEAR:{len(all_wl['bear']['tickers'])}")
+
+    # Smallcaps — also write to smallcap_pool so run_cycle_smallcap sees them
+    if "us_smallcap" in all_wl:
+        smallcap_pool["us"] = all_wl["us_smallcap"]["tickers"]
+        _cfg.US_SMALLCAP_WATCHLIST[:] = all_wl["us_smallcap"]["tickers"]
+        loaded.append(f"SmUS:{len(all_wl['us_smallcap']['tickers'])}")
+    if "ftse_smallcap" in all_wl:
+        smallcap_pool["ftse"] = all_wl["ftse_smallcap"]["tickers"]
+        _cfg.FTSE_SMALLCAP_WATCHLIST[:] = all_wl["ftse_smallcap"]["tickers"]
+        for s in all_wl["ftse_smallcap"]["tickers"]:
+            _INTL_MARKET[s] = ("LSE", "GBP")
+        loaded.append(f"SmFTSE:{len(all_wl['ftse_smallcap']['tickers'])}")
+    if "asx_smallcap" in all_wl:
+        smallcap_pool["asx"] = all_wl["asx_smallcap"]["tickers"]
+        _cfg.ASX_SMALLCAP_WATCHLIST[:] = all_wl["asx_smallcap"]["tickers"]
+        for s in all_wl["asx_smallcap"]["tickers"]:
+            _INTL_MARKET[s] = ("ASX", "AUD")
+        loaded.append(f"SmASX:{len(all_wl['asx_smallcap']['tickers'])}")
+
+    if loaded:
+        log.info(f"[WATCHLIST] Loaded from DB: {' | '.join(loaded)}")
+    else:
+        log.info("[WATCHLIST] DB empty for all markets — using config defaults")
+
+
 def update_smallcap_watchlists(us=None, ftse=None, asx=None):
     """Update smallcap watchlists — called on startup and by agent Refresh Small Caps."""
     import core.config as _cfg
@@ -1268,7 +1333,15 @@ def main():
 
     log.info("AlphaBot bot process starting — dashboard runs separately on port 8080")
 
-    # Load smallcap watchlists from DB (if Refresh Small Caps has been run)
+    # Start the IBKR connection manager (single shared connection on dedicated event loop)
+    start_ibkr_manager()
+    log.info("[STARTUP] IBKR connection manager initialised")
+
+    # Load all watchlists from DB (US, FTSE, ASX, smallcaps, crypto, bear)
+    # Any market without a DB entry keeps its config.py default
+    load_all_watchlists_from_db()
+
+    # Load smallcap watchlists from DB (legacy path — kept for backwards compat)
     update_smallcap_watchlists()
 
     # Verify IBKR connection
@@ -1373,15 +1446,19 @@ def main():
 
     # Start all trading threads as daemons
     trading_threads = [
-        ("US-Swing",       _us_stocks_thread,      60),
+        # Stock swing disciplines — 300s (5min) cycles
+        # Uses daily bars, multi-day holds — no need for sub-minute scanning
+        ("US-Swing",       _us_stocks_thread,     300),
+        ("FTSE",           _ftse_thread,          300),
+        ("ASX",            _asx_thread,           300),
+        ("Smallcap-US",    _smallcap_us_thread,   300),
+        ("Smallcap-FTSE",  _smallcap_ftse_thread, 300),
+        ("Smallcap-ASX",   _smallcap_asx_thread,  300),
+        ("Bear",           _bear_thread,          300),
+        # Crypto swing — 60s (daily bars but 24/7 market, faster response to regime changes)
         ("Crypto-Swing",   _crypto_swing_thread,   60),
-        ("FTSE",           _ftse_thread,            60),
-        ("ASX",            _asx_thread,             60),
-        ("Intraday",       _intraday_thread,        30),
-        ("Smallcap-US",    _smallcap_us_thread,    120),
-        ("Smallcap-FTSE",  _smallcap_ftse_thread,  120),
-        ("Smallcap-ASX",   _smallcap_asx_thread,   120),
-        ("Bear",           _bear_thread,            60),
+        # Intraday (US stocks + crypto intraday) — 30s for fast momentum captures
+        ("Intraday",       _intraday_thread,       30),
     ]
     for name, fn, interval in trading_threads:
         t = threading.Thread(target=_run_thread, args=(name, fn, interval), daemon=True, name=name)
@@ -1390,7 +1467,7 @@ def main():
         time.sleep(2)  # stagger thread starts to avoid API hammering
 
     # ── Main orchestration loop (10s) ──
-    # Handles: account refresh, status.json write, watchdog, panic kill, regime updates
+    # Handles: account refresh, DB status write, watchdog, panic kill, regime updates
     cycle = 0
     et = datetime.now(ZoneInfo("America/New_York"))
 
@@ -1438,8 +1515,7 @@ def main():
                                    ("FTSE", ftse_state), ("Bear", bear_state)]:
                     for sym, pos in st.positions.items():
                         snap[sym] = {**pos, "_type": label, "_live": cfg.live_prices.get(sym)}
-                with open("/home/alphabot/app/positions.json", "w") as _f:
-                    json.dump(snap, _f)
+                db_write_positions(snap)
             except Exception as _e:
                 log.warning(f"[SNAPSHOT] {_e}")
 
@@ -1500,9 +1576,8 @@ def main():
                         "binance_pv": cfg._binance_balance_cache.get("value", 0.0),
                     },
                 }
-                with open("/home/alphabot/app/status.json", "w") as _sf:
-                    json.dump(status_snap, _sf, default=str)
-                db_write_status(status_snap)  # DB-backed — survives restarts
+                # DB is source of truth — replaces status.json entirely
+                db_write_status(status_snap)
             except Exception as _se:
                 log.warning(f"[STATUS] {_se}")
 
@@ -1525,8 +1600,7 @@ def main():
                 total_pv    = ibkr_pv + binance_pv
                 # Persist last known good portfolio value for dashboard fallback
                 try:
-                    with open(os.path.join(_os.path.dirname(__file__), "..", "last_portfolio.json"), "w") as _pf:
-                        json.dump({"total_pv": total_pv, "ibkr_pv": ibkr_pv, "binance_pv": binance_pv, "ts": time.time()}, _pf)
+                    db_write_portfolio({"total_pv": total_pv, "ibkr_pv": ibkr_pv, "binance_pv": binance_pv, "ts": time.time()})
                 except: pass
                 crypto_base = binance_pv if binance_pv > 0 else ibkr_pv * 0.20
 
