@@ -423,7 +423,16 @@ def build_dashboard():
     btc_chg_str = f"{btc_chg:+.1f}%" if btc_chg is not None else "N/A"
     btc_chg_col = "#ff4466" if btc_chg and btc_chg < -BTC_CRASH_PCT else "#e0e0e0"
 
-    from app.main import is_asx_open, is_ftse_open
+    # Define market open functions inline — avoids circular import from app.main
+    from datetime import datetime as _dt
+    def is_asx_open():
+        now = _dt.utcnow()
+        if now.weekday() >= 5: return False
+        return 0 <= now.hour < 6
+    def is_ftse_open():
+        now = _dt.utcnow()
+        if now.weekday() >= 5: return False
+        return (now.hour == 8) or (9 <= now.hour < 16) or (now.hour == 16 and now.minute < 30)
     asx_open = is_asx_open(); ftse_open = is_ftse_open()
     market_open = is_market_open()
     asx_mode = st_asx_regime.get("mode","BULL"); ftse_mode = st_ftse_regime.get("mode","BULL")
