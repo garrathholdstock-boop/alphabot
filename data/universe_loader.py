@@ -1,18 +1,12 @@
 """
-data/universe_loader.py -- AlphaBot tradeable universe loader (Wikipedia-only edition)
+data/universe_loader.py -- AlphaBot tradeable universe loader (Wikipedia-only)
 
-IBKR's product directory moved to JavaScript rendering (no HTML tables),
-so we rely solely on Wikipedia index constituents.
+Smart parser: tries all wikitables on each page, tries multiple ticker columns,
+and picks whichever combination yields the most valid tickers. Handles the fact
+that FTSE/ASX Wikipedia pages use different table layouts than US pages.
 
-Indices fetched:
-  US:   SP500, SP400, SP600, NASDAQ100, DJIA
-  UK:   FTSE100, FTSE250
-  AUS:  ASX200, ASX300
-
-Every ticker in these indices is tradeable on IBKR (validated organically by
-bot runtime; any Error 200 symbols get stripped in subsequent refresh).
-
-Writes to `universe` and `universe_indices` tables.
+Dedupes before DB insert to avoid UNIQUE constraint failures when the same
+ticker appears in multiple indices (AAPL in SP500 + NASDAQ100).
 """
 import logging
 import sqlite3
@@ -44,9 +38,6 @@ if not log.handlers:
     log.setLevel(logging.INFO)
 
 
-# ==============================================================
-# HTTP
-# ==============================================================
 def _http_get(url):
     time.sleep(HTTP_DELAY)
     req = Request(url, headers={
@@ -58,33 +49,34 @@ def _http_get(url):
 
 
 # ==============================================================
-# WIKIPEDIA PARSER
+# ALL-WIKITABLES PARSER
 # ==============================================================
-class WikiTableParser(HTMLParser):
-    """Extract rows from <table class="wikitable ...">, handling nested tables."""
-    def __init__(self, ticker_col=0, name_col=1):
+class AllWikitablesParser(HTMLParser):
+    """Parse every <table class='wikitable'> on the page. Handles nested tables.
+    Each result is a list of rows; each row is a list of cell strings."""
+    def __init__(self):
         super().__init__()
-        self.in_table = False
+        self.in_wikitable = False
+        self.nest_depth = 0  # nested tables inside a wikitable
         self.in_row = False
         self.in_cell = False
         self.current_row = []
         self.current_cell = []
-        self.rows = []
-        self.ticker_col = ticker_col
-        self.name_col = name_col
-        self._table_depth = 0
+        self.current_table = []
+        self.tables = []  # list of tables
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
         if tag == "table":
             classes = attrs_dict.get("class", "")
-            if "wikitable" in classes and not self.in_table:
-                self.in_table = True
-                self._table_depth = 0
-            elif self.in_table:
-                self._table_depth += 1
-        elif self.in_table:
-            if tag == "tr" and self._table_depth == 0:
+            if "wikitable" in classes and not self.in_wikitable:
+                self.in_wikitable = True
+                self.nest_depth = 0
+                self.current_table = []
+            elif self.in_wikitable:
+                self.nest_depth += 1
+        elif self.in_wikitable and self.nest_depth == 0:
+            if tag == "tr":
                 self.in_row = True
                 self.current_row = []
             elif tag in ("td", "th") and self.in_row:
@@ -92,92 +84,137 @@ class WikiTableParser(HTMLParser):
                 self.current_cell = []
 
     def handle_endtag(self, tag):
-        if tag == "table" and self.in_table:
-            if self._table_depth > 0:
-                self._table_depth -= 1
+        if tag == "table" and self.in_wikitable:
+            if self.nest_depth > 0:
+                self.nest_depth -= 1
             else:
-                self.in_table = False
-        elif tag == "tr" and self.in_row:
-            if self.current_row:
-                self.rows.append(self.current_row)
-            self.in_row = False
-        elif tag in ("td", "th") and self.in_cell:
-            text = "".join(self.current_cell).strip()
-            text = re.sub(r"\s+", " ", text)
-            self.current_row.append(text)
-            self.in_cell = False
+                self.in_wikitable = False
+                if self.current_table:
+                    self.tables.append(self.current_table)
+        elif self.in_wikitable and self.nest_depth == 0:
+            if tag == "tr" and self.in_row:
+                if self.current_row:
+                    self.current_table.append(self.current_row)
+                self.in_row = False
+            elif tag in ("td", "th") and self.in_cell:
+                text = "".join(self.current_cell).strip()
+                text = re.sub(r"\s+", " ", text)
+                self.current_row.append(text)
+                self.in_cell = False
 
     def handle_data(self, data):
         if self.in_cell:
             self.current_cell.append(data)
 
-    def get_tickers(self):
-        """Return list of (ticker, name) tuples. Filters junk."""
-        out = []
-        for r in self.rows:
-            if len(r) <= max(self.ticker_col, self.name_col):
-                continue
-            tkr_raw = r[self.ticker_col].strip()
-            name = _ascii_safe(r[self.name_col].strip() if self.name_col < len(r) else "")
-            # Normalize ticker: ASCII uppercase, strip exchange suffixes common on Wikipedia
-            tkr = _ascii_safe(tkr_raw).upper().strip()
-            # Remove trailing exchange suffix like "BHP.L" -> "BHP" (for LSE)
-            # and "BHP.AX" -> "BHP" (for ASX)
-            # But preserve genuine dots like "BRK.B" (class B shares)
-            if tkr.endswith(".L") or tkr.endswith(".AX"):
-                tkr = tkr.rsplit(".", 1)[0]
-            # Filters
-            if not tkr or len(tkr) > 6:
-                continue
-            if tkr.lower() in ("ticker", "symbol", "code", "epic", "asxcode", "ref"):
-                continue
-            # Must be uppercase letters with optional dot (for BRK.B, etc)
-            if not re.match(r"^[A-Z][A-Z0-9.]*[A-Z0-9]$", tkr) and len(tkr) > 1:
-                continue
-            if not re.match(r"^[A-Z]$", tkr) and len(tkr) == 1:
-                continue
-            out.append((tkr, name))
-        return out
+
+def _normalize_ticker(raw):
+    """Normalize a raw cell value to a clean ticker or None."""
+    if not raw:
+        return None
+    t = _ascii_safe(raw).strip().upper()
+    # Strip exchange suffixes common on LSE/ASX Wikipedia pages
+    # e.g. "BHP.L" -> "BHP", "BHP.AX" -> "BHP"
+    if t.endswith(".L") or t.endswith(".AX"):
+        t = t.rsplit(".", 1)[0]
+    # Remove any trailing bracket notes like "ABC[1]"
+    t = re.sub(r"\[.*?\]", "", t).strip()
+    # Remove trailing whitespace/non-alphanumeric
+    t = t.strip(" .-")
+    if not t or len(t) > 6:
+        return None
+    if t.lower() in ("ticker", "symbol", "code", "epic", "asxcode", "ref", "company", "name"):
+        return None
+    # Must be at least one uppercase letter, allow digits and internal dots (BRK.B)
+    if not re.match(r"^[A-Z][A-Z0-9.]*$", t):
+        return None
+    return t
 
 
-# Index sources: (url, ticker_col, name_col, exchange)
+def _score_table_column(table, col_idx):
+    """Count how many rows have a valid-looking ticker in this column."""
+    if not table or len(table) < 5:  # too small to be the right table
+        return 0
+    valid = 0
+    for row in table:
+        if col_idx < len(row):
+            if _normalize_ticker(row[col_idx]):
+                valid += 1
+    return valid
+
+
+def _extract_tickers_from_page(html, name_col_offset=1):
+    """Find the best table + column combo, return (ticker, name) list.
+    name_col_offset says 'name is usually N columns to the right of ticker'."""
+    parser = AllWikitablesParser()
+    parser.feed(html)
+    if not parser.tables:
+        return []
+
+    best_score = 0
+    best_combo = None  # (table_idx, ticker_col)
+    for t_idx, table in enumerate(parser.tables):
+        for col in range(min(4, max(len(r) for r in table) if table else 0)):
+            score = _score_table_column(table, col)
+            if score > best_score:
+                best_score = score
+                best_combo = (t_idx, col)
+
+    if not best_combo or best_score < 5:
+        return []
+
+    t_idx, tkr_col = best_combo
+    table = parser.tables[t_idx]
+    name_col = tkr_col + name_col_offset
+    # If name_col out of range, try tkr_col - 1
+    if name_col >= max(len(r) for r in table):
+        name_col = max(0, tkr_col - 1)
+
+    results = []
+    for row in table:
+        if tkr_col >= len(row):
+            continue
+        tkr = _normalize_ticker(row[tkr_col])
+        if not tkr:
+            continue
+        name = ""
+        if name_col < len(row) and name_col != tkr_col:
+            name = _ascii_safe(row[name_col])[:80]
+        results.append((tkr, name))
+    return results
+
+
+# Index sources: (url, name_col_offset, exchange)
 WIKI_INDICES = {
-    "SP500":     ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0, 1, "NYSE_NASDAQ"),
-    "SP400":     ("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0, 1, "NYSE_NASDAQ"),
-    "SP600":     ("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 0, 1, "NYSE_NASDAQ"),
-    "NASDAQ100": ("https://en.wikipedia.org/wiki/Nasdaq-100", 1, 0, "NASDAQ"),
-    "DJIA":      ("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", 2, 0, "NYSE_NASDAQ"),
-    "FTSE100":   ("https://en.wikipedia.org/wiki/FTSE_100_Index", 0, 1, "LSE"),
-    "FTSE250":   ("https://en.wikipedia.org/wiki/FTSE_250_Index", 0, 1, "LSE"),
-    "ASX200":    ("https://en.wikipedia.org/wiki/S%26P/ASX_200", 0, 1, "ASX"),
-    "ASX300":    ("https://en.wikipedia.org/wiki/S%26P/ASX_300", 0, 1, "ASX"),
+    "SP500":     ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 1, "US"),
+    "SP400":     ("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 1, "US"),
+    "SP600":     ("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 1, "US"),
+    "NASDAQ100": ("https://en.wikipedia.org/wiki/Nasdaq-100", -1, "US"),
+    "DJIA":      ("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", -2, "US"),
+    "FTSE100":   ("https://en.wikipedia.org/wiki/FTSE_100_Index", 1, "LSE"),
+    "FTSE250":   ("https://en.wikipedia.org/wiki/FTSE_250_Index", 1, "LSE"),
+    "ASX200":    ("https://en.wikipedia.org/wiki/S%26P/ASX_200", 1, "ASX"),
+    "ASX300":    ("https://en.wikipedia.org/wiki/S%26P/ASX_300", 1, "ASX"),
 }
 
 
 def fetch_index_members(index_name):
-    """Return list of (ticker, name) from Wikipedia. ASCII-safe errors."""
     if index_name not in WIKI_INDICES:
         raise ValueError("Unknown index: %s" % index_name)
-    url, tkr_col, name_col, _ = WIKI_INDICES[index_name]
+    url, name_offset, _ = WIKI_INDICES[index_name]
     try:
         html = _http_get(url)
     except Exception as e:
         log.error("%s: fetch failed: %s", index_name, _ascii_safe(e))
         return []
-    parser = WikiTableParser(ticker_col=tkr_col, name_col=name_col)
     try:
-        parser.feed(html)
+        tickers = _extract_tickers_from_page(html, name_col_offset=name_offset)
     except Exception as e:
         log.error("%s: parse failed: %s", index_name, _ascii_safe(e))
         return []
-    tickers = parser.get_tickers()
     log.info("%s: %d members fetched", index_name, len(tickers))
     return tickers
 
 
-# ==============================================================
-# DB
-# ==============================================================
 def _get_conn():
     return sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
 
@@ -210,82 +247,63 @@ def ensure_schema():
 
 
 def refresh_universe():
-    """
-    Fetch Wikipedia indices, write to universe + universe_indices tables.
-    Each index_name maps to a specific exchange (US indices -> NYSE for now,
-    since we pick watchlists by index not by exchange).
-    """
     t0 = time.time()
     ensure_schema()
 
     result = {"ok": False, "counts": {}, "errors": [], "took_seconds": 0.0}
 
-    # Exchange resolution: US indices use "US" as a virtual exchange
-    # (main.py doesn't care which US exchange -- it routes via SMART anyway).
-    # For LSE and ASX, tickers are ambiguous without suffix, we use the exchange
-    # as the lookup for IBKR contract routing.
-    def _exchange_for(index_name):
-        _, _, _, exch = WIKI_INDICES[index_name]
-        if exch == "NYSE_NASDAQ":
-            return "US"  # IBKR SMART handles this
-        if exch == "NASDAQ":
-            return "US"
-        return exch  # LSE, ASX
+    universe_map = {}       # (symbol, exchange) -> (currency, name)
+    index_memberships = set()  # set of (symbol, exchange, index_name) -- dedup built-in
 
-    universe_rows = []  # (symbol, exchange, currency, name)
-    index_rows = []     # (symbol, exchange, index_name)
-    seen_universe = set()  # (symbol, exchange) keys
-
+    per_index_counts = {}
     for idx_name in WIKI_INDICES.keys():
-        exch = _exchange_for(idx_name)
+        _, _, exch = WIKI_INDICES[idx_name]
         currency = {"US": "USD", "LSE": "GBP", "ASX": "AUD"}.get(exch, "USD")
         members = fetch_index_members(idx_name)
+        per_index_counts[idx_name] = len(members)
         if not members:
             log.warning("%s: returned 0 members, skipping", idx_name)
             continue
         for tkr, name in members:
             key = (tkr, exch)
-            if key not in seen_universe:
-                seen_universe.add(key)
-                universe_rows.append((tkr, exch, currency, name))
-            index_rows.append((tkr, exch, idx_name))
+            if key not in universe_map:
+                universe_map[key] = (currency, name)
+            index_memberships.add((tkr, exch, idx_name))
 
-    result["counts"]["universe"] = len(universe_rows)
-    result["counts"]["indices"] = len(index_rows)
-    result["counts"]["per_index"] = {}
-    # Count per-index for reporting
-    for idx_name in WIKI_INDICES.keys():
-        count = sum(1 for r in index_rows if r[2] == idx_name)
-        result["counts"]["per_index"][idx_name] = count
+    result["counts"]["per_index"] = per_index_counts
+    result["counts"]["universe"] = len(universe_map)
+    result["counts"]["indices"] = len(index_memberships)
 
-    # Sanity check: SP500 alone should give us >400 tickers
-    sp500_count = result["counts"]["per_index"].get("SP500", 0)
+    # Sanity check: SP500 should be ~500
+    sp500_count = per_index_counts.get("SP500", 0)
     if sp500_count < 400:
-        msg = "SP500 returned only %d tickers, aborting to avoid wiping good data" % sp500_count
+        msg = "SP500 returned only %d, aborting to avoid wiping good data" % sp500_count
         log.error(msg)
         result["errors"].append(msg)
         result["took_seconds"] = round(time.time() - t0, 1)
         return result
 
-    if len(universe_rows) < 500:
-        msg = "Total universe only %d symbols, aborting" % len(universe_rows)
+    if len(universe_map) < 500:
+        msg = "Total universe only %d symbols, aborting" % len(universe_map)
         log.error(msg)
         result["errors"].append(msg)
         result["took_seconds"] = round(time.time() - t0, 1)
         return result
 
-    # Atomic DB swap
+    # Atomic write
     conn = _get_conn()
     c = conn.cursor()
     try:
         c.execute("BEGIN")
         c.execute("DELETE FROM universe_indices")
         c.execute("DELETE FROM universe")
+        universe_rows = [(sym, exch, cur, name) for (sym, exch), (cur, name) in universe_map.items()]
         c.executemany(
             "INSERT INTO universe (symbol, exchange, currency, name, updated_at) "
             "VALUES (?, ?, ?, ?, datetime('now'))",
             universe_rows
         )
+        index_rows = list(index_memberships)
         c.executemany(
             "INSERT INTO universe_indices (symbol, exchange, index_name) VALUES (?, ?, ?)",
             index_rows
@@ -311,8 +329,7 @@ def refresh_universe():
 if __name__ == "__main__":
     import sys
     print("Refreshing universe from Wikipedia index constituents...")
-    print("This takes 30-60 seconds.")
     print()
-    result = refresh_universe()
-    print(json.dumps(result, indent=2, default=str))
-    sys.exit(0 if result["ok"] else 1)
+    r = refresh_universe()
+    print(json.dumps(r, indent=2, default=str))
+    sys.exit(0 if r["ok"] else 1)
