@@ -38,6 +38,21 @@ def _safe_alter(conn, sql):
 
 
 # ═══════════════════════════════════════════════════════════════
+# CONNECTION HELPER
+# ═══════════════════════════════════════════════════════════════
+def _get_conn():
+    """Open a SQLite connection with sensible defaults.
+    - timeout=30s: so concurrent writes from the bot don't raise OperationalError immediately
+      when the DB is briefly locked by another writer (WAL mode still serialises writes).
+    - check_same_thread=False: the agent's uvicorn worker may call these helpers from threads
+      different to the one that first opened the connection. We close eagerly after every op
+      so thread affinity doesn't matter.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
+    return conn
+
+
+# ═══════════════════════════════════════════════════════════════
 # SCHEMA
 # ═══════════════════════════════════════════════════════════════
 def init_db():
