@@ -128,6 +128,12 @@ def update_smallcap_watchlists(us=None, ftse=None, asx=None):
         _cfg.ASX_SMALLCAP_WATCHLIST[:] = asx
     smallcap_pool["last_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     log.info(f"[SMALLCAP] Watchlists updated | US:{len(smallcap_pool['us'])} FTSE:{len(smallcap_pool['ftse'])} ASX:{len(smallcap_pool['asx'])}")
+    # Update IBKR exchange routing for new symbols
+    try:
+        from core.execution import _INTL_MARKET
+        for s in smallcap_pool["ftse"]: _INTL_MARKET[s] = ("LSE", "GBP")
+        for s in smallcap_pool["asx"]:  _INTL_MARKET[s] = ("ASX", "AUD")
+    except: pass
 
 
 # ── Intraday position manager ─────────────────────────────────
