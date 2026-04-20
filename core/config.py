@@ -111,18 +111,33 @@ MAX_EXPOSURE_PCT        = 30.0
 DAILY_PROFIT_TARGET_PCT = 2.0
 MAX_TRADE_PCT           = 5.0
 CRYPTO_EXPOSURE_PCT     = 20.0
-INTRADAY_TRADE_PCT      = 3.0
-CRYPTO_INTRADAY_PCT     = 2.0
-SMALLCAP_TRADE_PCT      = 2.5
+INTRADAY_TRADE_PCT      = 2.0
+CRYPTO_INTRADAY_PCT     = 1.0
+SMALLCAP_TRADE_PCT      = 1.5
+CRYPTO_MAX_TRADE_PCT    = 1.5  # Bug 8: dedicated crypto SWING sizing (separate from intraday)
+
+# ── Binance Paper Trading Base (2026-04-20) ───────────────────
+# Binance testnet balance is ~$9,480 but drifts. For stable sizing
+# during paper trading, pin a fixed base. Dynamic recalc at runtime
+# (main.py SIZING block) still overrides cfg.* using real binance_pv
+# whenever it's available, but the STATIC import baseline is now
+# realistic instead of $1M (which produced $20K crypto orders).
+BINANCE_PAPER_BALANCE   = 10000.0
+
+# ── Order failure cooldown (Bug 10) ───────────────────────────
+# After a place_order fails, the symbol is blocked for this many
+# minutes to stop cycle-after-cycle retry spam.
+ORDER_FAILED_COOLDOWN_MINUTES = 15
 
 MAX_DAILY_LOSS         = STARTING_BALANCE * MAX_DAILY_LOSS_PCT / 100
 MAX_DAILY_SPEND        = STARTING_BALANCE * MAX_DAILY_SPEND_PCT / 100
 MAX_PORTFOLIO_EXPOSURE = STARTING_BALANCE * MAX_EXPOSURE_PCT / 100
 DAILY_PROFIT_TARGET    = STARTING_BALANCE * DAILY_PROFIT_TARGET_PCT / 100
 MAX_TRADE_VALUE        = STARTING_BALANCE * MAX_TRADE_PCT / 100
-CRYPTO_MAX_EXPOSURE    = STARTING_BALANCE * CRYPTO_EXPOSURE_PCT / 100
+CRYPTO_MAX_EXPOSURE    = BINANCE_PAPER_BALANCE * CRYPTO_EXPOSURE_PCT / 100
 INTRADAY_MAX_TRADE     = STARTING_BALANCE * INTRADAY_TRADE_PCT / 100
-CRYPTO_INTRADAY_MAX_TRADE = STARTING_BALANCE * CRYPTO_INTRADAY_PCT / 100
+CRYPTO_INTRADAY_MAX_TRADE = BINANCE_PAPER_BALANCE * CRYPTO_INTRADAY_PCT / 100
+CRYPTO_MAX_TRADE       = BINANCE_PAPER_BALANCE * CRYPTO_MAX_TRADE_PCT / 100  # Bug 8: crypto swing
 SMALLCAP_MAX_TRADE     = STARTING_BALANCE * SMALLCAP_TRADE_PCT / 100
 
 # ── Stop / Trail / Take Profit ────────────────────────────────
