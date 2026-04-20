@@ -1,40 +1,34 @@
 """
-data/universe_loader.py -- AlphaBot tradeable universe loader
+data/universe_loader.py -- AlphaBot tradeable universe loader (Wikipedia-only edition)
 
-Responsibilities:
-  1. Fetch IBKR product directories for NYSE/NASDAQ/LSE/ASX (all tradeable common stocks)
-  2. Fetch index constituent lists from Wikipedia (SP 500, Russell 2000, FTSE 100/250,
-     ASX 200, etc.)
-  3. Cross-reference: only store symbols in BOTH IBKR AND at least one index
-  4. Write to `universe` and `universe_indices` tables
-  5. Idempotent: uses atomic transaction, re-runs safely
-  6. ASCII-only output and ASCII-safe error handling (server locale may be latin-1)
+IBKR's product directory moved to JavaScript rendering (no HTML tables),
+so we rely solely on Wikipedia index constituents.
 
-Usage:
-    from data.universe_loader import refresh_universe
-    result = refresh_universe()
+Indices fetched:
+  US:   SP500, SP400, SP600, NASDAQ100, DJIA
+  UK:   FTSE100, FTSE250
+  AUS:  ASX200, ASX300
 
-Run standalone:
-    python3 -m data.universe_loader
+Every ticker in these indices is tradeable on IBKR (validated organically by
+bot runtime; any Error 200 symbols get stripped in subsequent refresh).
+
+Writes to `universe` and `universe_indices` tables.
 """
 import logging
 import sqlite3
 import time
 import json
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 from html.parser import HTMLParser
 import re
 
 DB_PATH = "/home/alphabot/app/alphabot.db"
-USER_AGENT = "AlphaBot/1.0 (personal trading bot)"
+USER_AGENT = "Mozilla/5.0 AlphaBot/1.0 (personal trading bot)"
 HTTP_TIMEOUT = 30
-HTTP_DELAY = 0.5  # polite: 2 req/sec max
+HTTP_DELAY = 0.5
 
 
 def _ascii_safe(s):
-    """Convert any string to ASCII-safe form -- strips non-ASCII chars.
-    Used before logging to avoid latin-1 codec crashes on non-UTF8 VPS."""
     try:
         return str(s).encode("ascii", errors="replace").decode("ascii")
     except Exception:
@@ -51,28 +45,23 @@ if not log.handlers:
 
 
 # ==============================================================
-# HTTP HELPERS
+# HTTP
 # ==============================================================
-def _http_get(url, referer=None):
-    """Polite GET with delay, UA header, timeout. Returns str or raises."""
+def _http_get(url):
     time.sleep(HTTP_DELAY)
-    headers = {
+    req = Request(url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    if referer:
-        headers["Referer"] = referer
-    req = Request(url, headers=headers)
+    })
     with urlopen(req, timeout=HTTP_TIMEOUT) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
 
 # ==============================================================
-# SOURCE 1 -- WIKIPEDIA INDEX CONSTITUENTS
+# WIKIPEDIA PARSER
 # ==============================================================
 class WikiTableParser(HTMLParser):
-    """Extract wikitable sortable rows. First <td> in each <tr> is the ticker."""
+    """Extract rows from <table class="wikitable ...">, handling nested tables."""
     def __init__(self, ticker_col=0, name_col=1):
         super().__init__()
         self.in_table = False
@@ -92,10 +81,10 @@ class WikiTableParser(HTMLParser):
             if "wikitable" in classes and not self.in_table:
                 self.in_table = True
                 self._table_depth = 0
-        elif self.in_table:
-            if tag == "table":
+            elif self.in_table:
                 self._table_depth += 1
-            elif tag == "tr" and self._table_depth == 0:
+        elif self.in_table:
+            if tag == "tr" and self._table_depth == 0:
                 self.in_row = True
                 self.current_row = []
             elif tag in ("td", "th") and self.in_row:
@@ -103,7 +92,7 @@ class WikiTableParser(HTMLParser):
                 self.current_cell = []
 
     def handle_endtag(self, tag):
-        if tag == "table":
+        if tag == "table" and self.in_table:
             if self._table_depth > 0:
                 self._table_depth -= 1
             else:
@@ -123,47 +112,53 @@ class WikiTableParser(HTMLParser):
             self.current_cell.append(data)
 
     def get_tickers(self):
-        """Return list of (ticker, name) tuples, skipping header rows."""
+        """Return list of (ticker, name) tuples. Filters junk."""
         out = []
         for r in self.rows:
             if len(r) <= max(self.ticker_col, self.name_col):
                 continue
-            tkr = r[self.ticker_col].strip()
-            name = r[self.name_col].strip() if self.name_col < len(r) else ""
-            # Skip headers
-            if tkr.lower() in ("ticker", "symbol", "code", "epic", "asx code", "asx code[1]"):
+            tkr_raw = r[self.ticker_col].strip()
+            name = _ascii_safe(r[self.name_col].strip() if self.name_col < len(r) else "")
+            # Normalize ticker: ASCII uppercase, strip exchange suffixes common on Wikipedia
+            tkr = _ascii_safe(tkr_raw).upper().strip()
+            # Remove trailing exchange suffix like "BHP.L" -> "BHP" (for LSE)
+            # and "BHP.AX" -> "BHP" (for ASX)
+            # But preserve genuine dots like "BRK.B" (class B shares)
+            if tkr.endswith(".L") or tkr.endswith(".AX"):
+                tkr = tkr.rsplit(".", 1)[0]
+            # Filters
+            if not tkr or len(tkr) > 6:
                 continue
-            # Skip empties
-            if not tkr or len(tkr) > 10:
+            if tkr.lower() in ("ticker", "symbol", "code", "epic", "asxcode", "ref"):
                 continue
-            # Normalize to ASCII uppercase
-            tkr = _ascii_safe(tkr).upper().strip()
-            name = _ascii_safe(name)
-            if not tkr:
+            # Must be uppercase letters with optional dot (for BRK.B, etc)
+            if not re.match(r"^[A-Z][A-Z0-9.]*[A-Z0-9]$", tkr) and len(tkr) > 1:
+                continue
+            if not re.match(r"^[A-Z]$", tkr) and len(tkr) == 1:
                 continue
             out.append((tkr, name))
         return out
 
 
-# Index sources: (index_name, url, ticker_col, name_col)
+# Index sources: (url, ticker_col, name_col, exchange)
 WIKI_INDICES = {
-    "SP500":     ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0, 1),
-    "SP400":     ("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0, 1),
-    "SP600":     ("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 0, 1),
-    "NASDAQ100": ("https://en.wikipedia.org/wiki/Nasdaq-100", 1, 0),
-    "FTSE100":   ("https://en.wikipedia.org/wiki/FTSE_100_Index", 0, 1),
-    "FTSE250":   ("https://en.wikipedia.org/wiki/FTSE_250_Index", 0, 1),
-    "ASX200":    ("https://en.wikipedia.org/wiki/S%26P/ASX_200", 0, 1),
-    "ASX300":    ("https://en.wikipedia.org/wiki/S%26P/ASX_300", 0, 1),
-    "DJIA":      ("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", 2, 0),
+    "SP500":     ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0, 1, "NYSE_NASDAQ"),
+    "SP400":     ("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0, 1, "NYSE_NASDAQ"),
+    "SP600":     ("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", 0, 1, "NYSE_NASDAQ"),
+    "NASDAQ100": ("https://en.wikipedia.org/wiki/Nasdaq-100", 1, 0, "NASDAQ"),
+    "DJIA":      ("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", 2, 0, "NYSE_NASDAQ"),
+    "FTSE100":   ("https://en.wikipedia.org/wiki/FTSE_100_Index", 0, 1, "LSE"),
+    "FTSE250":   ("https://en.wikipedia.org/wiki/FTSE_250_Index", 0, 1, "LSE"),
+    "ASX200":    ("https://en.wikipedia.org/wiki/S%26P/ASX_200", 0, 1, "ASX"),
+    "ASX300":    ("https://en.wikipedia.org/wiki/S%26P/ASX_300", 0, 1, "ASX"),
 }
 
 
 def fetch_index_members(index_name):
-    """Return list of (ticker, name) for a given index. ASCII-safe errors."""
+    """Return list of (ticker, name) from Wikipedia. ASCII-safe errors."""
     if index_name not in WIKI_INDICES:
         raise ValueError("Unknown index: %s" % index_name)
-    url, tkr_col, name_col = WIKI_INDICES[index_name]
+    url, tkr_col, name_col, _ = WIKI_INDICES[index_name]
     try:
         html = _http_get(url)
     except Exception as e:
@@ -181,129 +176,13 @@ def fetch_index_members(index_name):
 
 
 # ==============================================================
-# SOURCE 2 -- IBKR PRODUCT DIRECTORY
-# ==============================================================
-class IBKRProductParser(HTMLParser):
-    """Parse IBKR's STK product list table. Extract ALL cells per row as strings."""
-    def __init__(self):
-        super().__init__()
-        self.in_row = False
-        self.in_cell = False
-        self.current_cell = []
-        self.current_row = []
-        self.rows = []
-        self.in_relevant_table = False
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "table":
-            self.in_relevant_table = True
-        elif tag == "tr" and self.in_relevant_table:
-            self.in_row = True
-            self.current_row = []
-        elif tag in ("td", "th") and self.in_row:
-            self.in_cell = True
-            self.current_cell = []
-
-    def handle_endtag(self, tag):
-        if tag == "table":
-            self.in_relevant_table = False
-        elif tag == "tr" and self.in_row:
-            if self.current_row:
-                self.rows.append(self.current_row)
-            self.in_row = False
-        elif tag in ("td", "th") and self.in_cell:
-            text = "".join(self.current_cell).strip()
-            text = re.sub(r"\s+", " ", text)
-            self.current_row.append(text)
-            self.in_cell = False
-
-    def handle_data(self, data):
-        if self.in_cell:
-            self.current_cell.append(data)
-
-
-def fetch_ibkr_universe(exchange):
-    """
-    Fetch tradeable STK symbols from IBKR's product directory.
-    Returns list of (symbol, name, currency) tuples. ASCII-safe throughout.
-    """
-    base = "https://www.interactivebrokers.com/en/index.php"
-    results = []
-    page = 1
-    max_pages = 100
-    empty_pages = 0
-    while page <= max_pages:
-        url = "%s?f=2222&exch=%s&showcategories=STK&p=&cc=&limit=100&page=%d" % (base, exchange, page)
-        try:
-            html = _http_get(url, referer=base)
-        except Exception as e:
-            log.warning("IBKR %s page %d: %s", exchange, page, _ascii_safe(e))
-            empty_pages += 1
-            if empty_pages >= 3:
-                break
-            page += 1
-            continue
-        parser = IBKRProductParser()
-        try:
-            parser.feed(html)
-        except Exception as e:
-            log.warning("IBKR %s page %d parse error: %s", exchange, page, _ascii_safe(e))
-            page += 1
-            continue
-
-        found_this_page = 0
-        for row in parser.rows:
-            if len(row) < 2:
-                continue
-            raw_sym = _ascii_safe(row[0]).strip().upper()
-            # Must look like a valid stock ticker
-            if not raw_sym or len(raw_sym) > 10:
-                continue
-            if not re.match(r"^[A-Z0-9.\-]+$", raw_sym):
-                continue
-            if raw_sym.lower() in ("symbol", "ticker", "code"):
-                continue
-            name = _ascii_safe(row[2]) if len(row) >= 3 else ""
-            currency = _ascii_safe(row[1]) if len(row) >= 2 else ""
-            results.append((raw_sym, name, currency))
-            found_this_page += 1
-        if found_this_page == 0:
-            empty_pages += 1
-            if empty_pages >= 2:
-                log.info("IBKR %s: pagination done at page %d", exchange, page)
-                break
-        else:
-            empty_pages = 0
-        page += 1
-    # Deduplicate by symbol
-    seen = set()
-    unique = []
-    for sym, name, cur in results:
-        if sym in seen:
-            continue
-        seen.add(sym)
-        unique.append((sym, name, cur))
-    log.info("IBKR %s: %d unique STK symbols", exchange, len(unique))
-    return unique
-
-
-IBKR_EXCHANGES = {
-    "nyse":   ("NYSE",   "USD"),
-    "nasdaq": ("NASDAQ", "USD"),
-    "lse":    ("LSE",    "GBP"),
-    "asx":    ("ASX",    "AUD"),
-}
-
-
-# ==============================================================
-# DB SCHEMA + WRITE
+# DB
 # ==============================================================
 def _get_conn():
     return sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
 
 
 def ensure_schema():
-    """Create universe + universe_indices tables if not present."""
     conn = _get_conn()
     c = conn.cursor()
     c.execute("""
@@ -332,98 +211,70 @@ def ensure_schema():
 
 def refresh_universe():
     """
-    End-to-end refresh:
-      1. Fetch IBKR universe per exchange
-      2. Fetch Wikipedia index constituents
-      3. Cross-reference -- only keep symbols in BOTH
-      4. Atomically swap into live tables
-    Returns dict with counts + errors. ASCII-safe throughout.
+    Fetch Wikipedia indices, write to universe + universe_indices tables.
+    Each index_name maps to a specific exchange (US indices -> NYSE for now,
+    since we pick watchlists by index not by exchange).
     """
     t0 = time.time()
     ensure_schema()
 
     result = {"ok": False, "counts": {}, "errors": [], "took_seconds": 0.0}
 
-    # Step 1: fetch IBKR universe per exchange
-    ibkr_data = {}
-    for exch_key, (exch_code, currency) in IBKR_EXCHANGES.items():
-        try:
-            syms = fetch_ibkr_universe(exch_key)
-            ibkr_data[exch_code] = {s: (n, c or currency) for s, n, c in syms}
-        except Exception as e:
-            err = _ascii_safe(e)
-            log.error("IBKR %s fetch failed: %s", exch_code, err)
-            result["errors"].append("IBKR %s: %s" % (exch_code, err))
-            ibkr_data[exch_code] = {}
+    # Exchange resolution: US indices use "US" as a virtual exchange
+    # (main.py doesn't care which US exchange -- it routes via SMART anyway).
+    # For LSE and ASX, tickers are ambiguous without suffix, we use the exchange
+    # as the lookup for IBKR contract routing.
+    def _exchange_for(index_name):
+        _, _, _, exch = WIKI_INDICES[index_name]
+        if exch == "NYSE_NASDAQ":
+            return "US"  # IBKR SMART handles this
+        if exch == "NASDAQ":
+            return "US"
+        return exch  # LSE, ASX
 
-    # Sanity check
-    nyse_count = len(ibkr_data.get("NYSE", {}))
-    if nyse_count < 500:
-        msg = "NYSE universe too small (%d), aborting to avoid wiping good data" % nyse_count
-        log.error(msg)
-        result["errors"].append(msg)
-        result["took_seconds"] = time.time() - t0
-        return result
+    universe_rows = []  # (symbol, exchange, currency, name)
+    index_rows = []     # (symbol, exchange, index_name)
+    seen_universe = set()  # (symbol, exchange) keys
 
-    # Step 2: fetch Wikipedia indices
-    index_data = {}
     for idx_name in WIKI_INDICES.keys():
+        exch = _exchange_for(idx_name)
+        currency = {"US": "USD", "LSE": "GBP", "ASX": "AUD"}.get(exch, "USD")
         members = fetch_index_members(idx_name)
-        index_data[idx_name] = members
-
-    # Step 3: cross-reference
-    index_exchange_hint = {
-        "SP500": ["NYSE", "NASDAQ"],
-        "SP400": ["NYSE", "NASDAQ"],
-        "SP600": ["NYSE", "NASDAQ"],
-        "NASDAQ100": ["NASDAQ"],
-        "DJIA": ["NYSE", "NASDAQ"],
-        "FTSE100": ["LSE"],
-        "FTSE250": ["LSE"],
-        "ASX200": ["ASX"],
-        "ASX300": ["ASX"],
-    }
-
-    universe_rows = []
-    index_rows = []
-    seen = set()
-
-    for idx_name, members in index_data.items():
-        candidates = index_exchange_hint.get(idx_name, ["NYSE", "NASDAQ", "LSE", "ASX"])
+        if not members:
+            log.warning("%s: returned 0 members, skipping", idx_name)
+            continue
         for tkr, name in members:
-            matched_exch = None
-            variants = [tkr, tkr.replace(".", ""), tkr.split(".")[0]]
-            for exch in candidates:
-                ibkr_pool = ibkr_data.get(exch, {})
-                for var in variants:
-                    if var in ibkr_pool:
-                        matched_exch = exch
-                        tkr = var
-                        break
-                if matched_exch:
-                    break
-            if not matched_exch:
-                continue
-            key = (tkr, matched_exch)
-            if key not in seen:
-                seen.add(key)
-                ibkr_name, ibkr_currency = ibkr_data[matched_exch][tkr]
-                universe_rows.append((tkr, matched_exch, ibkr_currency, ibkr_name or name))
-            index_rows.append((tkr, matched_exch, idx_name))
+            key = (tkr, exch)
+            if key not in seen_universe:
+                seen_universe.add(key)
+                universe_rows.append((tkr, exch, currency, name))
+            index_rows.append((tkr, exch, idx_name))
 
-    result["counts"]["ibkr_raw"] = {e: len(d) for e, d in ibkr_data.items()}
-    result["counts"]["index_raw"] = {k: len(v) for k, v in index_data.items()}
     result["counts"]["universe"] = len(universe_rows)
     result["counts"]["indices"] = len(index_rows)
+    result["counts"]["per_index"] = {}
+    # Count per-index for reporting
+    for idx_name in WIKI_INDICES.keys():
+        count = sum(1 for r in index_rows if r[2] == idx_name)
+        result["counts"]["per_index"][idx_name] = count
 
-    if len(universe_rows) < 500:
-        msg = "Cross-referenced universe too small (%d), aborting" % len(universe_rows)
+    # Sanity check: SP500 alone should give us >400 tickers
+    sp500_count = result["counts"]["per_index"].get("SP500", 0)
+    if sp500_count < 400:
+        msg = "SP500 returned only %d tickers, aborting to avoid wiping good data" % sp500_count
         log.error(msg)
         result["errors"].append(msg)
-        result["took_seconds"] = time.time() - t0
+        result["took_seconds"] = round(time.time() - t0, 1)
         return result
 
-    # Step 4: atomic swap
+    if len(universe_rows) < 500:
+        msg = "Total universe only %d symbols, aborting" % len(universe_rows)
+        log.error(msg)
+        result["errors"].append(msg)
+        result["took_seconds"] = round(time.time() - t0, 1)
+        return result
+
+    # Atomic DB swap
     conn = _get_conn()
     c = conn.cursor()
     try:
@@ -447,7 +298,7 @@ def refresh_universe():
         err = _ascii_safe(e)
         log.error("DB write failed: %s", err)
         result["errors"].append("DB: %s" % err)
-        result["took_seconds"] = time.time() - t0
+        result["took_seconds"] = round(time.time() - t0, 1)
         conn.close()
         return result
     conn.close()
@@ -459,8 +310,8 @@ def refresh_universe():
 
 if __name__ == "__main__":
     import sys
-    print("Refreshing universe from IBKR + Wikipedia...")
-    print("This takes 1-5 minutes. Please wait.")
+    print("Refreshing universe from Wikipedia index constituents...")
+    print("This takes 30-60 seconds.")
     print()
     result = refresh_universe()
     print(json.dumps(result, indent=2, default=str))
