@@ -575,14 +575,69 @@ def build_dashboard():
                 f'</div>{bd_html2}</div>'
                 f'</div>'
             )
+        # ── Holdings totals: position $, % of portfolio (vs MAX_EXPOSURE_PCT cap),
+        #    weighted avg P&L % (Σpnl / Σcost · weights by position size, not equal).
+        _tot_pos_val = 0.0
+        _tot_pnl     = 0.0
+        _tot_cost    = 0.0
+        for _, _p, _, _ in all_pos:
+            _e = _p.get("entry_price") or 0
+            _q = _p.get("qty") or 0
+            _l = _p.get("_live") or _p.get("highest_price", _e)
+            _tot_pos_val += _l * _q
+            _tot_pnl     += (_l - _e) * _q
+            _tot_cost    += _e * _q
+        _wpct      = (_tot_pnl / _tot_cost * 100.0) if _tot_cost else 0.0
+        _wpct_col  = "#00ff88" if _wpct >= 0 else "#ff4466"
+        _wpct_sign = "+" if _wpct >= 0 else ""
+        _cap_pct   = float(getattr(cfg, "MAX_EXPOSURE_PCT", 30.0))
+        _port_pct  = (_tot_pos_val / port_val * 100.0) if port_val else 0.0
+        if _port_pct < _cap_pct * 0.66:
+            _port_col = "#94a3b8"
+        elif _port_pct < _cap_pct:
+            _port_col = "#ffcc00"
+        else:
+            _port_col = "#ff4466"
+        _totals_tfoot = (
+            f'<tfoot><tr style="border-top:2px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.025)">'
+            f'<td colspan="7" style="padding:14px 12px;font-size:11px;letter-spacing:1.5px;'
+            f'text-transform:uppercase;color:#94a3b8;font-weight:700">Total Positions</td>'
+            f'<td style="padding:14px 12px;font-weight:700;font-size:14px">'
+            f'${_tot_pos_val:,.0f} '
+            f'<span style="color:{_port_col};font-weight:700">({_port_pct:.1f}%)</span>'
+            f'<span style="color:#6b7280;font-weight:400;font-size:11px"> · cap {_cap_pct:.0f}%</span>'
+            f'</td>'
+            f'<td style="padding:14px 12px;color:{_wpct_col};font-weight:700;font-size:14px">'
+            f'{_wpct_sign}{_wpct:.2f}% '
+            f'<span style="color:#6b7280;font-weight:400;font-size:11px">wtd</span>'
+            f'</td>'
+            f'</tr></tfoot>'
+        )
+        _totals_card = (
+            f'<div style="margin-top:12px;padding:14px 16px;'
+            f'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);'
+            f'border-radius:10px">'
+            f'<div style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;'
+            f'color:#94a3b8;font-weight:700;margin-bottom:8px">Total Positions</div>'
+            f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">'
+            f'<span style="font-weight:700;font-size:16px">${_tot_pos_val:,.0f}</span>'
+            f'<span style="color:{_port_col};font-weight:700;font-size:15px">{_port_pct:.1f}%</span>'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280">'
+            f'<span>cap {_cap_pct:.0f}%</span>'
+            f'<span style="color:{_wpct_col};font-weight:700">{_wpct_sign}{_wpct:.2f}% wtd avg</span>'
+            f'</div>'
+            f'</div>'
+        )
         positions_html = (
             f'<div class="card" style="margin-bottom:16px">'
             f'<div class="section-title">CURRENTLY HOLDING ({len(all_pos)}) <span style="font-size:13px;color:#94a3b8;font-weight:400;font-family:\'JetBrains Mono\'"></span></div>'
             f'<div class="pos-table-wrap table-wrap"><table><thead><tr>'
             f'<th>Symbol</th><th>Type</th><th>Held</th><th>Purchased</th>'
             f'<th>Entry $</th><th>Live $</th><th>Stop</th><th>Position $</th><th>P&L</th>'
-            f'</tr></thead><tbody>{pos_rows}</tbody></table></div>'
+            f'</tr></thead><tbody>{pos_rows}</tbody>{_totals_tfoot}</table></div>'
             f'<div class="pos-cards">{iphone_pos_cards}</div>'
+            f'{_totals_card}'
             f'</div>'
             f'<script>'
             f'function toggleDetail(i){{var r=document.getElementById("det-"+i);r.style.display=r.style.display==="none"?"table-row":"none";}}'
