@@ -1,22 +1,15 @@
 """
-data/watchlist_refresh.py -- refresh 6 watchlists from the universe table
+data/watchlist_refresh.py -- refresh 6 watchlists from the universe table.
 
-Picks highest-priority tradeable symbols per market, writes to the
-`watchlists` table that main.py reads at startup.
+Exchange values: "US" (for US stocks -- IBKR SMART routes), "LSE", "ASX".
 
-Priority heuristic (index membership):
-  US swing:      SP500 > NASDAQ100 > DJIA > SP400 -> target 250
-  US smallcap:   SP600 -> target 100
-  FTSE swing:    FTSE100 > FTSE250 -> target 250
-  FTSE smallcap: FTSE250 tail not in swing -> target 100
-  ASX swing:     ASX200 > ASX300 -> target 250
-  ASX smallcap:  ASX300 not in swing -> target 100
-
-Safety:
-  - Archives current watchlists to watchlists_history before overwriting
-  - If universe empty or <500 rows, aborts
-  - If any watchlist <25 symbols, aborts
-  - ASCII-safe logging and error messages
+Priority cascade:
+  us:            SP500 > NASDAQ100 > DJIA > SP400 -> 250
+  us_smallcap:   SP600 -> 100
+  ftse:          FTSE100 > FTSE250 -> 250
+  ftse_smallcap: FTSE250 not in swing -> 100
+  asx:           ASX200 > ASX300 -> 250
+  asx_smallcap:  ASX300 not in swing -> 100
 """
 import logging
 import sqlite3
@@ -57,7 +50,6 @@ TARGETS = {
 
 
 def _query_by_indices(conn, index_priority_list, exchanges, target, exclude_set=None):
-    """Return up to `target` symbols ranked by index priority."""
     exclude_set = exclude_set or set()
     c = conn.cursor()
     selected = []
@@ -87,10 +79,6 @@ def _query_by_indices(conn, index_priority_list, exchanges, target, exclude_set=
 
 
 def refresh_watchlists_from_universe():
-    """
-    Build 6 watchlists from universe and write to watchlists table.
-    Returns dict with counts, selections, and any errors.
-    """
     t0 = time.time()
     result = {
         "ok": False,
@@ -112,19 +100,17 @@ def refresh_watchlists_from_universe():
         return result
 
     if total < 500:
-        result["errors"].append(
-            "Universe has only %d symbols, run refresh_universe first" % total
-        )
+        result["errors"].append("Universe has only %d symbols, run refresh_universe first" % total)
         conn.close()
         return result
 
     log.info("Universe contains %d symbols, building watchlists", total)
 
     us = _query_by_indices(
-        conn, ["SP500", "NASDAQ100", "DJIA", "SP400"], ["NYSE", "NASDAQ"], TARGETS["us"]
+        conn, ["SP500", "NASDAQ100", "DJIA", "SP400"], ["US"], TARGETS["us"]
     )
     us_sm = _query_by_indices(
-        conn, ["SP600"], ["NYSE", "NASDAQ"], TARGETS["us_smallcap"], exclude_set=set(us)
+        conn, ["SP600"], ["US"], TARGETS["us_smallcap"], exclude_set=set(us)
     )
     ftse = _query_by_indices(
         conn, ["FTSE100", "FTSE250"], ["LSE"], TARGETS["ftse"]
@@ -150,7 +136,7 @@ def refresh_watchlists_from_universe():
 
     low_counts = {k: len(v) for k, v in lists.items() if len(v) < 25}
     if low_counts:
-        msg = "Low ticker counts: %s -- aborting to preserve current watchlists" % low_counts
+        msg = "Low ticker counts: %s, aborting to preserve current watchlists" % low_counts
         log.error(msg)
         result["errors"].append(msg)
         result["counts"] = {k: len(v) for k, v in lists.items()}
