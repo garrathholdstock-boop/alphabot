@@ -58,6 +58,58 @@ TARGETS = {
     "asx_smallcap":  100,
 }
 
+# Known-bad tickers that IBKR rejects with Error 200 ("no security definition")
+# or that have been delisted/renamed/acquired. These are filtered from ALL
+# watchlists at build time to keep Gateway calls clean and reduce connection
+# instability from retry storms on invalid contracts.
+#
+# Add tickers here as they're discovered. Each entry should have a note.
+DEAD_IBKR_TICKERS = {
+    # Confirmed rejected by IBKR in 2026-04-20 production logs (all US equities)
+    "AKRO",   # biotech — IBKR Error 200
+    "AYX",    # Alteryx — went private (Apr 2024)
+    "BASE",   # Couchbase — IBKR Error 200 (possibly CBASE now)
+    "BITF",   # Bitfarms — IBKR Error 200 (possibly delisted on SMART)
+    "CFLT",   # Confluent — IBKR Error 200 (should work but rejected)
+    "CTIC",   # CTI BioPharma — acquired by Sobi, delisted (Jun 2023)
+    "DWAC",   # Digital World Acquisition — merged into DJT (Trump Media)
+    "FSR",    # Fisker — bankruptcy filed, delisted (Jun 2024)
+    "GOEV",   # Canoo — bankruptcy filed (Jan 2025)
+    "GTHX",   # G1 Therapeutics — acquired by Pharmacosmos
+    "HES",    # Hess — acquired by Chevron
+    "LAZR",   # Luminar — IBKR Error 200
+    "LAZY",   # Lazydays RV — IBKR Error 200
+    "MMAT",   # Meta Materials — bankruptcy (Jul 2024)
+    "MRO",    # Marathon Oil — acquired by ConocoPhillips (Nov 2024)
+    "NKLA",   # Nikola — bankruptcy (Feb 2025)
+    "PARA",   # Paramount — now PSKY after Skydance merger (Aug 2025)
+    "PNTM",   # Pontem — IBKR Error 200
+    "PTRA",   # Proterra — bankruptcy, delisted (Aug 2023)
+    "PXD",    # Pioneer Natural — acquired by ExxonMobil (May 2024)
+    "SAVA",   # Cassava Sciences — IBKR Error 200
+    "SQ",     # Square — renamed to XYZ (Block, Jan 2025)
+    "STCO",   # Starco Brands — IBKR Error 200
+    "VLDR",   # Velodyne — merged into Ouster (OUST, Feb 2023)
+    "WISH",   # ContextLogic — IBKR Error 200 (Wish divested assets)
+    "YELL",   # Yellow Corp — bankruptcy, delisted (Aug 2023)
+    # Additional high-confidence dead/renamed (widely reported)
+    "FB",     # Meta — renamed to META (Jun 2022)
+    "TWTR",   # Twitter — taken private by Musk (Oct 2022)
+    "FISV",   # Fiserv — renamed to FI (Jul 2024)
+    "ATVI",   # Activision Blizzard — acquired by Microsoft (Oct 2023)
+    "VMW",    # VMware — acquired by Broadcom, delisted (Nov 2023)
+}
+
+
+def _filter_dead(tickers):
+    """Strip DEAD_IBKR_TICKERS entries from a ticker list, preserving order."""
+    before = len(tickers)
+    clean  = [t for t in tickers if t not in DEAD_IBKR_TICKERS]
+    dropped = before - len(clean)
+    if dropped:
+        log.info("Filtered %d dead ticker(s) from %d-entry list", dropped, before)
+    return clean
+
 MIN_LIST_SIZE = 15   # abort if any list falls below this
 ASX300_HEALTHY_THRESHOLD = 150  # if ASX300 has >=150 members, use it normally
 
@@ -249,6 +301,10 @@ def refresh_watchlists_from_universe():
         "ftse_smallcap": ftse_sm,
         "asx_smallcap": asx_sm,
     }
+
+    # Filter known-bad tickers from every list. Blocklist DEAD_IBKR_TICKERS is
+    # maintained above — entries get added as IBKR rejections are observed.
+    lists = {k: _filter_dead(v) for k, v in lists.items()}
 
     # Abort if any list is severely short
     low_counts = {k: len(v) for k, v in lists.items() if len(v) < MIN_LIST_SIZE}
