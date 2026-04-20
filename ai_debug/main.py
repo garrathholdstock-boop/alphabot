@@ -34,15 +34,7 @@ BASE = os.environ.get("ROOT_PATH", "")
 SESSIONS = {}
 
 # ── Config ────────────────────────────────────────────────────
-_KEY_FILE = "/home/alphabot/app/.claude_api_key"
-def _load_claude_key():
-    try:
-        with open(_KEY_FILE) as _f:
-            k = _f.read().strip()
-            if k.startswith("sk-ant"): return k
-    except: pass
-    return os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_KEY    = _load_claude_key()
+CLAUDE_API_KEY    = os.environ.get("CLAUDE_API_KEY", "")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "8749498685:AAHIlJrx6Hf8SxyF5R0oXPJGYoFN5JnEg5c")
 TELEGRAM_CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")  # swap in when you have it
 DB_PATH           = "/home/alphabot/app/alphabot.db"
@@ -856,19 +848,22 @@ def _update_context_md():
         today = datetime.now(PARIS).strftime("%d-%b-%Y %H:%M")
         bot_up = is_bot_running()
 
-        # Read live positions from positions.json (more accurate than DB)
+        # Read live positions from DB (bot_positions table)
         pos_summary = "None open"
         try:
-            with open("/home/alphabot/app/positions.json") as f:
-                pos_data = json.load(f)
-            if pos_data:
-                pos_lines = []
-                for sym, p in pos_data.items():
-                    qty = p.get("qty", "?")
-                    entry = p.get("entry_price", 0)
-                    typ = p.get("_type", "")
-                    pos_lines.append(f"{sym} x{qty} @ ${entry:.2f} [{typ}]")
-                pos_summary = ", ".join(pos_lines)
+            conn = sqlite3.connect(DB_PATH)
+            row = conn.execute("SELECT positions FROM bot_positions WHERE id = 1").fetchone()
+            conn.close()
+            if row:
+                pos_data = json.loads(row[0])
+                if pos_data:
+                    pos_lines = []
+                    for sym, p in pos_data.items():
+                        qty = p.get("qty", "?")
+                        entry = p.get("entry_price", 0)
+                        typ = p.get("_type", "")
+                        pos_lines.append(f"{sym} x{qty} @ ${entry:.2f} [{typ}]")
+                    pos_summary = ", ".join(pos_lines)
         except:
             pass
 
@@ -920,51 +915,32 @@ def _update_context_md():
 ## Architecture
 - VPS: 178.104.170.58 (Hetzner), user: root, Paris = UTC+2
 - Git root: /home/alphabot/app/ (branch: main)
-- **Services run via systemd — NOT screen sessions**
-- systemctl restart alphabot          → restarts trading bot
-- systemctl restart alphabot-dashboard → restarts dashboard
-- systemctl restart alphabot-agent     → restarts this agent
-- systemctl status alphabot            → check if running
+- Bot start: bash /home/alphabot/start.sh → screen session "alphabot"
+- start.sh runs: python3 -m app.main (NOT python3 app/main.py)
 - Dashboard: port 8080 | Debug agent: port 8000 | Intelligence: /intelligence
 - DB: /home/alphabot/app/alphabot.db
 - GitHub: https://github.com/garrathholdstock-boop/alphabot
-- Log: /home/alphabot/app/alphabot.log (archive with mv, then restart bot)
 
 ## File Structure
-- app/main.py — main trading loop (10 disciplines)
+- app/main.py — main trading loop (6 disciplines)
 - app/dashboard.py — web dashboard port 8080 + /intelligence + /analytics + /settings
-- core/config.py — all config + watchlists
-- core/execution.py — order execution (IBKR + Binance), unique clientIds per thread
+- core/config.py — all config + watchlists (US_WATCHLIST includes CBRE, BIPC, VRT, ANET, EQIX)
+- core/execution.py — order execution (IBKR + Binance)
+- core/risk.py — risk management
 - data/analytics.py — signal scoring + near-miss tracking + DB persistence
-- data/database.py — DB operations (v2 schema + bot_status + smallcap_watchlists)
-- data/intelligence.py — weekly Claude intelligence analysis
+- data/database.py — DB operations (v2: trades, near_misses, rotations, tuning_recommendations, intelligence_runs)
+- data/intelligence.py — weekly Claude intelligence analysis (Sunday 7pm ET + manual trigger)
 - ai_debug/main.py — this agent (port 8000)
-- trading_config.json — hot-reloaded every cycle (no restart needed)
-- .claude_api_key — Anthropic API key file (update via maintenance page)
-
-## 10 Trading Disciplines
-1. US Swing (US-Swing thread, clientId=2)
-2. US Intraday (Intraday thread, clientId=3)
-3. FTSE Swing (FTSE thread, clientId=4)
-4. ASX Swing (ASX thread, clientId=5)
-5. Smallcap US (Smallcap-US thread, clientId=6)
-6. Smallcap FTSE (Smallcap-FTSE thread, clientId=7)
-7. Smallcap ASX (Smallcap-ASX thread, clientId=8)
-8. Crypto Swing (Crypto-Swing thread, clientId=9)
-9. Crypto Intraday (Intraday thread via crypto flag)
-10. Bear (Bear thread, clientId=10)
-
-## Market Hours (Paris time)
-- US: 3:30pm–10pm Mon–Fri
-- FTSE: 9am–5:30pm Mon–Fri
-- ASX: 1am–7am Mon–Fri (opens Sunday 11pm UTC)
-- Crypto: 24/7
+- start.sh — starts 3 screens: alphabot, dashboard, agent
 
 ## Database Tables (v2 schema)
-- trades, near_misses, rotations, tuning_recommendations, intelligence_runs
-- stock_stats, agent_events, reports, config_history
-- bot_status: DB-backed status snapshot (replaces status.json)
-- smallcap_watchlists: written by Refresh Small Caps button, loaded on bot startup
+- trades: symbol, pnl, score, adx_at_entry, macd_bullish, breakout, rs_vs_spy, news_state, regime_at_entry, vix_at_entry, exit_category, discipline
+- near_misses: symbol, score, skip_reason, prices_since (JSON), pct_move, simulated_pnl_pct, mfe_pct, mae_pct, triggered, discipline
+- rotations: sold_symbol, bought_symbol, rotation_type (SCORE_ROTATE|STALE_EXIT), rotation_verdict (GOOD|BAD|NEUTRAL), 24h follow-up prices
+- tuning_recommendations: Claude-generated tuning actions with PENDING|APPLIED|DISMISSED|SNOOZED status
+- intelligence_runs: archive of weekly intelligence analysis runs + narratives
+- stock_stats: per-symbol aggregated stats
+- agent_events: this agent's event log
 
 ## Config (trading_config.json — hot-reloaded every 60s)
 - MIN_SIGNAL_SCORE={min_score} {'⚠️ RAISE TO 7 BEFORE GOING LIVE' if min_score < 7 else '✅'}
@@ -1152,17 +1128,13 @@ def clean(s):
 
 def is_safe(cmd):
     cmd = clean(cmd)
-    blocked = ['rm ', 'dd ', 'mkfs', 'reboot', 'shutdown', 'passwd', 'sudo',
-               '> /etc/passwd', '> /etc/shadow', '> /bin/', '> /usr/bin/']
+    blocked = ['rm ', 'chmod +x', '> /', 'dd ', 'mkfs', 'reboot', 'shutdown', 'passwd', 'sudo']
     if any(b in cmd for b in blocked):
         return False
     allowed = ['grep', 'cat ', 'head', 'tail', 'sed', 'wc ', 'ls ', 'find ', 'python3',
                'ps ', 'df ', 'free ', 'screen', 'git ', 'sqlite3', 'echo ', 'env',
-               'netstat', 'ss ', 'curl', 'cp ', 'pip ', 'wget ', 'bash ',
-               'chmod ', 'mkdir ', 'mv ', 'systemctl ', 'tee ', 'touch ']
-    return any(cmd.startswith(a) for a in allowed) or \
-           ('cat >' in cmd and '/home/alphabot' in cmd) or \
-           ('cat >' in cmd and '/etc/systemd' in cmd)
+               'netstat', 'ss ', 'curl', 'cp ', 'pip ', 'wget ', 'bash ']
+    return any(cmd.startswith(a) for a in allowed)
 
 
 def run_cmd(cmd, timeout=15):
@@ -1654,8 +1626,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
 
     # ── Quick actions ─────────────────────────────────────────
     quick_btns = [
-        ("🏥 Bot Health",      "Is the bot running and healthy? Check all 3 screens (alphabot, dashboard, agent), IBKR connection, and current positions."),
-        ("📊 Positions",       "Check current open positions from positions.json, their P&L, hold time, and stop distances."),
+        ("🏥 Bot Health",      "Is the bot running and healthy? Check all 3 systemd services (alphabot, alphabot-dashboard, alphabot-agent), IBKR connection, and current positions."),
+        ("📊 Positions",       "Check current open positions from bot_positions table in DB, their P&L, hold time, and stop distances."),
         ("🚨 Real Errors",     "Find any real errors in alphabot.log from the last 6 hours — ignore known cosmetics listed in CONTEXT.md."),
         ("🎯 Near Misses",     "Analyse near_misses table — what's the skip_reason breakdown? Are we getting blocked by SECTOR_CAP or MAX_TOTAL_POSITIONS more than SCORE?"),
         ("💰 Trading Check",   "Is the bot trading efficiently? Check exit_category distribution — too many STOPs vs TPs? Any execution blocks?"),
@@ -2207,15 +2179,17 @@ def _do_monday_check():
 
     # 6. Open positions — just list them
     try:
-        with open(os.path.join(APP_PATH, "positions.json")) as f:
-            pos = json.load(f)
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT positions FROM bot_positions WHERE id = 1").fetchone()
+        conn.close()
+        pos = json.loads(row[0]) if row else {}
         if pos:
             syms = ", ".join(pos.keys())
             checks.append(("ℹ️", f"Open positions going into Monday: {syms}"))
         else:
             checks.append(("ℹ️", "No open positions — starting Monday flat"))
     except:
-        checks.append(("ℹ️", "Could not read positions.json"))
+        checks.append(("ℹ️", "Could not read positions from DB"))
 
     # 7. Friday backup exists?
     backups = _list_backups()
@@ -2515,31 +2489,16 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
         Put up a dodgy file? Pick the file, see all dated backups for it,
         choose the version you want. PIN required. Never touches the database.
       </div>
-      <a href="{{BASE}}/maintenance/revert" style="text-decoration:none">
+      <a href="{BASE}/maintenance/revert" style="text-decoration:none">
         <button class="btn" style="width:100%;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3);color:#ffcc00">
           ↩ Revert a File
         </button>
       </a>
     </div>
-
-    <!-- Update API Key -->
-    <div style="background:#0a1020;border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:16px">
-      <div style="font-size:15px;font-weight:700;color:#f59e0b;margin-bottom:6px">🔑 Update API Key</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;line-height:1.6">
-        Paste a new Anthropic API key. Saved to VPS, agent restarts. PIN required.
-      </div>
-      <input id="api-key-input" type="password" placeholder="sk-ant-..."
-        style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:8px 10px;color:#f8fafc;font-family:monospace;font-size:12px;margin-bottom:10px">
-      <button onclick="updateApiKey()" class="btn" style="width:100%;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);color:#f59e0b">
-        🔑 Save New Key
-      </button>
-      <div id="api-key-result" style="display:none;margin-top:10px;font-size:12px;border-radius:6px;padding:8px"></div>
-    </div>
-
   </div>
 
 </div>
-{{backup_list_html}}
+{backup_list_html}
 
 <!-- Disk usage result -->
 <div id="disk-result" style="display:none" class="card">
@@ -2601,7 +2560,7 @@ function submitPin() {{
   fetch(BASE+'/maintenance/action', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{pin: pin, action: _pendingAction, api_key: _pendingApiKey}})
+    body: JSON.stringify({{pin: pin, action: _pendingAction}})
   }}).then(r => r.json()).then(d => {{
     if (d.status === 'wrong_pin') {{
       document.getElementById('pin-error').style.display = 'block';
@@ -2677,25 +2636,6 @@ function refreshSmallCaps() {{
       btn.style.opacity = '1';
     }});
 }}
-
-function updateApiKey() {{
-  var key = document.getElementById('api-key-input').value.trim();
-  var result = document.getElementById('api-key-result');
-  if (!key.startsWith('sk-ant')) {{
-    result.style.display = 'block';
-    result.style.color = '#ef4444';
-    result.textContent = 'Key must start with sk-ant';
-    return;
-  }}
-  _pendingApiKey = key;
-  document.getElementById('pin-label').textContent = 'Save new Anthropic API key and restart agent?';
-  document.getElementById('pin-error').style.display = 'none';
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-overlay').classList.add('visible');
-  document.getElementById('pin-input').focus();
-  _pendingAction = 'update-api-key';
-}}
-var _pendingApiKey = '';
 </script>
 </body></html>"""
 
@@ -2784,21 +2724,7 @@ async def maintenance_action(request: Request):
                 run_cmd("systemctl restart alphabot-agent", timeout=15)
             threading.Thread(target=_do_restart, daemon=True).start()
             _log_agent("Manual restart: agent (self)")
-            return JR({"status": "ok", "message": "✅ Agent restarting — this page will reload in 8 seconds.", "reload": 8, "reload_label": "🧠 Agent Restarting...", "reload_url": BASE + "/"})
-
-        elif action == "update-api-key":
-            new_key = body.get("api_key", "").strip()
-            if not new_key.startswith("sk-ant"):
-                return JR({"status": "error", "message": "❌ Invalid key — must start with sk-ant"})
-            with open("/home/alphabot/app/.claude_api_key", "w") as _kf:
-                _kf.write(new_key)
-            os.chmod("/home/alphabot/app/.claude_api_key", 0o600)
-            _log_agent("Claude API key updated via maintenance page")
-            def _restart_agent():
-                import time as _t; _t.sleep(2)
-                run_cmd("systemctl restart alphabot-agent", timeout=15)
-            threading.Thread(target=_restart_agent, daemon=True).start()
-            return JR({"status": "ok", "message": "✅ API key saved.", "reload": 8, "reload_label": "🔑 Saving API Key...", "reload_url": BASE + "/maintenance"})
+            return JR({"status": "ok", "message": "✅ Agent restarting — this page will reload in 8 seconds.", "reload": 8})
 
         elif action == "github-pull":
             # Safe force pull — resets tracked files to remote, never touches .env or DB
@@ -2882,26 +2808,28 @@ async def refresh_smallcaps():
     from fastapi.responses import JSONResponse as JR
     try:
         import anthropic as _ac
-        client = _ac.Anthropic(api_key=CLAUDE_API_KEY)
+        client = _ac.Anthropic()
 
-        today = datetime.now(PARIS).strftime("%Y-%m-%d")
-        prompt = f"""Today is {today}. You have web search available — use it now.
+        prompt = """You are AlphaBot's smallcap research assistant. Today is """ + datetime.now(PARIS).strftime("%Y-%m-%d") + """.
 
-Search for smallcap stocks with high momentum this week for 3 markets and return exactly 50 tickers per market.
+Research the past 7 days and generate 3 fresh smallcap watchlists for our trading bot. Use web search to find current market data.
 
-Step 1: Search "US smallcap momentum stocks high volume {today[:7]}" and pick 50 NYSE/NASDAQ tickers priced $2-$20.
-Step 2: Search "AIM LSE smallcap active stocks {today[:7]}" and pick 50 LSE/AIM tickers.
-Step 3: Search "ASX smallcap momentum stocks {today[:7]}" and pick 50 ASX tickers outside the top 50.
+Rules for each list:
+- Exactly 50 ticker symbols
+- Must be liquid (decent daily volume)
+- US list: NYSE/NASDAQ stocks $2-$20 price range, high momentum/speculative names
+- FTSE list: LSE/AIM-listed stocks with active trading, mix of sectors
+- ASX list: ASX-listed stocks outside the top 50, resources/tech/growth bias
 
-Do not refuse. Use your best judgment based on search results and known liquid smallcaps. If you cannot find 50 from search, fill the rest with known liquid smallcaps in that price range.
+Search for: recent smallcap movers, momentum stocks, high volume smallcaps this week for each market.
 
-Return ONLY this JSON, nothing else before or after:
-{{"us": ["IONQ","JOBY","ACHR","SOUN","CLOV","BBAI","HIMS","PAYO","RELY","PRAX","BCRX","FOLD","ARQT","OCGN","MVIS","LAZR","BLNK","CHPT","WKHS","SPCE","GOEV","INDI","OUST","AEVA","VLDR","AEYE","KOPN","PRPL","POWW","VNET","BKSY","RSKD","NUVL","IMVT","KALA","NRIX","SNDX","MGNX","GOCO","SWAG","GTHX","NCPL","LFST","MXCT","PNTM","ACMR","HLIT","BTBT","CIFR","CLSK"],
-"ftse": ["IQG","RWS","JTC","FOUR","AMS","CBOX","KNOS","BVXP","EKF","FRP","CML","GYM","TAST","MONY","PLUS","FDM","CLIG","RHM","FDEV","IGR","CMCX","YOU","RCH","BOKU","SHOE","MPAC","WINV","AFX","BGEO","SQZ","TIG","RDW","BOO","CARD","HYVE","TPX","VLX","SMDS","FSFL","MHN","QTX","SUMO","POLR","RBGP","GAMA","CRAW","ERM","CEPS","ASAI","IDP"],
-"asx": ["PLS","LTR","GL1","AKE","CXO","HMC","VUL","LKE","SYA","DRO","MEI","VHT","APX","TNE","SDR","NIC","SFR","GOR","RMS","WAF","DEG","BGL","NHC","YAL","TBN","HVN","SUL","UNI","IPD","GUD","NCK","MHJ","BAP","CCX","EML","PPH","SLR","SKC","AIM","BWX","IGL","MYX","PNV","AVH","PRN","CNI","KMD","NZM","SCP","AD8"],
-"summary": "Watchlists based on recent smallcap momentum research."}}
-
-Replace any tickers above with better ones you find from your web search. Keep exactly 50 per market."""
+Return ONLY a JSON object in this exact format, no other text:
+{
+  "us": ["TICK1","TICK2",...50 tickers],
+  "ftse": ["TICK1","TICK2",...50 tickers],
+  "asx": ["TICK1","TICK2",...50 tickers],
+  "summary": "Brief 2-sentence summary of what you found for each market"
+}"""
 
         loop = asyncio.get_event_loop()
         def _call():
@@ -2913,36 +2841,19 @@ Replace any tickers above with better ones you find from your web search. Keep e
             )
         response = await loop.run_in_executor(None, _call)
 
-        # Extract text from all content blocks including tool results
+        # Extract text from response
         text = ""
         for block in response.content:
             if hasattr(block, "text"):
                 text += block.text
-            elif hasattr(block, "content") and isinstance(block.content, list):
-                for sub in block.content:
-                    if hasattr(sub, "text"):
-                        text += sub.text
 
-        # Parse JSON — find the outermost { } containing our keys
+        # Parse JSON
         import re
-        json_match = re.search(r'\{\s*"us"\s*:', text)
+        json_match = re.search(r'\{[\s\S]*\}', text)
         if not json_match:
-            return JR({"status": "error", "message": f"Could not find JSON in response. Got: {text[:200]}"})
-        try:
-            # Find matching closing brace
-            start = json_match.start()
-            depth = 0
-            end = start
-            for i, ch in enumerate(text[start:]):
-                if ch == '{': depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0:
-                        end = start + i + 1
-                        break
-            data = json.loads(text[start:end])
-        except Exception as je:
-            return JR({"status": "error", "message": f"JSON parse error: {je}. Text: {text[:300]}"})
+            return JR({"status": "error", "message": "Could not parse Claude response"})
+
+        data = json.loads(json_match.group())
         us   = data.get("us", [])[:50]
         ftse = data.get("ftse", [])[:50]
         asx  = data.get("asx", [])[:50]
@@ -2951,21 +2862,26 @@ Replace any tickers above with better ones you find from your web search. Keep e
         if not us or not ftse or not asx:
             return JR({"status": "error", "message": f"Incomplete lists returned: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}"})
 
-        # Write directly to DB via sqlite3 — no import path issues
-        try:
-            import sqlite3 as _sq, json as _js
-            conn = _sq.connect(DB_PATH)
-            conn.execute("""
-                INSERT INTO smallcap_watchlists (id, us, ftse, asx, updated_at)
-                VALUES (1, ?, ?, ?, datetime('now'))
-                ON CONFLICT(id) DO UPDATE SET
-                    us=excluded.us, ftse=excluded.ftse,
-                    asx=excluded.asx, updated_at=excluded.updated_at
-            """, (_js.dumps(us), _js.dumps(ftse), _js.dumps(asx)))
-            conn.commit()
-            conn.close()
-        except Exception as dbe:
-            return JR({"status": "error", "message": f"DB write failed: {dbe}"})
+        # Write to config file so it persists across restarts
+        config_path = os.path.join(APP_PATH, "core/config.py")
+        with open(config_path, "r") as f:
+            cfg_txt = f.read()
+
+        def _replace_list(txt, var_name, new_list):
+            pattern = rf"{var_name}\s*=\s*\[[\s\S]*?\]"
+            items = ", ".join(f'"{s}"' for s in new_list)
+            # Format into groups of 10
+            groups = [new_list[i:i+10] for i in range(0, len(new_list), 10)]
+            lines = ",\n    ".join(", ".join(f'"{s}"' for s in g) for g in groups)
+            replacement = f"{var_name} = [\n    {lines},\n]"
+            return re.sub(pattern, replacement, txt, count=1)
+
+        cfg_txt = _replace_list(cfg_txt, "US_SMALLCAP_WATCHLIST", us)
+        cfg_txt = _replace_list(cfg_txt, "FTSE_SMALLCAP_WATCHLIST", ftse)
+        cfg_txt = _replace_list(cfg_txt, "ASX_SMALLCAP_WATCHLIST", asx)
+
+        with open(config_path, "w") as f:
+            f.write(cfg_txt)
 
         _log_agent(f"Smallcap refresh: US={len(us)} FTSE={len(ftse)} ASX={len(asx)}")
 
@@ -3226,36 +3142,26 @@ async def download_file(name: str = ""):
 @app.get("/log/lines")
 async def log_lines(since_byte: int = 0, tail: int = 0):
     """Return new log lines using byte position — reliable across restarts.
-    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from.
-    Detects log rotation (file shrinks) and resets byte position automatically."""
+    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from."""
     try:
         if not os.path.exists(LOG_PATH):
             return JSONResponse({"lines": [], "next_byte": 0})
         file_size = os.path.getsize(LOG_PATH)
-        # Detect log rotation — file is smaller than our position means it was rotated
-        if since_byte > file_size:
-            since_byte = 0
         if since_byte >= file_size:
             return JSONResponse({"lines": [], "next_byte": file_size})
-
-        _SKIP = ("INFO: 127.", "HTTP/1.1")
-        today_str = datetime.now(PARIS).strftime("%Y-%m-%d")
-
         # On first load (since_byte==0), jump to end and return last tail lines
         if since_byte == 0 and tail > 0:
             with open(LOG_PATH, "r", errors="replace") as f:
                 all_lines = [l.rstrip() for l in f.readlines()
-                             if l.strip() and not any(s in l for s in _SKIP)]
-            # Only show today's lines on fresh load
-            today_lines = [l for l in all_lines if l.startswith(today_str) or not l.startswith("20")]
-            lines = today_lines[-tail:] if today_lines else all_lines[-tail:]
+                             if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+            lines = all_lines[-tail:]
             return JSONResponse({"lines": lines, "next_byte": file_size})
-
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             raw = f.read()
+        # Filter out uvicorn HTTP access log lines — only show bot logs
         lines = [l.rstrip() for l in raw.splitlines()
-                 if l.strip() and not any(s in l for s in _SKIP)]
+                 if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
         return JSONResponse({"lines": lines, "next_byte": file_size})
     except Exception as e:
         return JSONResponse({"lines": [], "next_byte": since_byte, "error": str(e)})
