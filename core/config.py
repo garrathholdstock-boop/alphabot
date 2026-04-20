@@ -257,18 +257,18 @@ US_WATCHLIST = [
     "CDNS","ANET","FTNT","PANW","WDAY","TEAM","NOW","DOCU","ZM","DOCN",
     # Software / cloud
     "PLTR","SNOW","DDOG","NET","CRWD","ZS","OKTA","MDB","PATH","AI",
-    "S","BILL","GTLB","ESTC","CFLT","HUBS","VEEV","DT","FROG","AYX",
+    "S","BILL","GTLB","ESTC","HUBS","VEEV","DT","FROG",
     # Fintech / payments
-    "V","MA","PYPL","SQ","COIN","HOOD","SOFI","AFRM","UPST","NU",
-    "MARA","RIOT","MSTR","CLSK","BITF","CIFR","BTBT","HUT",
+    "V","MA","PYPL","COIN","HOOD","SOFI","AFRM","UPST","NU",
+    "MARA","RIOT","MSTR","CLSK","CIFR","BTBT","HUT",
     # Automakers / EV
     "F","GM","RIVN","LCID","NIO","XPEV","LI","BLNK","CHPT","PLUG",
-    "BE","FCEL","QS","FSR","GOEV","WKHS","HYLN","PTRA","NKLA",
+    "BE","FCEL","QS","WKHS","HYLN",
     # Consumer / retail
     "WMT","COST","HD","LOW","TGT","NKE","SBUX","MCD","CMG","DIS",
     "SHOP","ETSY","EBAY","WIX","ABNB","UBER","LYFT","DASH","DKNG","BATRA",
     # Communication / media
-    "RBLX","SNAP","PINS","YELP","MTCH","BMBL","SPOT","PARA","WBD","FOX",
+    "RBLX","SNAP","PINS","YELP","MTCH","BMBL","SPOT","WBD","FOX",
     # Pharma / biotech
     "JNJ","PFE","MRK","LLY","ABBV","UNH","CVS","BMY","GILD","AMGN",
     "MRNA","BNTX","NVAX","HIMS","TDOC","REGN","VRTX","ISRG","SDGR","RXRX",
@@ -278,7 +278,7 @@ US_WATCHLIST = [
     "USB","PNC","TFC","MTB","KEY","CFG","RF","HBAN","FITB","ZION",
     # Energy
     "XOM","CVX","COP","OXY","SLB","HAL","MPC","VLO","PSX","DVN",
-    "FANG","EOG","PXD","APA","HES","MRO","OVV","EQT","AR","KMI",
+    "FANG","EOG","APA","OVV","EQT","AR","KMI",
     # Industrials / defence
     "BA","CAT","GE","LMT","RTX","NOC","HON","MMM","DE","EMR",
     "ETN","PH","ROK","GD","TDG","HEI","LHX","TXT","CW","AXON",
@@ -302,22 +302,22 @@ US_SMALLCAP_WATCHLIST = [
     # Quantum/AI/Robotics
     "IONQ","QBTS","RGTI","JOBY","ACHR","SOUN","BBAI","AITX","GFAI","INDI",
     # Lidar / AV
-    "OUST","LIDR","AEVA","MVIS","LAZR","VLDR","AEYE","KOPN","INVZ","CGNX",
+    "OUST","LIDR","AEVA","MVIS","AEYE","KOPN","INVZ","CGNX",
     # Biotech
-    "NUVL","IMVT","KALA","NRIX","SNDX","BCRX","PRAX","FOLD","ARQT","GTHX",
-    "MGNX","NCPL","LFST","MXCT","DNLI","APLS","ALLO","BCYC","CTIC","AKRO",
+    "NUVL","IMVT","KALA","NRIX","SNDX","BCRX","PRAX","FOLD","ARQT",
+    "MGNX","NCPL","LFST","MXCT","DNLI","APLS","ALLO","BCYC",
     # EV / cleantech
-    "WKHS","SPCE","GOEV","BLNK","CHPT","PTRA","PLUG","FCEL","GEVO","RUN",
+    "WKHS","SPCE","BLNK","CHPT","PLUG","FCEL","GEVO","RUN",
     # Fintech
-    "HOOD","PAYO","RELY","PNTM","DAVE","MQ","UPST","AFRM","SOFI","OPFI",
+    "HOOD","PAYO","RELY","DAVE","MQ","UPST","AFRM","SOFI","OPFI",
     # Crypto exposure
-    "MARA","RIOT","CLSK","BITF","CIFR","BTBT","HUT","HIVE","CAN","CORZ",
+    "MARA","RIOT","CLSK","CIFR","BTBT","HUT","HIVE","CAN","CORZ",
     # Consumer / retail
-    "CLOV","HIMS","OCGN","RSKD","PRPL","POWW","YELL","WISH","DROP","STCO",
+    "CLOV","HIMS","OCGN","RSKD","PRPL","POWW","DROP",
     # Tech
-    "AI","NCNO","BKSY","VNET","BASE","SWIM","APP","NABL","ATEN","BAND",
+    "AI","NCNO","BKSY","VNET","SWIM","APP","NABL","ATEN","BAND",
     # Legacy momentum
-    "GME","AMC","BBBY","OPEN","MMAT","SAVA","LAZY","TPCS","DWAC","PHUN",
+    "GME","AMC","BBBY","OPEN","TPCS","PHUN",
 ]
 
 FTSE_SMALLCAP_WATCHLIST = [
