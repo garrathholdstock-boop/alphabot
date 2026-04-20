@@ -421,7 +421,11 @@ def fetch_intraday_bars_batch(symbols, timeframe="1Hour", limit=48):
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def _async_get_account(ib):
-    summary = ib.accountSummary()
+    # Use async variants — calling ib.accountSummary() synchronously from within
+    # a coroutine running on the manager's loop triggers
+    # "This event loop is already running" because ib_insync internally does
+    # run_until_complete on the current loop.
+    summary = await ib.accountSummaryAsync()
     result = {}
     for item in summary:
         if item.tag == "NetLiquidation":
@@ -432,6 +436,7 @@ async def _async_get_account(ib):
             result["long_market_value"] = float(item.value)
     result["last_equity"] = result.get("portfolio_value", 0)
     try:
+        # ib.portfolio() returns cached state — safe to call synchronously
         for item in ib.portfolio():
             sym = item.contract.symbol
             price = item.marketPrice
