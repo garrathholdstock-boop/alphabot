@@ -53,9 +53,16 @@ from core.config import (
     MAX_DAILY_LOSS_PCT, MAX_DAILY_SPEND_PCT, MAX_EXPOSURE_PCT,
     DAILY_PROFIT_TARGET_PCT, MAX_TRADE_PCT, CRYPTO_EXPOSURE_PCT,
     INTRADAY_TRADE_PCT, CRYPTO_INTRADAY_PCT,
+    CRYPTO_MAX_TRADE_PCT, CRYPTO_MAX_TRADE,
+    BINANCE_PAPER_BALANCE, ORDER_FAILED_COOLDOWN_MINUTES,
     SECTOR_MAP, MAX_SECTOR_POSITIONS,
 )
 import core.config as cfg
+
+# ── Order-failed cooldown tracker (Bug 10, 2026-04-20) ─────────
+# Maps symbol -> datetime when cooldown expires. Checked before BUY
+# execution to stop retry spam after a place_order failure.
+_order_failed_cooldowns = {}
 from core.config import load_trading_config
 
 from core.execution import (
@@ -448,9 +455,16 @@ def run_cycle(watchlist, st, crypto=False):
             break
 
         stop_pct_use  = CRYPTO_STOP_PCT if crypto else STOP_LOSS_PCT
+        # Bug 9 fix (2026-04-20): use dynamic cfg.* values which get updated
+        # every cycle from real portfolio values. Static imports are frozen
+        # at startup and caused crypto swing orders to size from $1M starting
+        # balance default instead of real $9.5K Binance balance.
+        # Bug 8 fix: crypto swing uses CRYPTO_MAX_TRADE (1.5%), not intraday's (1%).
+        _stock_trade = cfg.MAX_TRADE_VALUE
+        _crypto_trade = cfg.CRYPTO_MAX_TRADE
         base_qty      = max(1 if not crypto else 0.0001,
-                            int(MAX_TRADE_VALUE / s["price"]) if not crypto
-                            else round(CRYPTO_INTRADAY_MAX_TRADE / s["price"], 6))
+                            int(_stock_trade / s["price"]) if not crypto
+                            else round(_crypto_trade / s["price"], 6))
         eq_factor     = equity_curve_size_factor()
         vol_factor    = vol_adjusted_size(1.0)
         news_factor   = news_size_multiplier(s["symbol"])
@@ -514,6 +528,13 @@ def run_cycle(watchlist, st, crypto=False):
         else:
             stop_price = s["price"] * (1 - stop_pct_use / 100)
 
+        # Bug 10 check (2026-04-20): skip symbols in cooldown after recent order failure
+        _cooldown_until = _order_failed_cooldowns.get(s["symbol"])
+        if _cooldown_until and datetime.now(ZoneInfo("UTC")) < _cooldown_until:
+            _remaining = (_cooldown_until - datetime.now(ZoneInfo("UTC"))).total_seconds() / 60
+            log.debug(f"[{st.label}] SKIP {s['symbol']} — order-failed cooldown ({_remaining:.1f}m remaining)")
+            continue
+
         breakdown = signal_breakdown(
             s["symbol"], s["price"], s.get("change", 0), s.get("rsi"),
             s.get("vol_ratio", 1), s.get("closes", [s["price"]]*22),
@@ -555,6 +576,13 @@ def run_cycle(watchlist, st, crypto=False):
                 db_record_near_miss(s["symbol"], sig_score, MIN_SIGNAL_SCORE,
                     MIN_SIGNAL_SCORE - sig_score, s["price"], crypto, "ORDER_FAILED")
             except Exception: pass
+            # Bug 10 fix (2026-04-20): cooldown the symbol to stop retry spam
+            from datetime import timedelta
+            _order_failed_cooldowns[s["symbol"]] = (
+                datetime.now(ZoneInfo("UTC"))
+                + timedelta(minutes=ORDER_FAILED_COOLDOWN_MINUTES)
+            )
+            log.info(f"[{st.label}] {s['symbol']} cooldown set for {ORDER_FAILED_COOLDOWN_MINUTES}m")
             continue
 
         if _atr_val and _atr_val > 0:
@@ -1609,14 +1637,19 @@ def main():
                 cfg.MAX_DAILY_SPEND        = ibkr_pv * cfg.MAX_DAILY_SPEND_PCT / 100
                 cfg.MAX_PORTFOLIO_EXPOSURE = ibkr_pv * cfg.MAX_EXPOSURE_PCT / 100
                 cfg.MAX_TRADE_VALUE        = ibkr_pv * cfg.MAX_TRADE_PCT / 100
-                cfg.INTRADAY_MAX_TRADE     = ibkr_pv * 0.03
-                cfg.SMALLCAP_MAX_TRADE     = ibkr_pv * 0.025
+                # Bug 7 fix (2026-04-20): read percentages from config instead of hardcoding
+                cfg.INTRADAY_MAX_TRADE     = ibkr_pv * cfg.INTRADAY_TRADE_PCT / 100
+                cfg.SMALLCAP_MAX_TRADE     = ibkr_pv * cfg.SMALLCAP_TRADE_PCT / 100
                 cfg.CRYPTO_MAX_EXPOSURE    = crypto_base * cfg.MAX_EXPOSURE_PCT / 100
-                cfg.CRYPTO_INTRADAY_MAX_TRADE = crypto_base * 0.02
+                cfg.CRYPTO_INTRADAY_MAX_TRADE = crypto_base * cfg.CRYPTO_INTRADAY_PCT / 100
+                # Bug 8 fix: dedicated crypto swing sizing (was silently reusing intraday)
+                cfg.CRYPTO_MAX_TRADE       = crypto_base * cfg.CRYPTO_MAX_TRADE_PCT / 100
 
                 log.info(
                     f"[SIZING] IBKR:${ibkr_pv:,.2f} + Binance:${binance_pv:,.2f} = Total:${total_pv:,.2f} | "
-                    f"StockTrade:${cfg.MAX_TRADE_VALUE:.0f} CryptoTrade:${cfg.CRYPTO_INTRADAY_MAX_TRADE:.0f} DailyLoss:${cfg.MAX_DAILY_LOSS:.0f}"
+                    f"StockTrade:${cfg.MAX_TRADE_VALUE:.0f} CryptoSwing:${cfg.CRYPTO_MAX_TRADE:.0f} "
+                    f"CryptoID:${cfg.CRYPTO_INTRADAY_MAX_TRADE:.0f} Intraday:${cfg.INTRADAY_MAX_TRADE:.0f} "
+                    f"Smallcap:${cfg.SMALLCAP_MAX_TRADE:.0f} DailyLoss:${cfg.MAX_DAILY_LOSS:.0f}"
                 )
 
             # Performance analytics
