@@ -1,15 +1,18 @@
 """
 data/watchlist_refresh.py -- refresh 6 watchlists from the universe table.
 
-Exchange values: "US" (for US stocks -- IBKR SMART routes), "LSE", "ASX".
+Exchange values: "US" (IBKR SMART routes), "LSE", "ASX".
 
-Priority cascade:
+Priority cascade with smart fallbacks:
   us:            SP500 > NASDAQ100 > DJIA > SP400 -> 250
-  us_smallcap:   SP600 -> 100
+  us_smallcap:   SP600 > (SP400 tail if SP600 short) -> 100
   ftse:          FTSE100 > FTSE250 -> 250
-  ftse_smallcap: FTSE250 not in swing -> 100
+  ftse_smallcap: FTSE250 tail not in swing > (FTSE100 tail if FTSE250 short) -> 100
   asx:           ASX200 > ASX300 -> 250
-  asx_smallcap:  ASX300 not in swing -> 100
+  asx_smallcap:  ASX300 not in swing > (ASX200 tail fallback if ASX300 short) -> 100
+
+Fallbacks kick in when an index page is broken/short, so we still build a
+usable watchlist rather than returning 0.
 """
 import logging
 import sqlite3
@@ -48,8 +51,14 @@ TARGETS = {
     "asx_smallcap":  100,
 }
 
+# Minimum acceptable size per list -- below this we call it a failure.
+# Lowered from 25 to 15 to tolerate thin fallback cases.
+MIN_LIST_SIZE = 15
+
 
 def _query_by_indices(conn, index_priority_list, exchanges, target, exclude_set=None):
+    """Return up to `target` symbols, walking index_priority_list in order.
+    Deduplicates against exclude_set."""
     exclude_set = exclude_set or set()
     c = conn.cursor()
     selected = []
@@ -106,24 +115,71 @@ def refresh_watchlists_from_universe():
 
     log.info("Universe contains %d symbols, building watchlists", total)
 
+    # ---- US SWING ----
     us = _query_by_indices(
         conn, ["SP500", "NASDAQ100", "DJIA", "SP400"], ["US"], TARGETS["us"]
     )
+    log.info("Built us: %d tickers", len(us))
+
+    # ---- US SMALLCAP (with SP400 tail fallback) ----
     us_sm = _query_by_indices(
         conn, ["SP600"], ["US"], TARGETS["us_smallcap"], exclude_set=set(us)
     )
+    if len(us_sm) < TARGETS["us_smallcap"]:
+        # Fallback: grab SP400 tail not already used
+        extra = _query_by_indices(
+            conn, ["SP400"], ["US"],
+            TARGETS["us_smallcap"] - len(us_sm),
+            exclude_set=set(us) | set(us_sm)
+        )
+        if extra:
+            log.info("us_smallcap fallback: added %d from SP400 tail", len(extra))
+        us_sm.extend(extra)
+    log.info("Built us_smallcap: %d tickers", len(us_sm))
+
+    # ---- FTSE SWING ----
     ftse = _query_by_indices(
         conn, ["FTSE100", "FTSE250"], ["LSE"], TARGETS["ftse"]
     )
+    log.info("Built ftse: %d tickers", len(ftse))
+
+    # ---- FTSE SMALLCAP (with FTSE100 tail fallback) ----
     ftse_sm = _query_by_indices(
         conn, ["FTSE250"], ["LSE"], TARGETS["ftse_smallcap"], exclude_set=set(ftse)
     )
+    if len(ftse_sm) < TARGETS["ftse_smallcap"]:
+        extra = _query_by_indices(
+            conn, ["FTSE100"], ["LSE"],
+            TARGETS["ftse_smallcap"] - len(ftse_sm),
+            exclude_set=set(ftse) | set(ftse_sm)
+        )
+        if extra:
+            log.info("ftse_smallcap fallback: added %d from FTSE100 tail", len(extra))
+        ftse_sm.extend(extra)
+    log.info("Built ftse_smallcap: %d tickers", len(ftse_sm))
+
+    # ---- ASX SWING ----
     asx = _query_by_indices(
         conn, ["ASX200", "ASX300"], ["ASX"], TARGETS["asx"]
     )
+    log.info("Built asx: %d tickers", len(asx))
+
+    # ---- ASX SMALLCAP (with ASX200 tail fallback when ASX300 broken) ----
     asx_sm = _query_by_indices(
         conn, ["ASX300"], ["ASX"], TARGETS["asx_smallcap"], exclude_set=set(asx)
     )
+    if len(asx_sm) < TARGETS["asx_smallcap"]:
+        # Fallback: take the tail of ASX200 not already in asx swing.
+        # Useful when ASX300 Wikipedia page is broken/short.
+        extra = _query_by_indices(
+            conn, ["ASX200"], ["ASX"],
+            TARGETS["asx_smallcap"] - len(asx_sm),
+            exclude_set=set(asx) | set(asx_sm)
+        )
+        if extra:
+            log.info("asx_smallcap fallback: added %d from ASX200 tail", len(extra))
+        asx_sm.extend(extra)
+    log.info("Built asx_smallcap: %d tickers", len(asx_sm))
 
     lists = {
         "us": us,
@@ -134,7 +190,8 @@ def refresh_watchlists_from_universe():
         "asx_smallcap": asx_sm,
     }
 
-    low_counts = {k: len(v) for k, v in lists.items() if len(v) < 25}
+    # Sanity check -- abort only if any list is very small
+    low_counts = {k: len(v) for k, v in lists.items() if len(v) < MIN_LIST_SIZE}
     if low_counts:
         msg = "Low ticker counts: %s, aborting to preserve current watchlists" % low_counts
         log.error(msg)
@@ -144,7 +201,7 @@ def refresh_watchlists_from_universe():
         conn.close()
         return result
 
-    # Archive existing
+    # Archive existing watchlists
     try:
         c.execute("""
             CREATE TABLE IF NOT EXISTS watchlists_history (
