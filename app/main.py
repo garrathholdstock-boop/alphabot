@@ -1754,69 +1754,164 @@ def main():
             except: pass
             time.sleep(30)
 def run_ibkr_startup_recovery():
-    """Recover open positions from IBKR on startup.
+    """Recover open positions from BOTH brokers on startup.
 
-    Merges IBKR truth (qty, entry_price) with DB-saved state
-    (highest_price, entry_ts, etc.) so trailing stops and hold-duration
-    logic survive restarts. Falls back to fresh defaults for any position
-    that has no matching DB record (e.g. opened manually in IBKR web UI).
+    Recovery design (rewritten 2026-04-20):
+      1. Read DB snapshot — has _type tags from previous run for routing.
+      2. Build _type -> state-object routing table.
+      3. Pull live IBKR positions; for each, route by saved _type tag,
+         merge IBKR truth (qty/avg) with DB metadata (highest_price/entry_ts/score).
+      4. Pull live Binance balances; for each non-USDT non-zero balance, derive
+         pair symbol (ASSET+USDT), route to crypto_state vs crypto_intraday_state
+         by saved _type tag, merge as above.
+      5. Reverse pass: any DB position not seen on either broker is an ORPHAN.
+         Log loudly and DO NOT load into in-memory state. Next snapshot write
+         will then naturally remove them from the DB (snapshot is full overwrite).
+      6. Per-discipline summary so failures are obvious.
+
+    Failure modes are LOUD — silent failure here means silent capital risk.
     """
+    # Import lazily so a missing helper can't crash module import.
+    from core.execution import binance_get
+    log.info("=" * 60)
+    log.info("[RECOVERY] Startup position recovery — all disciplines")
+    log.info("=" * 60)
+
+    # ── Step 1: read DB snapshot. This is the ROUTING SOURCE OF TRUTH. ──
+    db_state = {}
+    try:
+        db_state = db_read_positions() or {}
+        log.info(f"[RECOVERY] DB snapshot: {len(db_state)} position(s) tagged from previous run")
+    except Exception as e:
+        log.error(f"[RECOVERY] !! DB read FAILED: {e!r} — recovery will use fresh defaults for ALL")
+
+    # ── Step 2: build routing table. _type tag -> (state_object, label). ──
+    _type_to_state = {
+        "Stock":  (state,                 "STOCKS"),
+        "Crypto": (crypto_state,          "CRYPTO"),
+        "SmCap":  (smallcap_state,        "SMALLCAP_US"),
+        "ID":     (intraday_state,        "INTRADAY"),
+        "CrypID": (crypto_intraday_state, "CRYPTO_ID"),
+        "ASX":    (asx_state,             "ASX"),
+        "FTSE":   (ftse_state,            "FTSE"),
+        "Bear":   (bear_state,            "BEAR"),
+    }
+
+    # Track which symbols we successfully restored, so we can detect orphans.
+    seen = set()
+    per_discipline_count = {label: 0 for _, label in _type_to_state.values()}
+    fresh_count = 0
+    orphan_count = 0
+
+    def _build_pos_dict(qty, avg, saved):
+        """Compose position dict from broker truth + saved DB metadata."""
+        return {
+            "qty":               qty,
+            "entry_price":       avg,
+            "stop_price":        saved.get("stop_price",        avg * (1 - STOP_LOSS_PCT / 100)),
+            "take_profit_price": saved.get("take_profit_price", avg * (1 + TAKE_PROFIT_PCT / 100)),
+            "highest_price":     saved.get("highest_price",     avg),
+            "entry_ts":          saved.get("entry_ts")          or datetime.now(ZoneInfo("UTC")).isoformat(),
+            "entry_date":        saved.get("entry_date")        or datetime.now(ZoneInfo("Europe/Paris")).strftime("%d %b %H:%M"),
+            "signal_score":      saved.get("signal_score"),
+            "entry_breakdown":   saved.get("entry_breakdown",   ""),
+        }
+
+    # ── Step 3: IBKR — covers Stocks, SmCap, ID, ASX, FTSE, Bear. ──
     try:
         ibkr_positions = ibkr_get_positions() or []
-        open_orders = ibkr_get_open_orders() or []
-        stop_map = {o["symbol"]: o for o in open_orders if o.get("order_type") == "STP"}
-        db_state = db_read_positions() or {}
-        recovered = 0
-        merged_count = 0
+        log.info(f"[RECOVERY] IBKR returned {len(ibkr_positions)} position(s)")
         for p in ibkr_positions:
             sym = p.get("symbol")
             qty = float(p.get("qty", 0) or 0)
             avg = float(p.get("avg_entry_price", 0) or p.get("avg_cost", 0) or 0)
             if not sym or qty <= 0:
                 continue
-            ibkr_stop = stop_map.get(sym, {}).get("stop_price")
             saved = db_state.get(sym, {}) or {}
-            now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
-            now_paris = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d %b %H:%M")
-            if saved:
-                # Merge: IBKR truth for qty/entry_price, DB state for everything else
-                stop = ibkr_stop if ibkr_stop else saved.get("stop_price", avg * (1 - STOP_LOSS_PCT / 100))
-                state.positions[sym] = {
-                    "qty": qty,
-                    "entry_price": avg,
-                    "stop_price": stop,
-                    "take_profit_price": saved.get("take_profit_price", avg * (1 + TAKE_PROFIT_PCT / 100)),
-                    "highest_price": saved.get("highest_price", avg),
-                    "entry_ts": saved.get("entry_ts", now_utc),
-                    "entry_date": saved.get("entry_date", now_paris),
-                    "signal_score": saved.get("signal_score", None),
-                    "entry_breakdown": saved.get("entry_breakdown", ""),
-                }
-                merged_count += 1
+            saved_type = saved.get("_type")
+            if saved_type and saved_type in _type_to_state:
+                target_state, label = _type_to_state[saved_type]
+                target_state.positions[sym] = _build_pos_dict(qty, avg, saved)
+                per_discipline_count[label] += 1
+                seen.add(sym)
                 _high = saved.get("highest_price", avg)
-                _ets = (saved.get("entry_ts") or now_utc)[:10]
-                log.info(f"[RECOVERY] Restored {sym} x{qty} @ ${avg:.2f} | MERGED from DB: high=${_high:.2f} entry_ts={_ets}")
+                _ets  = (saved.get("entry_ts") or "")[:10] or "today"
+                log.info(f"[RECOVERY] [{label}] Restored {sym} x{qty} @ ${avg:.2f} | MERGED: high=${_high:.2f} ts={_ets}")
             else:
-                # No DB record (position opened outside bot) - use fresh defaults
-                stop = ibkr_stop if ibkr_stop else avg * (1 - STOP_LOSS_PCT / 100)
-                state.positions[sym] = {
-                    "qty": qty,
-                    "entry_price": avg,
-                    "stop_price": stop,
-                    "take_profit_price": avg * (1 + TAKE_PROFIT_PCT / 100),
-                    "highest_price": avg,
-                    "entry_ts": now_utc,
-                    "entry_date": now_paris,
-                    "signal_score": None,
-                    "entry_breakdown": "",
-                }
-                log.info(f"[RECOVERY] Restored {sym} x{qty} @ ${avg:.2f} | fresh (no DB record)")
-            if sym not in stop_map:
-                log.warning(f"[RECOVERY] {sym} has no stop on IBKR — software stop-loss active @ ${stop:.2f}")
-            recovered += 1
-        log.info(f"=== Recovered {recovered} open position(s) ({merged_count} merged from DB) ===\n")
+                # No DB tag — fall back to US Stocks. Loud warning so you can
+                # decide manually if this is a position opened outside the bot.
+                state.positions[sym] = _build_pos_dict(qty, avg, {})
+                per_discipline_count["STOCKS"] += 1
+                fresh_count += 1
+                seen.add(sym)
+                log.warning(f"[RECOVERY] [STOCKS] Restored {sym} x{qty} @ ${avg:.2f} | FRESH (no DB tag — opened outside bot?)")
     except Exception as e:
-        log.error(f"[RECOVERY] Failed: {e}")
+        log.error(f"[RECOVERY] !! IBKR pull FAILED: {e!r} — IBKR positions NOT recovered this cycle")
+
+    # ── Step 4: Binance — covers crypto_state and crypto_intraday_state. ──
+    try:
+        acct = binance_get("/api/v3/account", signed=True)
+        if not acct:
+            log.warning("[RECOVERY] Binance returned empty account response — skipping crypto recovery")
+        else:
+            balances = acct.get("balances", []) or []
+            non_zero = [b for b in balances
+                        if (float(b.get("free", 0)) + float(b.get("locked", 0))) > 0
+                        and b.get("asset") not in ("USDT", "BUSD", "USDC")]
+            log.info(f"[RECOVERY] Binance returned {len(non_zero)} non-zero non-stable balance(s)")
+            for b in non_zero:
+                asset = b.get("asset")
+                qty   = float(b.get("free", 0)) + float(b.get("locked", 0))
+                if not asset or qty <= 0:
+                    continue
+                pair = f"{asset}USDT"
+                saved = db_state.get(pair, {}) or {}
+                saved_type = saved.get("_type")
+                # Need entry price from DB — Binance balances don't carry one
+                avg = float(saved.get("entry_price") or 0)
+                if avg <= 0:
+                    log.warning(f"[RECOVERY] [BINANCE] {pair} qty={qty} on broker but NO entry_price in DB — cannot restore safely. Manual review needed.")
+                    continue
+                if saved_type == "CrypID":
+                    target_state, label = crypto_intraday_state, "CRYPTO_ID"
+                elif saved_type == "Crypto":
+                    target_state, label = crypto_state, "CRYPTO"
+                else:
+                    # Default Binance positions to swing if no tag
+                    target_state, label = crypto_state, "CRYPTO"
+                    log.warning(f"[RECOVERY] [{label}] {pair} has no/unknown _type tag — defaulting to swing state")
+                target_state.positions[pair] = _build_pos_dict(qty, avg, saved)
+                per_discipline_count[label] += 1
+                seen.add(pair)
+                _high = saved.get("highest_price", avg)
+                _ets  = (saved.get("entry_ts") or "")[:10] or "today"
+                log.info(f"[RECOVERY] [{label}] Restored {pair} x{qty:.6f} @ ${avg:.6f} | MERGED: high=${_high:.6f} ts={_ets}")
+    except Exception as e:
+        log.error(f"[RECOVERY] !! Binance pull FAILED: {e!r} — crypto positions NOT recovered this cycle")
+
+    # ── Step 5: orphan detection. DB had it, brokers didn't. ──
+    orphans = [sym for sym in db_state.keys() if sym not in seen]
+    if orphans:
+        log.warning("=" * 60)
+        log.warning(f"[RECOVERY] !! {len(orphans)} ORPHAN(S) in DB but NOT on broker:")
+        for sym in orphans:
+            tag  = (db_state.get(sym, {}) or {}).get("_type", "?")
+            qty  = (db_state.get(sym, {}) or {}).get("qty", "?")
+            ts   = (db_state.get(sym, {}) or {}).get("entry_ts", "?")[:19]
+            log.warning(f"[RECOVERY] !!   ORPHAN: {sym} (_type={tag}, qty={qty}, entry_ts={ts}) — DROPPING from state")
+        log.warning("[RECOVERY] !! Orphans will be removed from DB on next snapshot write.")
+        log.warning("[RECOVERY] !! These positions never filled on broker — investigate via trades table.")
+        log.warning("=" * 60)
+        orphan_count = len(orphans)
+
+    # ── Step 6: summary. Visible at every restart, makes regressions obvious. ──
+    total_restored = sum(per_discipline_count.values())
+    log.info("=" * 60)
+    log.info(f"[RECOVERY] SUMMARY — {total_restored} position(s) restored, {orphan_count} orphan(s) dropped, {fresh_count} fresh")
+    for label, n in per_discipline_count.items():
+        if n > 0:
+            log.info(f"[RECOVERY]   {label:14s}: {n}")
+    log.info("=" * 60)
 
 
 if __name__ == "__main__":
