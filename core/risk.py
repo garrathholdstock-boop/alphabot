@@ -198,7 +198,21 @@ def check_stop_losses(st, crypto=False):
 
         entry  = pos["entry_price"]
         high   = pos.get("highest_price", entry)
-        days   = pos.get("days_held", 0)
+        # Bug fix (2026-04-20): compute days_held dynamically from entry_ts.
+        # The days_held field is only ever set to 0 at entry and never
+        # incremented anywhere, making MAX_HOLD_DAYS checks dead-letter.
+        # entry_ts is persistent across restarts (via DB merge in recovery).
+        _ets_str = pos.get("entry_ts")
+        if _ets_str:
+            try:
+                _ets = datetime.fromisoformat(_ets_str)
+                if _ets.tzinfo is None:
+                    _ets = _ets.replace(tzinfo=ZoneInfo("UTC"))
+                days = (datetime.now(ZoneInfo("UTC")) - _ets).days
+            except Exception:
+                days = pos.get("days_held", 0)
+        else:
+            days = pos.get("days_held", 0)
 
         if live > high:
             pos["highest_price"] = live
