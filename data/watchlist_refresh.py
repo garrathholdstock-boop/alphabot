@@ -3,16 +3,23 @@ data/watchlist_refresh.py -- refresh 6 watchlists from the universe table.
 
 Exchange values: "US" (IBKR SMART routes), "LSE", "ASX".
 
-Priority cascade with smart fallbacks:
+Standard priority cascade with intelligent fallbacks:
   us:            SP500 > NASDAQ100 > DJIA > SP400 -> 250
-  us_smallcap:   SP600 > (SP400 tail if SP600 short) -> 100
+  us_smallcap:   SP600 > (SP400 tail fallback) -> 100
   ftse:          FTSE100 > FTSE250 -> 250
-  ftse_smallcap: FTSE250 tail not in swing > (FTSE100 tail if FTSE250 short) -> 100
-  asx:           ASX200 > ASX300 -> 250
-  asx_smallcap:  ASX300 not in swing > (ASX200 tail fallback if ASX300 short) -> 100
+  ftse_smallcap: FTSE250 tail > (FTSE100 tail fallback) -> 100
 
-Fallbacks kick in when an index page is broken/short, so we still build a
-usable watchlist rather than returning 0.
+ASX has special handling because ASX300 Wikipedia page is unreliable:
+  If ASX300 healthy (>= 150 members):
+    asx:           ASX200 > ASX300 -> 250
+    asx_smallcap:  ASX300 not in swing -> 100
+  If ASX300 broken (< 150 members):
+    asx:           top 150 of ASX200 -> swing
+    asx_smallcap:  bottom 48 of ASX200 + any ASX300-only tickers -> smallcap
+    This guarantees asx_smallcap gets populated even when ASX300 broken.
+
+US and FTSE use the same "split the pool when needed" logic but their primary
+indices aren't broken so they behave normally.
 """
 import logging
 import sqlite3
@@ -51,13 +58,22 @@ TARGETS = {
     "asx_smallcap":  100,
 }
 
-# Minimum acceptable size per list -- below this we call it a failure.
-# Lowered from 25 to 15 to tolerate thin fallback cases.
-MIN_LIST_SIZE = 15
+MIN_LIST_SIZE = 15   # abort if any list falls below this
+ASX300_HEALTHY_THRESHOLD = 150  # if ASX300 has >=150 members, use it normally
+
+
+def _count_in_index(conn, index_name, exchange):
+    """How many symbols are registered in this index?"""
+    c = conn.cursor()
+    c.execute(
+        "SELECT COUNT(*) FROM universe_indices WHERE index_name = ? AND exchange = ?",
+        (index_name, exchange)
+    )
+    return c.fetchone()[0]
 
 
 def _query_by_indices(conn, index_priority_list, exchanges, target, exclude_set=None):
-    """Return up to `target` symbols, walking index_priority_list in order.
+    """Return up to `target` symbols walking index_priority_list in order.
     Deduplicates against exclude_set."""
     exclude_set = exclude_set or set()
     c = conn.cursor()
@@ -85,6 +101,69 @@ def _query_by_indices(conn, index_priority_list, exchanges, target, exclude_set=
             if len(selected) >= target:
                 break
     return selected
+
+
+def _query_index_symbols(conn, index_name, exchange):
+    """Return all symbols for an index, sorted alphabetically."""
+    c = conn.cursor()
+    c.execute(
+        "SELECT u.symbol FROM universe u "
+        "JOIN universe_indices ui "
+        "  ON u.symbol = ui.symbol AND u.exchange = ui.exchange "
+        "WHERE ui.index_name = ? AND u.exchange = ? "
+        "ORDER BY u.symbol",
+        (index_name, exchange)
+    )
+    return [r[0] for r in c.fetchall()]
+
+
+def _build_asx_lists(conn, target_swing, target_smallcap):
+    """Special ASX handling: if ASX300 broken, split ASX200 into swing+smallcap.
+    Returns (asx_swing_list, asx_smallcap_list)."""
+    asx300_count = _count_in_index(conn, "ASX300", "ASX")
+    asx200_count = _count_in_index(conn, "ASX200", "ASX")
+    log.info("ASX200 has %d members, ASX300 has %d members", asx200_count, asx300_count)
+
+    if asx300_count >= ASX300_HEALTHY_THRESHOLD:
+        # Normal flow: ASX200 for swing, ASX300 (not in swing) for smallcap
+        asx = _query_by_indices(
+            conn, ["ASX200", "ASX300"], ["ASX"], target_swing
+        )
+        asx_sm = _query_by_indices(
+            conn, ["ASX300"], ["ASX"], target_smallcap, exclude_set=set(asx)
+        )
+        log.info("Using normal ASX flow (ASX300 healthy)")
+        return asx, asx_sm
+
+    # ASX300 broken: split ASX200 into halves
+    log.info("ASX300 broken (%d < %d), splitting ASX200 pool",
+             asx300_count, ASX300_HEALTHY_THRESHOLD)
+    asx200_syms = _query_index_symbols(conn, "ASX200", "ASX")
+    asx300_syms = _query_index_symbols(conn, "ASX300", "ASX")
+
+    # Split point: leave the last 48 of ASX200 for smallcap
+    # 150 top for swing, 48 bottom for smallcap, pad smallcap with any ASX300 not in swing
+    split_point = min(150, max(50, len(asx200_syms) - 48))
+    asx = asx200_syms[:split_point]
+
+    # Smallcap: ASX200 tail + ASX300-only tickers
+    swing_set = set(asx)
+    asx_sm = []
+    seen = set()
+    for s in asx200_syms[split_point:]:
+        if s not in swing_set and s not in seen:
+            asx_sm.append(s)
+            seen.add(s)
+    for s in asx300_syms:
+        if s not in swing_set and s not in seen:
+            asx_sm.append(s)
+            seen.add(s)
+        if len(asx_sm) >= target_smallcap:
+            break
+
+    log.info("ASX split: %d for swing, %d for smallcap (tail of ASX200 + ASX300-only)",
+             len(asx), len(asx_sm))
+    return asx, asx_sm[:target_smallcap]
 
 
 def refresh_watchlists_from_universe():
@@ -126,7 +205,6 @@ def refresh_watchlists_from_universe():
         conn, ["SP600"], ["US"], TARGETS["us_smallcap"], exclude_set=set(us)
     )
     if len(us_sm) < TARGETS["us_smallcap"]:
-        # Fallback: grab SP400 tail not already used
         extra = _query_by_indices(
             conn, ["SP400"], ["US"],
             TARGETS["us_smallcap"] - len(us_sm),
@@ -158,27 +236,9 @@ def refresh_watchlists_from_universe():
         ftse_sm.extend(extra)
     log.info("Built ftse_smallcap: %d tickers", len(ftse_sm))
 
-    # ---- ASX SWING ----
-    asx = _query_by_indices(
-        conn, ["ASX200", "ASX300"], ["ASX"], TARGETS["asx"]
-    )
+    # ---- ASX: special handling ----
+    asx, asx_sm = _build_asx_lists(conn, TARGETS["asx"], TARGETS["asx_smallcap"])
     log.info("Built asx: %d tickers", len(asx))
-
-    # ---- ASX SMALLCAP (with ASX200 tail fallback when ASX300 broken) ----
-    asx_sm = _query_by_indices(
-        conn, ["ASX300"], ["ASX"], TARGETS["asx_smallcap"], exclude_set=set(asx)
-    )
-    if len(asx_sm) < TARGETS["asx_smallcap"]:
-        # Fallback: take the tail of ASX200 not already in asx swing.
-        # Useful when ASX300 Wikipedia page is broken/short.
-        extra = _query_by_indices(
-            conn, ["ASX200"], ["ASX"],
-            TARGETS["asx_smallcap"] - len(asx_sm),
-            exclude_set=set(asx) | set(asx_sm)
-        )
-        if extra:
-            log.info("asx_smallcap fallback: added %d from ASX200 tail", len(extra))
-        asx_sm.extend(extra)
     log.info("Built asx_smallcap: %d tickers", len(asx_sm))
 
     lists = {
@@ -190,7 +250,7 @@ def refresh_watchlists_from_universe():
         "asx_smallcap": asx_sm,
     }
 
-    # Sanity check -- abort only if any list is very small
+    # Abort if any list is severely short
     low_counts = {k: len(v) for k, v in lists.items() if len(v) < MIN_LIST_SIZE}
     if low_counts:
         msg = "Low ticker counts: %s, aborting to preserve current watchlists" % low_counts
