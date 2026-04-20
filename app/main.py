@@ -1721,34 +1721,67 @@ def main():
             except: pass
             time.sleep(30)
 def run_ibkr_startup_recovery():
-    """Recover open positions from IBKR on startup."""
+    """Recover open positions from IBKR on startup.
+
+    Merges IBKR truth (qty, entry_price) with DB-saved state
+    (highest_price, entry_ts, etc.) so trailing stops and hold-duration
+    logic survive restarts. Falls back to fresh defaults for any position
+    that has no matching DB record (e.g. opened manually in IBKR web UI).
+    """
     try:
         ibkr_positions = ibkr_get_positions() or []
         open_orders = ibkr_get_open_orders() or []
         stop_map = {o["symbol"]: o for o in open_orders if o.get("order_type") == "STP"}
+        db_state = db_read_positions() or {}
         recovered = 0
+        merged_count = 0
         for p in ibkr_positions:
             sym = p.get("symbol")
             qty = float(p.get("qty", 0) or 0)
             avg = float(p.get("avg_entry_price", 0) or p.get("avg_cost", 0) or 0)
             if not sym or qty <= 0:
                 continue
-            stop = stop_map.get(sym, {}).get("stop_price", avg * (1 - STOP_LOSS_PCT / 100))
-            state.positions[sym] = {
-                "qty": qty,
-                "entry_price": avg,
-                "stop_price": stop,
-                "take_profit_price": avg * (1 + TAKE_PROFIT_PCT / 100),
-                "entry_ts": datetime.now(ZoneInfo("UTC")).isoformat(),
-                "entry_date": datetime.now(ZoneInfo("Europe/Paris")).strftime("%d %b %H:%M"),
-                "signal_score": "—",
-                "entry_breakdown": "",
-            }
-            log.info(f"[RECOVERY] Restored position: {sym} x{qty} @ ${avg:.2f}")
+            ibkr_stop = stop_map.get(sym, {}).get("stop_price")
+            saved = db_state.get(sym, {}) or {}
+            now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
+            now_paris = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d %b %H:%M")
+            if saved:
+                # Merge: IBKR truth for qty/entry_price, DB state for everything else
+                stop = ibkr_stop if ibkr_stop else saved.get("stop_price", avg * (1 - STOP_LOSS_PCT / 100))
+                state.positions[sym] = {
+                    "qty": qty,
+                    "entry_price": avg,
+                    "stop_price": stop,
+                    "take_profit_price": saved.get("take_profit_price", avg * (1 + TAKE_PROFIT_PCT / 100)),
+                    "highest_price": saved.get("highest_price", avg),
+                    "entry_ts": saved.get("entry_ts", now_utc),
+                    "entry_date": saved.get("entry_date", now_paris),
+                    "signal_score": saved.get("signal_score", "—"),
+                    "entry_breakdown": saved.get("entry_breakdown", ""),
+                }
+                merged_count += 1
+                _high = saved.get("highest_price", avg)
+                _ets = (saved.get("entry_ts") or now_utc)[:10]
+                log.info(f"[RECOVERY] Restored {sym} x{qty} @ ${avg:.2f} | MERGED from DB: high=${_high:.2f} entry_ts={_ets}")
+            else:
+                # No DB record (position opened outside bot) - use fresh defaults
+                stop = ibkr_stop if ibkr_stop else avg * (1 - STOP_LOSS_PCT / 100)
+                state.positions[sym] = {
+                    "qty": qty,
+                    "entry_price": avg,
+                    "stop_price": stop,
+                    "take_profit_price": avg * (1 + TAKE_PROFIT_PCT / 100),
+                    "highest_price": avg,
+                    "entry_ts": now_utc,
+                    "entry_date": now_paris,
+                    "signal_score": "—",
+                    "entry_breakdown": "",
+                }
+                log.info(f"[RECOVERY] Restored {sym} x{qty} @ ${avg:.2f} | fresh (no DB record)")
             if sym not in stop_map:
                 log.warning(f"[RECOVERY] {sym} has no stop on IBKR — software stop-loss active @ ${stop:.2f}")
             recovered += 1
-        log.info(f"=== Recovered {recovered} open position(s) ===\n")
+        log.info(f"=== Recovered {recovered} open position(s) ({merged_count} merged from DB) ===\n")
     except Exception as e:
         log.error(f"[RECOVERY] Failed: {e}")
 
