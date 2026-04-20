@@ -1152,13 +1152,17 @@ def clean(s):
 
 def is_safe(cmd):
     cmd = clean(cmd)
-    blocked = ['rm ', 'chmod +x', '> /', 'dd ', 'mkfs', 'reboot', 'shutdown', 'passwd', 'sudo']
+    blocked = ['rm ', 'dd ', 'mkfs', 'reboot', 'shutdown', 'passwd', 'sudo',
+               '> /etc/passwd', '> /etc/shadow', '> /bin/', '> /usr/bin/']
     if any(b in cmd for b in blocked):
         return False
     allowed = ['grep', 'cat ', 'head', 'tail', 'sed', 'wc ', 'ls ', 'find ', 'python3',
                'ps ', 'df ', 'free ', 'screen', 'git ', 'sqlite3', 'echo ', 'env',
-               'netstat', 'ss ', 'curl', 'cp ', 'pip ', 'wget ', 'bash ']
-    return any(cmd.startswith(a) for a in allowed)
+               'netstat', 'ss ', 'curl', 'cp ', 'pip ', 'wget ', 'bash ',
+               'chmod ', 'mkdir ', 'mv ', 'systemctl ', 'tee ', 'touch ']
+    return any(cmd.startswith(a) for a in allowed) or \
+           ('cat >' in cmd and '/home/alphabot' in cmd) or \
+           ('cat >' in cmd and '/etc/systemd' in cmd)
 
 
 def run_cmd(cmd, timeout=15):
@@ -3222,26 +3226,36 @@ async def download_file(name: str = ""):
 @app.get("/log/lines")
 async def log_lines(since_byte: int = 0, tail: int = 0):
     """Return new log lines using byte position — reliable across restarts.
-    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from."""
+    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from.
+    Detects log rotation (file shrinks) and resets byte position automatically."""
     try:
         if not os.path.exists(LOG_PATH):
             return JSONResponse({"lines": [], "next_byte": 0})
         file_size = os.path.getsize(LOG_PATH)
+        # Detect log rotation — file is smaller than our position means it was rotated
+        if since_byte > file_size:
+            since_byte = 0
         if since_byte >= file_size:
             return JSONResponse({"lines": [], "next_byte": file_size})
+
+        _SKIP = ("INFO: 127.", "HTTP/1.1")
+        today_str = datetime.now(PARIS).strftime("%Y-%m-%d")
+
         # On first load (since_byte==0), jump to end and return last tail lines
         if since_byte == 0 and tail > 0:
             with open(LOG_PATH, "r", errors="replace") as f:
                 all_lines = [l.rstrip() for l in f.readlines()
-                             if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
-            lines = all_lines[-tail:]
+                             if l.strip() and not any(s in l for s in _SKIP)]
+            # Only show today's lines on fresh load
+            today_lines = [l for l in all_lines if l.startswith(today_str) or not l.startswith("20")]
+            lines = today_lines[-tail:] if today_lines else all_lines[-tail:]
             return JSONResponse({"lines": lines, "next_byte": file_size})
+
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             raw = f.read()
-        # Filter out uvicorn HTTP access log lines — only show bot logs
         lines = [l.rstrip() for l in raw.splitlines()
-                 if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+                 if l.strip() and not any(s in l for s in _SKIP)]
         return JSONResponse({"lines": lines, "next_byte": file_size})
     except Exception as e:
         return JSONResponse({"lines": [], "next_byte": since_byte, "error": str(e)})
