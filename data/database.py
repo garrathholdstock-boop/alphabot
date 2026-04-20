@@ -201,12 +201,34 @@ def init_db():
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
+    # Live positions snapshot — replaces positions.json
+    c.execute("""CREATE TABLE IF NOT EXISTS bot_positions (
+        id         INTEGER PRIMARY KEY CHECK (id = 1),
+        positions  TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Last known portfolio value — replaces last_portfolio.json
+    c.execute("""CREATE TABLE IF NOT EXISTS bot_portfolio (
+        id         INTEGER PRIMARY KEY CHECK (id = 1),
+        data       TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    )""")
+
     # Smallcap watchlists — written by Refresh Small Caps, read on bot startup
     c.execute("""CREATE TABLE IF NOT EXISTS smallcap_watchlists (
         id         INTEGER PRIMARY KEY CHECK (id = 1),
         us         TEXT NOT NULL DEFAULT '[]',
         ftse       TEXT NOT NULL DEFAULT '[]',
         asx        TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # General watchlists table — one row per market, replaces smallcap_watchlists going forward
+    # Markets: 'us', 'ftse', 'asx', 'us_smallcap', 'ftse_smallcap', 'asx_smallcap', 'crypto', 'bear'
+    c.execute("""CREATE TABLE IF NOT EXISTS watchlists (
+        market     TEXT PRIMARY KEY,
+        tickers    TEXT NOT NULL,
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
@@ -262,6 +284,75 @@ def db_read_smallcap_watchlists() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════
+# GENERAL WATCHLISTS — one row per market in `watchlists` table
+# ═══════════════════════════════════════════════════════════════
+# Supported markets: 'us', 'ftse', 'asx', 'us_smallcap',
+#                    'ftse_smallcap', 'asx_smallcap', 'crypto', 'bear'
+# ═══════════════════════════════════════════════════════════════
+
+def db_write_watchlist(market: str, tickers: list) -> bool:
+    """Write a watchlist for a given market. Upsert."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO watchlists (market, tickers, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(market) DO UPDATE SET
+                tickers = excluded.tickers,
+                updated_at = excluded.updated_at
+        """, (market, _json.dumps(tickers)))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        try: conn.close()
+        except: pass
+        return False
+
+
+def db_read_watchlist(market: str) -> list:
+    """Read watchlist for a market. Returns None if not set (caller should use config fallback)."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT tickers FROM watchlists WHERE market = ?", (market,))
+        row = c.fetchone()
+        conn.close()
+        if row and row[0]:
+            parsed = _json.loads(row[0])
+            return parsed if parsed else None
+        return None
+    except:
+        return None
+
+
+def db_read_all_watchlists() -> dict:
+    """Read all watchlists from DB. Returns {market: [tickers]} for any that exist."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT market, tickers, updated_at FROM watchlists")
+        rows = c.fetchall()
+        conn.close()
+        result = {}
+        for market, tickers_json, updated_at in rows:
+            try:
+                result[market] = {
+                    "tickers": _json.loads(tickers_json),
+                    "updated_at": updated_at,
+                }
+            except:
+                pass
+        return result
+    except:
+        return {}
+
+
+# ═══════════════════════════════════════════════════════════════
 # BOT STATUS SNAPSHOT — replaces status.json, survives restarts
 # ═══════════════════════════════════════════════════════════════
 def db_write_status(snapshot: dict) -> bool:
@@ -293,6 +384,88 @@ def db_read_status() -> dict:
         conn = _get_conn()
         c = conn.cursor()
         c.execute("SELECT snapshot FROM bot_status WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return _json.loads(row[0])
+        return {}
+    except:
+        return {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# LIVE POSITIONS SNAPSHOT — replaces positions.json
+# ═══════════════════════════════════════════════════════════════
+def db_write_positions(positions: dict) -> bool:
+    """Write live positions snapshot to DB."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO bot_positions (id, positions, updated_at)
+            VALUES (1, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+                positions = excluded.positions,
+                updated_at = excluded.updated_at
+        """, (_json.dumps(positions, default=str),))
+        conn.commit()
+        conn.close()
+        return True
+    except:
+        try: conn.close()
+        except: pass
+        return False
+
+
+def db_read_positions() -> dict:
+    """Read live positions snapshot from DB. Returns {} if none yet."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT positions FROM bot_positions WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return _json.loads(row[0])
+        return {}
+    except:
+        return {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# LAST KNOWN PORTFOLIO — replaces last_portfolio.json
+# ═══════════════════════════════════════════════════════════════
+def db_write_portfolio(data: dict) -> bool:
+    """Write last known portfolio value to DB."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO bot_portfolio (id, data, updated_at)
+            VALUES (1, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+                data = excluded.data,
+                updated_at = excluded.updated_at
+        """, (_json.dumps(data, default=str),))
+        conn.commit()
+        conn.close()
+        return True
+    except:
+        try: conn.close()
+        except: pass
+        return False
+
+
+def db_read_portfolio() -> dict:
+    """Read last known portfolio from DB. Returns {} if none yet."""
+    import json as _json
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT data FROM bot_portfolio WHERE id = 1")
         row = c.fetchone()
         conn.close()
         if row:
