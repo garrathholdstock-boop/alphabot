@@ -1789,7 +1789,7 @@ def run_ibkr_startup_recovery():
                     "highest_price": saved.get("highest_price", avg),
                     "entry_ts": saved.get("entry_ts", now_utc),
                     "entry_date": saved.get("entry_date", now_paris),
-                    "signal_score": saved.get("signal_score", "—"),
+                    "signal_score": saved.get("signal_score", None),
                     "entry_breakdown": saved.get("entry_breakdown", ""),
                 }
                 merged_count += 1
@@ -1807,7 +1807,7 @@ def run_ibkr_startup_recovery():
                     "highest_price": avg,
                     "entry_ts": now_utc,
                     "entry_date": now_paris,
-                    "signal_score": "—",
+                    "signal_score": None,
                     "entry_breakdown": "",
                 }
                 log.info(f"[RECOVERY] Restored {sym} x{qty} @ ${avg:.2f} | fresh (no DB record)")
