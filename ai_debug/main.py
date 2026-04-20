@@ -1139,14 +1139,53 @@ def clean(s):
 
 
 def is_safe(cmd):
+    """
+    Approval-gated agent model: Garrath reviews and taps approve on every command.
+    This gate exists only to block a minimal set of genuinely UNRECOVERABLE
+    footguns that would require a VPS rescue console to fix. Everything else
+    (reboot, sudo, chmod +x, dd, rm, etc.) is allowed because the human is the
+    safety layer.
+    """
     cmd = clean(cmd)
-    blocked = ['rm ', 'chmod +x', '> /', 'dd ', 'mkfs', 'reboot', 'shutdown', 'passwd', 'sudo']
-    if any(b in cmd for b in blocked):
-        return False
-    allowed = ['grep', 'cat ', 'head', 'tail', 'sed', 'wc ', 'ls ', 'find ', 'python3',
-               'ps ', 'df ', 'free ', 'screen', 'git ', 'sqlite3', 'echo ', 'env',
-               'netstat', 'ss ', 'curl', 'cp ', 'pip ', 'wget ', 'bash ']
-    return any(cmd.startswith(a) for a in allowed)
+
+    # Normalise whitespace for safer matching (collapse multiple spaces)
+    cmd_norm = " ".join(cmd.split())
+
+    # ── UNRECOVERABLE operations — hard block always ──
+    # These cannot be fixed by another command — they brick the VPS or
+    # destroy irreplaceable data. Everything else is trusted to human approval.
+    unrecoverable_patterns = [
+        # Full filesystem wipes
+        "rm -rf /", "rm -rf /*", "rm -r /", "rm -r /*",
+        "rm -rf ~", "rm -rf $HOME", "rm -rf .",
+        "rm -rf /etc", "rm -rf /boot", "rm -rf /usr", "rm -rf /var",
+        "rm -rf /home", "rm -rf /root", "rm -rf /bin", "rm -rf /sbin",
+        "rm -rf /lib", "rm -rf /proc", "rm -rf /sys", "rm -rf /dev",
+        # Irreplaceable DB destruction (months of trade history)
+        "rm /home/alphabot/app/alphabot.db",
+        "rm -f /home/alphabot/app/alphabot.db",
+        "rm -rf /home/alphabot/app/alphabot.db",
+        "> /home/alphabot/app/alphabot.db",
+        # Whole-disk overwrite / reformat
+        "dd if=/dev/zero of=/dev/sda", "dd if=/dev/urandom of=/dev/sda",
+        "dd if=/dev/zero of=/dev/vda", "dd if=/dev/urandom of=/dev/vda",
+        "dd if=/dev/zero of=/dev/nvme", "dd if=/dev/urandom of=/dev/nvme",
+        "mkfs.ext4 /dev/sda", "mkfs.ext3 /dev/sda", "mkfs.xfs /dev/sda",
+        "mkfs.ext4 /dev/vda", "mkfs.ext3 /dev/vda", "mkfs.xfs /dev/vda",
+        "mkfs.ext4 /dev/nvme", "mkfs.ext3 /dev/nvme", "mkfs.xfs /dev/nvme",
+        # Auth system destruction
+        "> /etc/passwd", "> /etc/shadow", "> /etc/sudoers",
+        ">> /etc/passwd", ">> /etc/shadow", ">> /etc/sudoers",
+        "rm /etc/passwd", "rm /etc/shadow", "rm /etc/sudoers",
+        # Classic fork bomb
+        ":(){:|:&};:", ":() { :|: & };:",
+    ]
+    for pat in unrecoverable_patterns:
+        if pat in cmd_norm:
+            return False
+
+    # Everything else is approved by the human. Trust them.
+    return True
 
 
 def run_cmd(cmd, timeout=15):
