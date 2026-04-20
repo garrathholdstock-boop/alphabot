@@ -3220,9 +3220,26 @@ async def log_lines(since_byte: int = 0, tail: int = 0):
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             raw = f.read()
-        # Filter out uvicorn HTTP access log lines — only show bot logs
+        # Known cosmetic errors — suppress from live log to reduce noise
+        _SUPPRESS = (
+            "Error 200,",   # Symbol not found — invalid ticker, harmless
+            "Error 10089,", # Market data subscription — SPY delayed, always fires
+            "Error 300,",   # Can't find EId — stale request cleanup
+            "Error 326,",   # clientId in use — transient, resolves itself
+            "Error 10090,", # Part of market data subscription chain
+            "DeprecationWarning:",  # Various deprecation warnings
+            "_is_weekend = datetime", # associated deprecation line
+            "on_event is deprecated", # FastAPI lifespan warning
+            "use lifespan event",   # FastAPI lifespan warning continuation
+            "fastapi.tiangolo.com", # FastAPI docs link in warning
+            "@app.on_event",        # FastAPI warning continuation
+            "Read more about it",   # FastAPI warning continuation
+            "No Sockets found",     # screen cleanup message
+            "INFO: 127.",   # uvicorn HTTP access
+            "HTTP/1.1",     # uvicorn HTTP access
+        )
         lines = [l.rstrip() for l in raw.splitlines()
-                 if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+                 if l.strip() and not any(s in l for s in _SUPPRESS)]
         return JSONResponse({"lines": lines, "next_byte": file_size})
     except Exception as e:
         return JSONResponse({"lines": [], "next_byte": since_byte, "error": str(e)})
