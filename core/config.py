@@ -234,16 +234,46 @@ VOLUME_MIN_RATIO = 1.2
 
 # ── Watchlists ────────────────────────────────────────────────
 US_WATCHLIST = [
-    "AAPL","MSFT","GOOGL","AMZN","META","NVDA","TSLA","NFLX","ORCL","ADBE",
-    "AMD","INTC","QCOM","AVGO","MU","AMAT","LRCX","KLAC","TXN","MRVL",
-    "COIN","HOOD","PYPL","SOFI","AFRM","UPST","NU","MARA","RIOT",
-    "RIVN","LCID","NIO","XPEV","LI","BLNK","CHPT","PLUG","BE",
-    "PLTR","AI","PATH","SNOW","DDOG","NET","CRWD","ZS","OKTA","MDB",
-    "MRNA","BNTX","NVAX","HIMS","TDOC","SDGR","RXRX","BEAM",
-    "SHOP","ETSY","ABNB","UBER","LYFT","DASH","RBLX","SNAP","PINS","YELP",
-    "XOM","CVX","OXY","SLB","HAL","MPC","VLO","PSX","DVN","FANG",
-    "GME","AMC","SPCE","WKHS","OPEN","DKNG","CLOV",
-    "CBRE","BIPC","VRT","ANET","EQIX",
+    # Mega-cap tech
+    "AAPL","MSFT","GOOGL","GOOG","AMZN","META","NVDA","TSLA","NFLX","ORCL",
+    "ADBE","CRM","AMD","INTC","QCOM","AVGO","CSCO","TXN","IBM","INTU",
+    # Semiconductor
+    "MU","AMAT","LRCX","KLAC","MRVL","ON","NXPI","MCHP","ADI","SNPS",
+    "CDNS","ANET","FTNT","PANW","WDAY","TEAM","NOW","DOCU","ZM","DOCN",
+    # Software / cloud
+    "PLTR","SNOW","DDOG","NET","CRWD","ZS","OKTA","MDB","PATH","AI",
+    "S","BILL","GTLB","ESTC","CFLT","HUBS","VEEV","DT","FROG","AYX",
+    # Fintech / payments
+    "V","MA","PYPL","SQ","COIN","HOOD","SOFI","AFRM","UPST","NU",
+    "MARA","RIOT","MSTR","CLSK","BITF","CIFR","BTBT","HUT",
+    # Automakers / EV
+    "F","GM","RIVN","LCID","NIO","XPEV","LI","BLNK","CHPT","PLUG",
+    "BE","FCEL","QS","FSR","GOEV","WKHS","HYLN","PTRA","NKLA",
+    # Consumer / retail
+    "WMT","COST","HD","LOW","TGT","NKE","SBUX","MCD","CMG","DIS",
+    "SHOP","ETSY","EBAY","WIX","ABNB","UBER","LYFT","DASH","DKNG","BATRA",
+    # Communication / media
+    "RBLX","SNAP","PINS","YELP","MTCH","BMBL","SPOT","PARA","WBD","FOX",
+    # Pharma / biotech
+    "JNJ","PFE","MRK","LLY","ABBV","UNH","CVS","BMY","GILD","AMGN",
+    "MRNA","BNTX","NVAX","HIMS","TDOC","REGN","VRTX","ISRG","SDGR","RXRX",
+    "BEAM","NTLA","EDIT","CRSP","ILMN","DXCM","VTRS","INCY","ALNY",
+    # Banks / financial
+    "JPM","BAC","WFC","GS","MS","C","BLK","SCHW","AXP","COF",
+    "USB","PNC","TFC","MTB","KEY","CFG","RF","HBAN","FITB","ZION",
+    # Energy
+    "XOM","CVX","COP","OXY","SLB","HAL","MPC","VLO","PSX","DVN",
+    "FANG","EOG","PXD","APA","HES","MRO","OVV","EQT","AR","KMI",
+    # Industrials / defence
+    "BA","CAT","GE","LMT","RTX","NOC","HON","MMM","DE","EMR",
+    "ETN","PH","ROK","GD","TDG","HEI","LHX","TXT","CW","AXON",
+    # Real estate / REITs
+    "PLD","AMT","CCI","EQIX","DLR","PSA","WELL","SPG","O","SBAC",
+    "EXR","AVB","EQR","ARE","VICI","INVH","MAA","ESS","CPT","UDR",
+    # Utilities
+    "NEE","DUK","SO","D","AEP","SRE","XEL","PCG","PEG","ED",
+    # Misc / momentum
+    "GME","AMC","SPCE","OPEN","CLOV","GEVO","CBRE","BIPC","VRT","SYM",
 ]
 
 # ── Bear discipline watchlist — inverse ETFs ──────────────────
@@ -254,27 +284,65 @@ BEAR_WATCHLIST = ["SQQQ", "SPXU", "SDOW", "FAZ"]
 
 # ── Smallcap Watchlists (refreshed weekly via agent Refresh Small Caps) ──
 US_SMALLCAP_WATCHLIST = [
-    "IONQ","JOBY","ACHR","SOUN","CLOV","WKHS","SPCE","GOEV","BLNK","CHPT",
-    "PTRA","BBAI","AITX","GFAI","INDI","OUST","LIDR","AEVA","MVIS","LAZR",
-    "VLDR","AEYE","KOPN","PRPL","POWW","HIMS","OCGN","VNET","BKSY","RSKD",
-    "PAYO","RELY","PNTM","NUVL","IMVT","KALA","NRIX","SNDX","BCRX","PRAX",
-    "FOLD","ARQT","GOCO","SWAG","GTHX","MGNX","NCPL","SBFG","LFST","MXCT",
+    # Quantum/AI/Robotics
+    "IONQ","QBTS","RGTI","JOBY","ACHR","SOUN","BBAI","AITX","GFAI","INDI",
+    # Lidar / AV
+    "OUST","LIDR","AEVA","MVIS","LAZR","VLDR","AEYE","KOPN","INVZ","CGNX",
+    # Biotech
+    "NUVL","IMVT","KALA","NRIX","SNDX","BCRX","PRAX","FOLD","ARQT","GTHX",
+    "MGNX","NCPL","LFST","MXCT","DNLI","APLS","ALLO","BCYC","CTIC","AKRO",
+    # EV / cleantech
+    "WKHS","SPCE","GOEV","BLNK","CHPT","PTRA","PLUG","FCEL","GEVO","RUN",
+    # Fintech
+    "HOOD","PAYO","RELY","PNTM","DAVE","MQ","UPST","AFRM","SOFI","OPFI",
+    # Crypto exposure
+    "MARA","RIOT","CLSK","BITF","CIFR","BTBT","HUT","HIVE","CAN","CORZ",
+    # Consumer / retail
+    "CLOV","HIMS","OCGN","RSKD","PRPL","POWW","YELL","WISH","DROP","STCO",
+    # Tech
+    "AI","NCNO","BKSY","VNET","BASE","SWIM","APP","NABL","ATEN","BAND",
+    # Legacy momentum
+    "GME","AMC","BBBY","OPEN","MMAT","SAVA","LAZY","TPCS","DWAC","PHUN",
 ]
 
 FTSE_SMALLCAP_WATCHLIST = [
+    # Tech / data
     "IQG","RWS","GAMA","JTC","FOUR","AMS","CBOX","KNOS","BVXP","EKF",
+    "BOKU","BGEO","CEPS","CRAW","ERM","CMCX","YOU","RCH","KOO","IMM",
+    # Biotech / health
     "FRP","POLR","CML","GYM","TAST","RBGP","MONY","PLUS","FDM","CLIG",
-    "RHM","CEPS","CRAW","ERM","FDEV","IGR","CMCX","YOU","RCH","BOKU",
-    "SHOE","MPAC","WINV","IDP","AFX","BGEO","SQZ","TIG","ASAI","RDW",
-    "BOO","CARD","HYVE","TPX","VLX","SMDS","FSFL","MHN","QTX","SUMO",
+    "DRM","OXB","ANGL","ABDX","REN","IPX","SYNC","MCB","ADT","BHG",
+    # Consumer / retail
+    "SHOE","MPAC","WINV","IDP","AFX","SQZ","TIG","ASAI","RDW","BOO",
+    "CARD","HYVE","TPX","VLX","SMDS","FSFL","MHN","QTX","SUMO","RHM",
+    # Energy / resources
+    "FDEV","IGR","JET","GKP","TLW","SOLG","ECOR","HOC","CAP","TRP",
+    # Real estate / industrial
+    "WHR","IHR","LOK","FCH","TRN","AGR","TR.","CTO","BMY","XPF",
+    # Property
+    "SAFE","ASHM","CAPC","BBOX","GPE","MUT","SHB","FCRE","EPIC","SHI",
+    # Financial services
+    "ARBB","IPO","LIO","CAPD","INL","RBN","ASB","CLIG","JAM","BRK",
+    # Industrials
+    "CHRT","FGP","RENX","VP.","NORC","EAH","STEM","TIG","BWNG","GKN",
 ]
 
 ASX_SMALLCAP_WATCHLIST = [
+    # Mining / resources
     "PLS","LTR","GL1","AKE","CXO","HMC","VUL","LKE","SYA","DRO",
-    "MEI","VHT","APX","TNE","SDR","NIC","SFR","GOR","RMS","WAF",
-    "DEG","BGL","NHC","YAL","TBN","HVN","SUL","UNI","IPD","GUD",
-    "NCK","MHJ","BAP","CCX","EML","PPH","SLR","SKC","AIM","BWX",
-    "IGL","MYX","PNV","AVH","PRN","CNI","KMD","NZM","SCP","AD8",
+    "BGL","BHP","NST","EVN","SFR","GOR","RMS","WAF","DEG","NIC",
+    "CAA","OSH","PNR","SVL","BMN","LRS","BOE","LOT","PDN","AEE",
+    # Technology
+    "MEI","VHT","APX","TNE","SDR","NIC","WTC","XRO","TLX","ALU",
+    "MP1","NEA","BVS","PPS","WLD","EML","IRE","PPH","RUL","DTL",
+    # Financial / fintech
+    "LVT","HUB","PYR","Z1P","AFG","HGH","BRG","EQT","HMY","HOC",
+    # Consumer / retail
+    "NHC","YAL","TBN","HVN","SUL","UNI","IPD","GUD","NCK","MHJ",
+    "BAP","CCX","EML","PPH","SLR","SKC","AIM","BWX","PMV","KMD",
+    # Healthcare / biotech
+    "IGL","MYX","PNV","AVH","PRN","CNI","IMU","NAN","RHY","ACL",
+    "EBO","MSB","FPH","OSH","IPD","AVH","VHT","SIG","RHC","ANN",
 ]
 
 CRYPTO_WATCHLIST_BINANCE = [
@@ -520,35 +588,70 @@ _state_lock = _threading.Lock()
 
 # ── ASX Watchlist (ASX exchange, AUD) ─────────────────────────
 ASX_WATCHLIST = [
-    "CBA","NAB","WBC","ANZ","MQG",
-    "BHP","RIO","FMG","MIN","S32",
-    "CSL","RMD","COH","SHL","PME",
-    "WTC","XRO","TLX","ALU","MP1",
-    "WOW","COL","JBH","ARB","REH",
-    "WDS","STO","BPT","KAR","WHC",
-    "GMG","SCG","GPT","MGR","CHC",
-    "TCL","QAN","AZJ","ORI","AMC",
+    # Banks
+    "CBA","NAB","WBC","ANZ","MQG","BEN","BOQ","JDO","AFG","HGH",
+    # Miners — big
+    "BHP","RIO","FMG","MIN","S32","NST","EVN","NEM","PRU","RRL",
+    "AWC","ILU","IGO","LYC","MTS","PLS","LTR","AKE","GL1","CXO",
+    "WAF","GOR","RMS","WDS","STO","BPT","KAR","WHC","YAL","NHC",
+    # Healthcare
+    "CSL","RMD","COH","SHL","PME","ANN","SIG","RHC","NAN","RHY",
+    "IMU","ACL","EBO","FPH","MSB","OSH","PNV","IPD","AVH","VHT",
+    # Tech
+    "WTC","XRO","TLX","ALU","MP1","TNE","SDR","NIC","APX","NEA",
+    "BVS","PPS","WLD","EML","IRE","PPH","RUL","DTL","LVT","HUB",
+    # Consumer / retail
+    "WOW","COL","JBH","ARB","REH","HVN","SUL","UNI","NCK","MHJ",
+    "BAP","CCX","KMD","LOV","RBL","TPW","BWX","PMV","MTS","EDV",
+    # Energy
+    "WDS","STO","BPT","KAR","WHC","YAL","NHC","SXY","COE","CTX",
+    "ORG","AGL","APA","ALD","CIA","NEW","VMM","TIG","MEI","BUY",
+    # Property / REIT
+    "GMG","SCG","GPT","MGR","CHC","SGP","DXS","VCX","CQR","CIP",
+    "CLW","ARF","COF","HPI","RFF","CMW","NSR","ABP","HMC","HDN",
+    # Industrials / transport
+    "TCL","QAN","AZJ","ORI","AMC","QUB","ALL","SCP","IGL","IPL",
+    "REH","PRN","CNI","SLR","SKC","AIM","MYX","SEK","REA","DMP",
+    # Telco / media
+    "TLS","TPG","TUA","SWM","NEC","ARB","IPH","EVT","SKT","VOC",
+    # Misc
+    "IFL","CGF","SUN","IAG","QBE","MPL","PPT","AMP","MFG","CGC",
+    "HMY","DRO","VUL","LKE","SYA","BGL","TBN","GUD","AD8","FLT",
 ]
 
 # ── FTSE Watchlist (LSE exchange, GBP) ────────────────────────
 FTSE_WATCHLIST = [
-    "HSBA","LLOY","BARC","AV.","LGEN","PRU","STJ","HLMA",
-    "SBRE","ABDN","OSB","NWG","MNG","JUP","ITRK",
-    "SHEL","BP.","SSE","SGE","EXPN",
-    "RIO","BHP","AAL","GLEN","FRES","MNDI",
-    "ULVR","DGE","BATS","IMB","OCDO","ABF",
-    "AZN","GSK","HLN","HIK","NXT",
-    "BA.","RR.","IMI","WEIR","DCC","PSN","MTO",
-    "AUTO","MKS","TSCO","SBRY","WPP","WTB",
-    "JD.","BRBY","KGF","HMSO",
-    "VOD","BT.A","SMIN","DPLM",
-    "LAND","SGRO","BLND","BBOX","PHP","SUPR",
-    "UU.","SVT","NG.","CNA",
-    "REL","PSON","ITV",
-    "CCH","TATE",
-    "IAG","EZJ",
-    "CRH","SMT","FCIT",
-    "PETS","BKG","TW.","BWY",
+    # Banks & insurance
+    "HSBA","LLOY","BARC","NWG","STAN","AV.","LGEN","PRU","STJ","HLMA",
+    "SBRE","ABDN","OSB","MNG","JUP","ITRK","CBG","PAG","PSDL","IIG",
+    # Energy
+    "SHEL","BP.","HBR","TLW","TRIN","ENQ","CAP","WOSG","SOLG","PMO",
+    # Miners
+    "RIO","BHP","AAL","GLEN","FRES","MNDI","ANTO","EVR","CEY","SHG",
+    "POLY","KMR","HOC","ECOR","HOR","ADT","GRG","TRR","CZN","GEMD",
+    # Consumer staples
+    "ULVR","DGE","BATS","IMB","OCDO","ABF","RKT","TATE","CCH","BBAM",
+    "BWY","BAB","RSW","NICL","SMDS","SGP","EMG","RNO","ROR","WIX",
+    # Pharma
+    "AZN","GSK","HLN","HIK","NXT","ASLE","DRX","PHP","SPH","MCB",
+    "GWRS","SYNC","BHG","ANGL","VCT","OXB","IPX","ATS","REN","ABDX",
+    # Industrials
+    "BA.","RR.","IMI","WEIR","DCC","MTO","SMIN","DPLM","SMDS","AUTO",
+    "IHG","EXPN","SGE","SSP","DLG","VMUK","BKG","TW.","PSN","RPD",
+    # Retail
+    "MKS","TSCO","SBRY","WPP","WTB","JD.","BRBY","KGF","HMSO","ASC",
+    "GPE","GFS","CARD","LSEG","GNS","BOO","MCB","PETS","WIZZ","EZJ",
+    # Real estate
+    "LAND","SGRO","BLND","BBOX","PHP","SUPR","CLS","DLN","GPE","SHB",
+    # Utilities
+    "UU.","SVT","NG.","CNA","PNN","DRX","SPC","RWS","TRIG","BSIF",
+    # Tech / media
+    "REL","PSON","ITV","CCH","TATE","BME","GSF","OBS","GAW","TRST",
+    # Transport
+    "IAG","EZJ","WIZZ","RYA","SMDS","FGP","GOG","MBH","TRN","SHAL",
+    # Other
+    "CRH","SMT","FCIT","PETS","SCT","TRN","HSX","III","SDR","HWDN",
+    "SPX","SKG","ABF","EPIC","ASHM","ATG","AO.","BWY","GSK","SHEL",
 ]
 
 # ── Market configs per exchange ───────────────────────────────
