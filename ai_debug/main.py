@@ -61,8 +61,8 @@ COSMETIC_PATTERNS = [
 
 # ── P1 Safety triggers ────────────────────────────────────────
 P1_PATTERNS = [
-    ("bot_down",          r"No Sockets found|screen.*removed|Broken pipe",
-                          "🔴 P1: Bot process DOWN"),
+    ("bot_down",          r"systemctl.*failed|Main process exited.*status=1|alphabot\.service.*Failed",
+                          "🔴 P1: Bot process DOWN (systemd reports failure)"),
     ("stop_not_firing",   r"unrealizedPNL=-[6-9]\d{3}|unrealizedPNL=-[1-9]\d{4}",
                           "🔴 P1: Position loss >$6k — stop may not be firing"),
     ("ibkr_disconnect",   r"API connection failed|Cannot connect to IBKR|connection refused",
@@ -211,12 +211,17 @@ def db_get_recent_events(limit=20):
 # BOT STATUS HELPERS
 # ═══════════════════════════════════════════════════════════════
 def get_screen_log(lines=100):
+    """Post-refactor: there are no screen sessions. Return a tail of the bot log file.
+    Kept with the same name to avoid touching every caller."""
     try:
-        subprocess.run(["/usr/bin/screen", "-S", SCREEN_NAME, "-X", "hardcopy", "/tmp/ab.txt"],
-                       timeout=3, capture_output=True)
-        with open("/tmp/ab.txt", "r", errors="replace") as f:
-            return "".join(f.readlines()[-lines:])
-    except:
+        if not os.path.exists(LOG_PATH):
+            return ""
+        with open(LOG_PATH, "r", errors="replace") as f:
+            # Skip uvicorn HTTP access log noise — same filter as the Live Log endpoint
+            all_real = [l for l in f.readlines()
+                        if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+        return "".join(all_real[-lines:])
+    except Exception:
         return ""
 
 
@@ -226,7 +231,9 @@ def get_log_file(lines=500, hours=None):
         if not os.path.exists(LOG_PATH):
             return ""
         with open(LOG_PATH, "r", errors="replace") as f:
-            all_lines = f.readlines()
+            # Drop uvicorn HTTP access log noise — these lines don't carry bot signal
+            all_lines = [l for l in f.readlines()
+                         if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
         if hours:
             cutoff = datetime.now(PARIS) - timedelta(hours=hours)
             cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M")
@@ -297,19 +304,15 @@ def analyse_log_patterns(hours=6):
 
 
 def is_bot_running():
-    # Check systemd first (post-migration), fall back to screen session check
+    """Post-refactor: systemd is the source of truth. No screen sessions exist."""
     try:
         r = subprocess.run(
             ["systemctl", "is-active", "alphabot"],
             capture_output=True, text=True, timeout=5
         )
-        if r.stdout.strip() == "active":
-            return True
+        return r.stdout.strip() == "active"
     except Exception:
-        pass
-    # Fallback: screen session (pre-systemd / manual start)
-    r = subprocess.run(["/usr/bin/screen", "-ls"], capture_output=True, text=True)
-    return SCREEN_NAME in r.stdout
+        return False
 
 
 def get_positions_from_db():
@@ -386,7 +389,7 @@ def auto_restart_bot():
             ["systemctl", "is-active", "alphabot"],
             capture_output=True, text=True, timeout=5
         )
-        use_systemd = True  # always attempt systemd; falls through to screen if not found
+        use_systemd = True  # post-refactor: systemd is the only managed runtime
 
         result = subprocess.run(
             ["systemctl", "restart", "alphabot"],
@@ -407,28 +410,27 @@ def auto_restart_bot():
             _log_agent("Auto-restarted bot via systemd successfully")
             return True
 
-        # Fallback: screen + start.sh (pre-systemd)
-        _log_agent("systemd restart did not confirm — falling back to start.sh")
-        subprocess.run("pkill -9 -f 'python3 -m app.main'", shell=True, timeout=5)
-        subprocess.run("/usr/bin/screen -wipe", shell=True, timeout=5)
-        time.sleep(2)
-        subprocess.run(f"bash /home/alphabot/start.sh", shell=True, timeout=10, cwd=APP_PATH)
-        time.sleep(5)
+        # Fallback: try systemd once more with a longer wait before escalating.
+        # Post-refactor there is no start.sh/screen path — if systemd can't bring the bot up,
+        # manual intervention is required.
+        _log_agent("systemd restart did not confirm after 5s — retrying once with longer wait")
+        subprocess.run(["systemctl", "restart", "alphabot"], capture_output=True, text=True, timeout=15)
+        time.sleep(10)
         if is_bot_running():
             msg = (f"✅ <b>AlphaBot Auto-Restarted</b>\n"
                    f"Time: {datetime.now(PARIS).strftime('%H:%M Paris')}\n"
-                   f"Status: Screen session confirmed running")
+                   f"Status: systemd service confirmed active (second attempt)")
             send_telegram(msg, "P1")
-            db_log_event("P1", "bot_down", "Bot was down", "Auto-restarted via start.sh fallback")
+            db_log_event("P1", "bot_down", "Bot was down", "Auto-restarted via systemd (second attempt)")
             auto_fixed_log.insert(0, {
                 "time": datetime.now(PARIS).strftime("%H:%M"),
-                "action": "Bot restarted (start.sh fallback)",
+                "action": "Bot restarted (systemd, 2nd attempt)",
                 "result": "✅ Running"
             })
-            _log_agent("Auto-restarted bot via start.sh fallback")
+            _log_agent("Auto-restarted bot via systemd second attempt")
             return True
         else:
-            send_telegram("🔴 <b>P1 CRITICAL: Bot restart FAILED</b>\nManual intervention required.", "P1")
+            send_telegram("🔴 <b>P1 CRITICAL: Bot restart FAILED</b>\nManual intervention required. Try via Termius:\n• systemctl status alphabot\n• journalctl -u alphabot -n 100 --no-pager", "P1")
             return False
     except Exception as e:
         _log_agent(f"auto_restart_bot error: {e}")
@@ -912,26 +914,32 @@ def _update_context_md():
 ## Last Updated
 {today} Paris (auto-updated by agent)
 
-## Architecture
+## Architecture (post-refactor, systemd-managed)
 - VPS: 178.104.170.58 (Hetzner), user: root, Paris = UTC+2
 - Git root: /home/alphabot/app/ (branch: main)
-- Bot start: bash /home/alphabot/start.sh → screen session "alphabot"
-- start.sh runs: python3 -m app.main (NOT python3 app/main.py)
-- Dashboard: port 8080 | Debug agent: port 8000 | Intelligence: /intelligence
-- DB: /home/alphabot/app/alphabot.db
+- IB Gateway: runs in Docker container (NOT a host process), exposes port 4004 on localhost
+- Services managed by systemd — NOT screen. There are no screen sessions.
+  - alphabot.service           (port n/a, trading bot)         — systemctl status/restart alphabot
+  - alphabot-dashboard.service (port 8080, FastAPI dashboard)  — systemctl status/restart alphabot-dashboard
+  - alphabot-agent.service     (port 8000, this debug agent)   — systemctl status/restart alphabot-agent
+- Logs:
+  - /home/alphabot/app/alphabot.log         — bot stdout/stderr
+  - /home/alphabot/app/alphabot-agent.log   — this agent's uvicorn HTTP access log
+  - journalctl -u alphabot-dashboard        — dashboard logs
+  - Rotated daily via /etc/logrotate.d/alphabot (14 days, compressed)
+- DB: /home/alphabot/app/alphabot.db (SQLite, WAL mode, backed up nightly to /home/alphabot/backups/db/)
 - GitHub: https://github.com/garrathholdstock-boop/alphabot
 
 ## File Structure
 - app/main.py — main trading loop (6 disciplines)
 - app/dashboard.py — web dashboard port 8080 + /intelligence + /analytics + /settings
 - core/config.py — all config + watchlists (US_WATCHLIST includes CBRE, BIPC, VRT, ANET, EQIX)
-- core/execution.py — order execution (IBKR + Binance)
+- core/execution.py — order execution (IBKR + Binance, single-connection manager post-refactor)
 - core/risk.py — risk management
 - data/analytics.py — signal scoring + near-miss tracking + DB persistence
 - data/database.py — DB operations (v2: trades, near_misses, rotations, tuning_recommendations, intelligence_runs)
 - data/intelligence.py — weekly Claude intelligence analysis (Sunday 7pm ET + manual trigger)
 - ai_debug/main.py — this agent (port 8000)
-- start.sh — starts 3 screens: alphabot, dashboard, agent
 
 ## Database Tables (v2 schema)
 - trades: symbol, pnl, score, adx_at_entry, macd_bullish, breakout, rs_vs_spy, news_state, regime_at_entry, vix_at_entry, exit_category, discipline
@@ -993,7 +1001,8 @@ def _update_context_md():
 - DeprecationWarning utcnow() — Python 3.12, cosmetic
 - reqHistoricalData Timeout for SPY — harmless, retries next cycle
 - Can't find EId with tickerId — harmless IBKR cosmetic
-- "future belongs to a different loop" — harmless if from dashboard thread, P1 if from alphabot screen
+- Error 200 "No security definition" for specific LSE tickers — watchlist symbol needs cleanup but not a live-system issue
+- [IBKR-MGR] Request failed: This event loop is already running — REAL BUG in core/execution.py, tracked separately, fire every bot cycle
 
 ## Priority Matrix
 - P1 SAFETY: bot down, stop not firing, IBKR disconnect, kill switch, daily loss limit
@@ -1009,10 +1018,11 @@ def _update_context_md():
 
 ## Deploy Workflow
 cd /home/alphabot/app && git pull origin main
-pkill -9 -f python3 && pkill -9 -f uvicorn && screen -wipe && bash /home/alphabot/start.sh
+systemctl restart alphabot && systemctl restart alphabot-dashboard && systemctl restart alphabot-agent
 
 ## Emergency
-pkill -9 -f python3 && screen -wipe && bash /home/alphabot/start.sh
+systemctl restart alphabot
+# If that fails: systemctl status alphabot (check why), journalctl -u alphabot -n 100 --no-pager
 """
         os.makedirs(os.path.dirname(CONTEXT_PATH), exist_ok=True)
         with open(CONTEXT_PATH, "w") as f:
@@ -1029,12 +1039,14 @@ SYSTEM_PROMPT = """You are an expert autonomous debugging agent for AlphaBot tra
 
 Read the CONTEXT section carefully - it has architecture, known errors, previous fixes.
 
-ARCHITECTURE:
-- Bot screen: "alphabot" | Dashboard: port 8080 | Debug agent: port 8000
+ARCHITECTURE (post-refactor, systemd-managed):
+- Services (all systemd, NO screen sessions): alphabot (bot), alphabot-dashboard (port 8080), alphabot-agent (port 8000, this agent)
+- Commands: systemctl restart alphabot | systemctl status alphabot | journalctl -u alphabot -n 100 --no-pager
+- IB Gateway: runs in Docker container (NOT a host process), exposes port 4004 on localhost
 - Files: app/main.py, app/dashboard.py, core/config.py, core/execution.py, core/risk.py
 - New files: data/analytics.py, data/database.py (v2), data/intelligence.py
 - DB: /home/alphabot/app/alphabot.db
-- Start: bash /home/alphabot/start.sh (3 screens: alphabot, dashboard, agent)
+- Logs: /home/alphabot/app/alphabot.log (bot), /home/alphabot/app/alphabot-agent.log (this agent)
 - Brokers: IBKR (US/ASX/FTSE), Binance TESTNET (crypto)
 
 DB TABLES (v2 schema — key new fields):
@@ -1082,7 +1094,7 @@ RULES:
 - Never touch .env — flag to user instead
 - NO smart quotes in commands
 - If COMPLETE, fill CONTEXT_UPDATE
-- Prefer reading alphabot.log over screen buffer for pattern analysis
+- Prefer reading alphabot.log (bot) and journalctl -u <service> (systemd services) — there are no screen sessions
 """
 
 COMPRESS_PROMPT = """Summarise this debugging session into under 300 words.
@@ -1175,7 +1187,18 @@ def update_context(fix_summary):
 
 def get_bot_context():
     log = get_screen_log(80)
-    screen = run_cmd("/usr/bin/screen -ls")
+    # Post-refactor: report systemd service status instead of screen sessions.
+    # The `screen` variable name is preserved for compatibility with prompt strings
+    # elsewhere — but its content is now the systemd truth.
+    svc_lines = []
+    for svc, label in [("alphabot", "bot"), ("alphabot-dashboard", "dashboard"), ("alphabot-agent", "agent")]:
+        try:
+            r = subprocess.run(["systemctl", "is-active", svc],
+                               capture_output=True, text=True, timeout=3)
+            svc_lines.append(f"{label}: {r.stdout.strip() or 'unknown'}")
+        except Exception:
+            svc_lines.append(f"{label}: check_failed")
+    screen = "SYSTEMD SERVICES (post-refactor — no screen sessions used):\n" + "\n".join(svc_lines)
     db = {}
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1380,8 +1403,8 @@ def render(analysis="", command="", reason="", status="", cmd_output="", cmd_run
            error="", question="", history="", complete=False, compressed=False,
            step_count=0, ctx_updated=False, audit_result="", **kwargs):
 
-    screen_status = run_cmd("/usr/bin/screen -ls")
-    bot_ok = SCREEN_NAME in screen_status
+    # Post-refactor: use is_bot_running() which checks systemd first (correct truth source)
+    bot_ok = is_bot_running()
     sc = "#00ff88" if bot_ok else "#ef4444"
     st = "RUNNING" if bot_ok else "DOWN"
     trades, today_count = get_db_display()
@@ -1824,7 +1847,7 @@ async def ask(question: str = Form("")):
         return RedirectResponse(os.environ.get("ROOT_PATH","")+"/", status_code=303)
     log, screen, db = get_bot_context()
     context = load_context()
-    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM: {question}"}]
+    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSERVICES:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM: {question}"}]
     response_text = call_claude(messages)
     status, analysis, command, reason, ctx_update = parse_response(response_text)
     steps = messages + [{"role": "assistant", "content": response_text}]
@@ -1907,7 +1930,7 @@ MARKET STATUS:
 DATABASE SNAPSHOT (v2 schema):
 {json.dumps(db_snap, default=str, indent=2)[:4000]}
 
-BOT SCREEN LOG (last 80 lines):
+BOT RECENT LOG (last 80 lines):
 {log_screen}
 
 ALPHABOT.LOG (last 6h, last 200 lines):
@@ -1951,7 +1974,7 @@ async def queue_investigate(item_id: str = Form(""), event_type: str = Form(""))
     question = q_map.get(event_type, f"Investigate: {event_type}")
     log, screen, db = get_bot_context()
     context = load_context()
-    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM: {question}"}]
+    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSERVICES:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nPROBLEM: {question}"}]
     response_text = call_claude(messages)
     status, analysis, command, reason, ctx_update = parse_response(response_text)
     steps = messages + [{"role": "assistant", "content": response_text}]
@@ -1984,7 +2007,7 @@ async def event_investigate(event_type: str = Form(""), message: str = Form(""),
     question = q_map.get(event_type, f"Investigate this event: {message}. Detail: {detail}")
     log, screen, db = get_bot_context()
     context = load_context()
-    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSCREEN:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nEVENT TRIGGERED: {message}\n\nPROBLEM: {question}"}]
+    messages = [{"role": "user", "content": f"CONTEXT:\n{context}\n\nLIVE LOGS:\n{log}\n\nSERVICES:\n{screen}\n\nDB:\n{json.dumps(db, default=str)[:800]}\n\nEVENT TRIGGERED: {message}\n\nPROBLEM: {question}"}]
     response_text = call_claude(messages)
     status, analysis, command, reason, ctx_update = parse_response(response_text)
     steps = messages + [{"role": "assistant", "content": response_text}]
@@ -3319,24 +3342,30 @@ async def download_file(name: str = ""):
 @app.get("/log/lines")
 async def log_lines(since_byte: int = 0, tail: int = 0):
     """Return new log lines using byte position — reliable across restarts.
-    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from."""
+    If tail>0 and since_byte==0, returns last N lines and the byte position to continue from.
+    On first load, seeks to near end of file rather than reading whole file — cheap even if log is large."""
     try:
         if not os.path.exists(LOG_PATH):
             return JSONResponse({"lines": [], "next_byte": 0})
         file_size = os.path.getsize(LOG_PATH)
         if since_byte >= file_size:
             return JSONResponse({"lines": [], "next_byte": file_size})
-        # On first load (since_byte==0), jump to end and return last tail lines
+        # On first load (since_byte==0), seek to last ~200KB and take tail lines.
+        # This keeps the query fast even if the log file is very large.
         if since_byte == 0 and tail > 0:
+            read_from = max(0, file_size - 200_000)
             with open(LOG_PATH, "r", errors="replace") as f:
-                all_lines = [l.rstrip() for l in f.readlines()
-                             if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
+                f.seek(read_from)
+                if read_from > 0:
+                    f.readline()  # discard the partial line at the seek boundary
+                raw = f.read()
+            all_lines = [l for l in raw.splitlines()
+                         if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
             lines = all_lines[-tail:]
             return JSONResponse({"lines": lines, "next_byte": file_size})
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             raw = f.read()
-        # Filter out uvicorn HTTP access log lines — only show bot logs
         lines = [l.rstrip() for l in raw.splitlines()
                  if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
         return JSONResponse({"lines": lines, "next_byte": file_size})
