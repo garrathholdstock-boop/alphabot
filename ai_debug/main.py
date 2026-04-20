@@ -2497,6 +2497,27 @@ td {{ padding:8px 8px; border-bottom:1px solid #0f0f18; }}
     </div>
   </div>
 
+  <!-- Row 5: Credentials -->
+  <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:#94a3b8;text-transform:uppercase;margin-bottom:10px">🔐 Credentials</div>
+  <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:20px">
+    <!-- Update Claude API Key -->
+    <div style="background:#0a1020;border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:16px">
+      <div style="font-size:15px;font-weight:700;color:#f59e0b;margin-bottom:6px">🔑 Update Claude API Key</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.6">
+        Paste a new key from <a href="https://console.anthropic.com" target="_blank" style="color:#aa88ff">console.anthropic.com</a>.
+        Key is tested against Anthropic before saving — if rejected, the old key stays in place.
+        Written atomically to <code>.env</code>, live-reloaded, no agent restart needed. PIN required.
+      </div>
+      <input id="apikey-input" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"
+        placeholder="sk-ant-api03-..." maxlength="140"
+        style="width:100%;background:#0a0a0f;border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#f59e0b;font-family:'JetBrains Mono',monospace;font-size:13px;padding:10px 14px;margin-bottom:10px;letter-spacing:1px">
+      <button onclick="updateApiKey()" class="btn" style="width:100%;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);color:#f59e0b">
+        🔑 Test & Apply Key
+      </button>
+      <div id="apikey-result" style="display:none;margin-top:12px;font-size:12px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:10px;line-height:1.6"></div>
+    </div>
+  </div>
+
 </div>
 {backup_list_html}
 
@@ -2636,6 +2657,54 @@ function refreshSmallCaps() {{
       btn.style.opacity = '1';
     }});
 }}
+
+function updateApiKey() {{
+  var input = document.getElementById('apikey-input');
+  var result = document.getElementById('apikey-result');
+  var newKey = (input.value || '').trim();
+  if (!newKey) {{
+    result.style.display = 'block';
+    result.style.color = '#ef4444';
+    result.textContent = 'Paste a key first.';
+    return;
+  }}
+  if (!newKey.startsWith('sk-ant-api03-')) {{
+    result.style.display = 'block';
+    result.style.color = '#ef4444';
+    result.textContent = 'Key must start with sk-ant-api03-';
+    return;
+  }}
+  var pin = prompt('Enter maintenance PIN to update the API key:');
+  if (!pin) return;
+  result.style.display = 'block';
+  result.style.color = '#f59e0b';
+  result.textContent = 'Testing key with Anthropic...';
+  fetch(BASE+'/maintenance/update-api-key', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{pin: pin, api_key: newKey}})
+  }})
+  .then(r => r.json())
+  .then(d => {{
+    if (d.status === 'wrong_pin') {{
+      result.style.color = '#ef4444';
+      result.textContent = 'Wrong PIN.';
+      return;
+    }}
+    if (d.status === 'ok') {{
+      result.style.color = '#00ff88';
+      result.textContent = d.message || 'Done.';
+      input.value = '';
+    }} else {{
+      result.style.color = '#ef4444';
+      result.textContent = d.message || 'Error.';
+    }}
+  }})
+  .catch(function(err) {{
+    result.style.color = '#ef4444';
+    result.textContent = 'Network error — could not reach agent.';
+  }});
+}}
 </script>
 </body></html>"""
 
@@ -2677,6 +2746,114 @@ async def maintenance_disk():
         timeout=10
     ))
     return JSONResponse({"output": output or "No output"})
+
+
+# ───────────────────────────────────────────────────────────────
+#  API KEY HOT-SWAP — write to .env atomically, test, live-reload
+# ───────────────────────────────────────────────────────────────
+def _write_env_var(name: str, value: str, env_path: str = "/home/alphabot/app/.env") -> None:
+    """
+    Atomic in-place update of a single var in .env.
+    - Preserves all other lines (comments, blanks, other vars) unchanged.
+    - Writes to .env.tmp then os.rename → impossible to leave .env half-written.
+    - Never logs or prints `value`.
+    """
+    lines = []
+    found = False
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            for line in f:
+                if line.startswith(f"{name}="):
+                    lines.append(f"{name}={value}\n")
+                    found = True
+                else:
+                    lines.append(line)
+    if not found:
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+        lines.append(f"{name}={value}\n")
+    tmp_path = env_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        f.writelines(lines)
+    os.chmod(tmp_path, 0o600)
+    os.rename(tmp_path, env_path)
+
+
+def _test_claude_key(candidate_key: str):
+    """
+    Tests a candidate key with a minimum-cost Anthropic call.
+    Returns (ok, message). Never logs the key.
+    """
+    try:
+        _client = anthropic.Anthropic(api_key=candidate_key, timeout=15.0)
+        _client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "."}],
+        )
+        return True, "verified"
+    except anthropic.AuthenticationError:
+        return False, "rejected by Anthropic (401 invalid x-api-key)"
+    except anthropic.APIConnectionError as e:
+        return False, f"could not reach Anthropic API: {type(e).__name__}"
+    except Exception as e:
+        msg = str(e).replace(candidate_key, "sk-ant-***REDACTED***")
+        return False, f"unexpected error: {msg[:180]}"
+
+
+@app.post("/maintenance/update-api-key")
+async def maintenance_update_api_key(request: Request):
+    """
+    PIN-gated Claude API key hot-swap.
+    Validates → tests with Anthropic → writes to .env atomically → live-reloads.
+    Never logs, returns, or persists the key value.
+    """
+    from fastapi.responses import JSONResponse as JR
+    global CLAUDE_API_KEY
+    try:
+        body = await request.json()
+        if body.get("pin") != MAINT_PIN:
+            return JR({"status": "wrong_pin"})
+
+        new_key = (body.get("api_key") or "").strip()
+
+        # Server-side validation
+        if not new_key:
+            return JR({"status": "error", "message": "No key provided."})
+        if not new_key.startswith("sk-ant-api03-"):
+            return JR({"status": "error",
+                       "message": "Invalid format — Anthropic keys start with sk-ant-api03-"})
+        if not (100 <= len(new_key) <= 120):
+            return JR({"status": "error",
+                       "message": f"Invalid length ({len(new_key)} chars) — expected 100–120."})
+        if any(c.isspace() for c in new_key) or any(c in new_key for c in ("'", '"', "`", "\\")):
+            return JR({"status": "error",
+                       "message": "Key contains whitespace or quotes. Re-copy from console.anthropic.com."})
+
+        # Live-test BEFORE writing
+        ok, detail = _test_claude_key(new_key)
+        if not ok:
+            return JR({"status": "error",
+                       "message": f"❌ Key rejected — {detail}. Old key preserved."})
+
+        # Atomic write to .env
+        try:
+            _write_env_var("CLAUDE_API_KEY", new_key)
+        except Exception as e:
+            return JR({"status": "error",
+                       "message": f"❌ Write to .env failed: {type(e).__name__}. Old key preserved."})
+
+        # Live-reload in-memory var (no agent restart needed)
+        CLAUDE_API_KEY = new_key
+        os.environ["CLAUDE_API_KEY"] = new_key
+
+        # Audit log — suffix only, never the full key
+        _log_agent(f"API key updated (ends ...{new_key[-6:]}) — verified and live")
+
+        return JR({"status": "ok",
+                   "message": "✅ Claude API key updated, verified with Anthropic, and live. No restart needed."})
+    except Exception as e:
+        return JR({"status": "error", "message": f"Unexpected: {type(e).__name__}"})
 
 
 @app.post("/maintenance/action")
