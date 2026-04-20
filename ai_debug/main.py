@@ -920,32 +920,51 @@ def _update_context_md():
 ## Architecture
 - VPS: 178.104.170.58 (Hetzner), user: root, Paris = UTC+2
 - Git root: /home/alphabot/app/ (branch: main)
-- Bot start: bash /home/alphabot/start.sh → screen session "alphabot"
-- start.sh runs: python3 -m app.main (NOT python3 app/main.py)
+- **Services run via systemd — NOT screen sessions**
+- systemctl restart alphabot          → restarts trading bot
+- systemctl restart alphabot-dashboard → restarts dashboard
+- systemctl restart alphabot-agent     → restarts this agent
+- systemctl status alphabot            → check if running
 - Dashboard: port 8080 | Debug agent: port 8000 | Intelligence: /intelligence
 - DB: /home/alphabot/app/alphabot.db
 - GitHub: https://github.com/garrathholdstock-boop/alphabot
+- Log: /home/alphabot/app/alphabot.log (archive with mv, then restart bot)
 
 ## File Structure
-- app/main.py — main trading loop (6 disciplines)
+- app/main.py — main trading loop (10 disciplines)
 - app/dashboard.py — web dashboard port 8080 + /intelligence + /analytics + /settings
-- core/config.py — all config + watchlists (US_WATCHLIST includes CBRE, BIPC, VRT, ANET, EQIX)
-- core/execution.py — order execution (IBKR + Binance)
-- core/risk.py — risk management
+- core/config.py — all config + watchlists
+- core/execution.py — order execution (IBKR + Binance), unique clientIds per thread
 - data/analytics.py — signal scoring + near-miss tracking + DB persistence
-- data/database.py — DB operations (v2: trades, near_misses, rotations, tuning_recommendations, intelligence_runs)
-- data/intelligence.py — weekly Claude intelligence analysis (Sunday 7pm ET + manual trigger)
+- data/database.py — DB operations (v2 schema + bot_status + smallcap_watchlists)
+- data/intelligence.py — weekly Claude intelligence analysis
 - ai_debug/main.py — this agent (port 8000)
-- start.sh — starts 3 screens: alphabot, dashboard, agent
+- trading_config.json — hot-reloaded every cycle (no restart needed)
+- .claude_api_key — Anthropic API key file (update via maintenance page)
+
+## 10 Trading Disciplines
+1. US Swing (US-Swing thread, clientId=2)
+2. US Intraday (Intraday thread, clientId=3)
+3. FTSE Swing (FTSE thread, clientId=4)
+4. ASX Swing (ASX thread, clientId=5)
+5. Smallcap US (Smallcap-US thread, clientId=6)
+6. Smallcap FTSE (Smallcap-FTSE thread, clientId=7)
+7. Smallcap ASX (Smallcap-ASX thread, clientId=8)
+8. Crypto Swing (Crypto-Swing thread, clientId=9)
+9. Crypto Intraday (Intraday thread via crypto flag)
+10. Bear (Bear thread, clientId=10)
+
+## Market Hours (Paris time)
+- US: 3:30pm–10pm Mon–Fri
+- FTSE: 9am–5:30pm Mon–Fri
+- ASX: 1am–7am Mon–Fri (opens Sunday 11pm UTC)
+- Crypto: 24/7
 
 ## Database Tables (v2 schema)
-- trades: symbol, pnl, score, adx_at_entry, macd_bullish, breakout, rs_vs_spy, news_state, regime_at_entry, vix_at_entry, exit_category, discipline
-- near_misses: symbol, score, skip_reason, prices_since (JSON), pct_move, simulated_pnl_pct, mfe_pct, mae_pct, triggered, discipline
-- rotations: sold_symbol, bought_symbol, rotation_type (SCORE_ROTATE|STALE_EXIT), rotation_verdict (GOOD|BAD|NEUTRAL), 24h follow-up prices
-- tuning_recommendations: Claude-generated tuning actions with PENDING|APPLIED|DISMISSED|SNOOZED status
-- intelligence_runs: archive of weekly intelligence analysis runs + narratives
-- stock_stats: per-symbol aggregated stats
-- agent_events: this agent's event log
+- trades, near_misses, rotations, tuning_recommendations, intelligence_runs
+- stock_stats, agent_events, reports, config_history
+- bot_status: DB-backed status snapshot (replaces status.json)
+- smallcap_watchlists: written by Refresh Small Caps button, loaded on bot startup
 
 ## Config (trading_config.json — hot-reloaded every 60s)
 - MIN_SIGNAL_SCORE={min_score} {'⚠️ RAISE TO 7 BEFORE GOING LIVE' if min_score < 7 else '✅'}
@@ -3220,26 +3239,9 @@ async def log_lines(since_byte: int = 0, tail: int = 0):
         with open(LOG_PATH, "r", errors="replace") as f:
             f.seek(since_byte)
             raw = f.read()
-        # Known cosmetic errors — suppress from live log to reduce noise
-        _SUPPRESS = (
-            "Error 200,",   # Symbol not found — invalid ticker, harmless
-            "Error 10089,", # Market data subscription — SPY delayed, always fires
-            "Error 300,",   # Can't find EId — stale request cleanup
-            "Error 326,",   # clientId in use — transient, resolves itself
-            "Error 10090,", # Part of market data subscription chain
-            "DeprecationWarning:",  # Various deprecation warnings
-            "_is_weekend = datetime", # associated deprecation line
-            "on_event is deprecated", # FastAPI lifespan warning
-            "use lifespan event",   # FastAPI lifespan warning continuation
-            "fastapi.tiangolo.com", # FastAPI docs link in warning
-            "@app.on_event",        # FastAPI warning continuation
-            "Read more about it",   # FastAPI warning continuation
-            "No Sockets found",     # screen cleanup message
-            "INFO: 127.",   # uvicorn HTTP access
-            "HTTP/1.1",     # uvicorn HTTP access
-        )
+        # Filter out uvicorn HTTP access log lines — only show bot logs
         lines = [l.rstrip() for l in raw.splitlines()
-                 if l.strip() and not any(s in l for s in _SUPPRESS)]
+                 if l.strip() and not l.startswith("INFO:") and "HTTP/1.1" not in l]
         return JSONResponse({"lines": lines, "next_byte": file_size})
     except Exception as e:
         return JSONResponse({"lines": [], "next_byte": since_byte, "error": str(e)})
