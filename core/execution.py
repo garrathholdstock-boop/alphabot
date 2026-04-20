@@ -166,9 +166,11 @@ def _make_contract(symbol, exchange="SMART", currency="USD"):
 
 _INTL_MARKET = {}
 try:
-    from core.config import ASX_WATCHLIST, FTSE_WATCHLIST
-    for s in ASX_WATCHLIST: _INTL_MARKET[s] = ("ASX", "AUD")
-    for s in FTSE_WATCHLIST: _INTL_MARKET[s] = ("LSE", "GBP")
+    from core.config import ASX_WATCHLIST, FTSE_WATCHLIST, ASX_SMALLCAP_WATCHLIST, FTSE_SMALLCAP_WATCHLIST
+    for s in ASX_WATCHLIST:           _INTL_MARKET[s] = ("ASX", "AUD")
+    for s in FTSE_WATCHLIST:          _INTL_MARKET[s] = ("LSE", "GBP")
+    for s in ASX_SMALLCAP_WATCHLIST:  _INTL_MARKET[s] = ("ASX", "AUD")
+    for s in FTSE_SMALLCAP_WATCHLIST: _INTL_MARKET[s] = ("LSE", "GBP")
 except Exception:
     pass
 
