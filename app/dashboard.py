@@ -159,14 +159,6 @@ def _load_status():
             return _status_cache
     except:
         pass
-    # Fallback to JSON file
-    try:
-        with open("/home/alphabot/app/status.json") as f:
-            data = json.load(f)
-        if data and data.get("candidates"):
-            _status_cache = data
-    except:
-        pass
     return _status_cache
 
 def _st(market):
@@ -281,7 +273,7 @@ tr:hover td{background:rgba(255,255,255,0.025)}
 # BUILD DASHBOARD HTML
 # ═══════════════════════════════════════════════════════════════
 def build_dashboard():
-    # Load live status from bot process (written every cycle via status.json)
+    # Load live status from bot process (written every cycle to bot_status table in DB)
     st_data = _load_status()
     st_states = st_data.get("states", {})
     st_regime = st_data.get("market_regime", {})
@@ -304,12 +296,11 @@ def build_dashboard():
             port_val = float(_sizing.get("total_pv", 0))
         except: pass
     if not port_val:
-        # IBKR offline — use last known good value from file
+        # IBKR offline — use last known good value from DB
         try:
-            import os as _os2
-            _pf = _os2.path.join(_os2.path.dirname(__file__), "..", "last_portfolio.json")
-            with open(_pf) as _f:
-                _pd = json.load(_f)
+            from data.database import db_read_portfolio
+            _pd = db_read_portfolio()
+            if _pd:
                 port_val = float(_pd.get("total_pv", 0))
         except: pass
     if not port_val:
@@ -467,9 +458,8 @@ def build_dashboard():
     _type_colors = {"Stock":"#00aaff","Crypto":"#00ff88","SmCap":"#ffcc00",
                     "ID":"#aa88ff","CrypID":"#00ff88","ASX":"#ffaa00","FTSE":"#cc88ff"}
     try:
-        import json as _json
-        with open("/home/alphabot/app/positions.json") as _pf:
-            _snap = _json.load(_pf)
+        from data.database import db_read_positions
+        _snap = db_read_positions()
         all_pos = [(sym, pos, _type_colors.get(pos.get("_type","Stock"),"#00aaff"), pos.get("_type","Stock"))
                    for sym, pos in _snap.items()]
     except Exception:
