@@ -76,6 +76,7 @@ from data.database import (
     db_get_latest_intelligence_run, db_get_intelligence_runs,
     db_ev_by_discipline, db_discipline_detail,
     db_log_config_change, db_get_config_history,
+    db_get_strategy_health,
 )
 
 try:
@@ -309,6 +310,16 @@ def build_dashboard():
     now_paris = datetime.now(PARIS)
     now_date = now_paris.strftime("%A %d %B %Y")
 
+    # ── Strategy health metrics (all-time) ──
+    # Five quality measures that don't depend on time window PnL.
+    # Measure EDGE rather than recent luck. Low trade counts are visually flagged.
+    try:
+        sh = db_get_strategy_health("all")
+    except Exception:
+        sh = {"trade_count": 0, "expectancy": 0.0, "win_rate": 0.0,
+              "rr_ratio": None, "sharpe": None, "max_drawdown": 0.0,
+              "max_dd_pct": 0.0, "avg_win": 0.0, "avg_loss": 0.0}
+
     # ── P&L helpers ──
     def _fmt(v): return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
     def _col(v): return "#00ff88" if v >= 0 else "#ff4466"
@@ -325,6 +336,34 @@ def build_dashboard():
     def _status(st): return "Shut Off" if st.get("shutoff") else ("Running" if st.get("running") else "Idle")
     def _pnl(st): return _fmt(st.get("pnl", 0.0))
     def _pnlc(st): return _col(st.get("pnl", 0.0))
+
+    # ── Strategy health formatters ──
+    # Color thresholds reflect what professional systematic traders target.
+    # Expectancy/Sharpe/DD are SAFE to evaluate but only above a min trade count.
+    def _sh_count_col(n):
+        if n < 30:   return "#8899aa"   # insufficient data — grey
+        if n < 100:  return "#f59e0b"   # early signal — amber
+        return "#00ff88"                # statistically meaningful — green
+    def _sh_count_label(n):
+        if n < 30:   return "insufficient"
+        if n < 100:  return "early"
+        return "meaningful"
+    def _sh_expectancy_col(v, n):
+        if n < 30: return "#8899aa"     # don't colour too optimistically on small N
+        return "#00ff88" if v > 0 else "#ff4466"
+    def _sh_sharpe_col(s, n):
+        if s is None or n < 30: return "#8899aa"
+        if s >= 1.0:  return "#00ff88"
+        if s >= 0.5:  return "#f59e0b"
+        return "#ff4466"
+    def _sh_dd_col(pct):
+        # Negative pct values — smaller (closer to 0) is better
+        if pct >= -5:   return "#00ff88"
+        if pct >= -15:  return "#f59e0b"
+        return "#ff4466"
+    def _sh_fmt_exp(v):    return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
+    def _sh_fmt_sharpe(s): return f"{s:.2f}" if s is not None else "—"
+    def _sh_fmt_rr(r):     return f"1:{r:.2f}" if r else "—"
 
     # ── Period P&L ──
     today_str = date.today().isoformat()
@@ -1358,21 +1397,29 @@ function pinCmd(path,label){{
 <!-- Portfolio strip -->
 <div class="pstrip" style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px">
   <div class="card">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <div>
-        <div class="lbl">Total Balance · IBKR + Binance</div>
-        <div class="big blue" style="font-size:32px">{portfolio}</div>
+    <div class="lbl">Current Balance</div>
+    <div class="big blue" style="font-size:28px;line-height:1.1;margin-bottom:10px">{portfolio}</div>
+    <div style="border-top:1px solid #2a3544;padding-top:8px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+        <span style="color:#94a3b8">Expectancy</span>
+        <span style="font-weight:700;color:{_sh_expectancy_col(sh["expectancy"], sh["trade_count"])}">{_sh_fmt_exp(sh["expectancy"])}</span>
       </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;color:#94a3b8">{now_date}</div>
-        <div style="font-size:13px;color:#94a3b8;margin-top:3px">
-          <span class="dot {'dot-green' if market_open else 'dot-red'}"></span>{"Open" if market_open else "Closed"}
-        </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+        <span style="color:#94a3b8">Win Rate</span>
+        <span style="font-weight:700;color:{_wrcol(sh["win_rate"])}">{sh["win_rate"]:.0f}% · {_sh_fmt_rr(sh["rr_ratio"])}</span>
       </div>
-    </div>
-    <div style="margin-top:10px;display:flex;gap:24px;font-size:14px;flex-wrap:wrap">
-      <span><span style="color:#94a3b8">Today </span><span style="font-weight:700;color:{_col(today_pnl)}">{_fmt(today_pnl)}</span></span>
-      <span><span style="color:#94a3b8">Trades </span><span style="font-weight:700">{today_count}</span></span>
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+        <span style="color:#94a3b8">Sharpe</span>
+        <span style="font-weight:700;color:{_sh_sharpe_col(sh["sharpe"], sh["trade_count"])}">{_sh_fmt_sharpe(sh["sharpe"])}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+        <span style="color:#94a3b8">Max DD</span>
+        <span style="font-weight:700;color:{_sh_dd_col(sh["max_dd_pct"])}">{sh["max_dd_pct"]:.1f}%</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px">
+        <span style="color:#94a3b8">Trades</span>
+        <span style="font-weight:700;color:{_sh_count_col(sh["trade_count"])}" title="{_sh_count_label(sh['trade_count'])}">{sh["trade_count"]}</span>
+      </div>
     </div>
   </div>
   <div class="card">
