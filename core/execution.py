@@ -58,6 +58,7 @@ _IB_START_LOCK     = threading.Lock()  # guards manager startup
 _IB_CONNECT_LOCK   = threading.Lock()  # guards reconnection attempts
 _IB_LAST_CONNECT   = 0.0               # timestamp of last connect attempt
 _IB_CONNECT_BACKOFF = 1.0              # current backoff (seconds)
+_IB_CONNECT_IN_FLIGHT = False          # True while an _async_connect is running
 _IB_METRICS = {
     "requests_total": 0,
     "requests_failed": 0,
@@ -119,6 +120,14 @@ async def _async_connect():
     When Gateway has a lingering session from a recent restart, it can take
     30-60s to release the slot. Rather than failing 5 times in quick succession
     and tripping the kill switch, we back off and let Gateway catch up.
+
+    IMPORTANT: this coroutine is re-entrant-safe. Multiple worker threads can
+    race into _ensure_connected() and each submit a fresh _async_connect() to
+    the loop. The outer fut.result() has a 20s timeout — if it expires, the
+    coroutine is abandoned but STILL RUNS on the loop. A second worker then
+    submits another. Without the isConnected() re-check after each sleep, two
+    coroutines both call connectAsync() within the same second → double-connect
+    → one kicks the other → Error 326 cascade.
     """
     global _IB_INSTANCE, _IB_CONNECTED
     if _IB_INSTANCE is None:
@@ -136,7 +145,18 @@ async def _async_connect():
         if wait_before > 0:
             log.info(f"[IBKR-MGR] Waiting {wait_before}s before retry (attempt {attempt}/{len(backoff_schedule)}) — likely stale Gateway session")
             await asyncio.sleep(wait_before)
+            # Re-check after sleep: a concurrent _async_connect may have
+            # succeeded while we were sleeping. If so, don't double-connect.
+            if _IB_INSTANCE.isConnected():
+                _IB_CONNECTED = True
+                log.info(f"[IBKR-MGR] Already connected by another coroutine — skipping attempt {attempt}")
+                return True
         try:
+            # One more check right before the actual connectAsync call,
+            # in case something connected between our sleep-wake and now.
+            if _IB_INSTANCE.isConnected():
+                _IB_CONNECTED = True
+                return True
             await _IB_INSTANCE.connectAsync(
                 IBKR_HOST, IBKR_PORT,
                 clientId=_SHARED_CLIENT_ID, timeout=15,
@@ -181,8 +201,15 @@ async def _async_connect():
 
 def _ensure_connected():
     """Check & reconnect if needed. Returns True on success.
-    Exponential backoff to avoid hammering IB during outages."""
-    global _IB_CONNECTED, _IB_LAST_CONNECT, _IB_CONNECT_BACKOFF
+    Exponential backoff to avoid hammering IB during outages.
+
+    IMPORTANT: this is called from many worker threads concurrently.
+    The _IB_CONNECT_LOCK serializes lock acquisition, but the 20s fut.result()
+    timeout can abandon a still-running _async_connect coroutine. A second
+    caller would then submit another, yielding double-connect. We use an
+    in-flight flag so a second caller waits rather than submitting concurrently.
+    """
+    global _IB_CONNECTED, _IB_LAST_CONNECT, _IB_CONNECT_BACKOFF, _IB_CONNECT_IN_FLIGHT
 
     if _is_weekend_maintenance():
         return False
@@ -204,14 +231,25 @@ def _ensure_connected():
             except: pass
             _IB_CONNECTED = False
 
+        # Guard: if another caller is already mid-connect, don't submit a second one.
+        # They'll finish (success or failure), this caller returns False and will
+        # retry on next cycle. Prevents double-connect race.
+        if _IB_CONNECT_IN_FLIGHT:
+            log.debug("[IBKR-MGR] Connect already in flight — skipping duplicate attempt")
+            return False
+
         now = time.time()
         if now - _IB_LAST_CONNECT < _IB_CONNECT_BACKOFF:
             return False
         _IB_LAST_CONNECT = now
 
+        _IB_CONNECT_IN_FLIGHT = True
+        fut = None
         try:
             fut = asyncio.run_coroutine_threadsafe(_async_connect(), _IB_LOOP)
-            ok = fut.result(timeout=20)
+            # Timeout generous enough for the full 326-backoff (up to 110s).
+            # Previously 20s caused us to abandon still-running coroutines.
+            ok = fut.result(timeout=120)
             if ok:
                 _IB_CONNECT_BACKOFF = 1.0
             else:
@@ -219,8 +257,18 @@ def _ensure_connected():
             return ok
         except Exception as e:
             _IB_CONNECT_BACKOFF = min(_IB_CONNECT_BACKOFF * 2, 30.0)
-            log.error(f"[IBKR-MGR] Reconnect failed: {e}")
+            log.error(f"[IBKR-MGR] Reconnect failed: {e!r}")
+            # Cancel the abandoned coroutine so it doesn't keep running and
+            # race with the next connect attempt.
+            if fut is not None and not fut.done():
+                try:
+                    fut.cancel()
+                    log.info("[IBKR-MGR] Cancelled abandoned connect coroutine")
+                except Exception:
+                    pass
             return False
+        finally:
+            _IB_CONNECT_IN_FLIGHT = False
 
 
 def ibkr_graceful_disconnect():
