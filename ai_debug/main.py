@@ -3046,13 +3046,55 @@ async def maintenance_action(request: Request):
             return JR({"status": "ok", "message": msg})
 
         elif action == "restart-bot":
-            out = run_cmd("systemctl restart alphabot", timeout=15)
-            time.sleep(5)
+            # Enhanced restart sequence:
+            #  1. Pre-flight: kill any zombie python processes holding clientId=1.
+            #     These can linger after crashes/SIGKILL and prevent Gateway from
+            #     releasing the session, causing Error 326 on the next connect.
+            #  2. systemctl restart — sends SIGTERM; our bot's signal handler
+            #     then disconnects IBKR cleanly before exiting.
+            #  3. Wait 10s then verify — longer than the old 5s because the new
+            #     connect path has exponential backoff (may take up to 20s on a
+            #     stale-session restart).
+            pre = run_cmd(
+                "pgrep -af 'python.*app\\.main' | grep -v $$ || true",
+                timeout=5,
+            )
+            zombie_lines = [ln for ln in (pre or "").splitlines() if "python" in ln.lower()]
+            if zombie_lines:
+                _log_agent(f"Manual restart: found {len(zombie_lines)} python app.main process(es) pre-restart — systemd will replace them")
+            # Kill any stray python processes running app.main that systemd
+            # isn't managing. Belt-and-braces: systemctl should handle its own,
+            # but zombie processes from prior SIGKILLs can survive.
+            run_cmd(
+                "pkill -9 -f 'python.*app\\.main' 2>/dev/null; sleep 1; true",
+                timeout=8,
+            )
+            out = run_cmd("systemctl restart alphabot", timeout=20)
+            # Longer wait — new connect path has exponential backoff for Error 326.
+            # 10s is enough for a clean start; stale-session retries may push to 20s.
+            time.sleep(10)
             running = is_bot_running()
-            _log_agent(f"Manual restart: bot — {'OK' if running else 'FAILED'}")
-            status = "ok" if running else "error"
-            msg = "✅ Bot restarted successfully — trading resumed." if running else f"🔴 Bot restart may have failed — check Termius.\n{out}"
-            return JR({"status": status, "message": msg, "reload": 8, "reload_label": "🤖 Bot Restarting...", "reload_url": BASE + "/maintenance"})
+            # Verify IBKR actually connected, not just that the process is alive
+            post = run_cmd(
+                "journalctl -u alphabot --since '20 seconds ago' --no-pager "
+                "| grep -E 'IBKR-MGR.*Connected|RECOVERY.*SUMMARY|Error 326|API KILL' "
+                "| tail -10 || true",
+                timeout=5,
+            )
+            ibkr_ok = "Connected" in (post or "") and "Error 326" not in (post or "") and "API KILL" not in (post or "")
+            _log_agent(f"Manual restart: bot process={'OK' if running else 'FAILED'}, IBKR={'OK' if ibkr_ok else 'NOT YET'}")
+            if running and ibkr_ok:
+                status = "ok"
+                msg = "✅ Bot restarted successfully — IBKR connected, trading resumed."
+            elif running:
+                status = "ok"
+                msg = (f"⚠️ Bot process running but IBKR not yet confirmed connected. "
+                       f"May still be retrying (Error 326 backoff can take up to 2 minutes).\n\n"
+                       f"Recent log:\n{post.strip() if post else '(none)'}")
+            else:
+                status = "error"
+                msg = f"🔴 Bot restart may have failed — check Termius.\n{out}"
+            return JR({"status": status, "message": msg, "reload": 12, "reload_label": "🤖 Bot Restarting...", "reload_url": BASE + "/maintenance"})
 
         elif action == "restart-dashboard":
             out = run_cmd("systemctl restart alphabot-dashboard", timeout=15)
