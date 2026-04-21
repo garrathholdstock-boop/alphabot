@@ -1403,34 +1403,34 @@ function pinCmd(path,label){{
 {kill_banner}{circuit_banner}
 
 <!-- Portfolio strip -->
-<div class="pstrip" style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px">
+<div class="pstrip" style="display:grid;grid-template-columns:1.7fr 1fr 1fr 1fr 1fr 1fr;gap:12px;margin-bottom:14px">
   <div class="card">
     <div class="lbl">Current Balance</div>
-    <div class="big blue" style="font-size:28px;line-height:1.1;margin-bottom:10px">{portfolio}</div>
-    <div style="border-top:1px solid #2a3544;padding-top:8px">
-      <div style="font-size:10px;color:#64748b;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">Last 30 days</div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+    <div class="big blue" style="font-size:30px;line-height:1.1;margin-bottom:12px">{portfolio}</div>
+    <div style="border-top:1px solid #2a3544;padding-top:10px">
+      <div style="font-size:11px;color:#64748b;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px">Last 30 days</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
         <span style="color:#94a3b8">Expectancy</span>
-        <span style="text-align:right">
-          <span style="font-weight:700;color:{_sh_expectancy_col(sh["expectancy"], sh["trade_count"])}">{_sh_fmt_exp(sh["expectancy"])}</span>
-          <br><span style="color:#94a3b8;font-size:10px">{_sh_fmt_pct(sh.get("expectancy_pct"))} · {_sh_fmt_r(sh.get("expectancy_r"))}</span>
+        <span>
+          <span style="font-weight:700;color:{_sh_expectancy_col(sh.get("expectancy",0), sh.get("trade_count",0))}">{_sh_fmt_exp(sh.get("expectancy",0))}</span>
+          <span style="color:#64748b;font-size:11px;margin-left:4px">· {_sh_fmt_pct(sh.get("expectancy_pct"))} · {_sh_fmt_r(sh.get("expectancy_r"))}</span>
         </span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
         <span style="color:#94a3b8">Win Rate</span>
-        <span style="font-weight:700;color:{_wrcol(sh["win_rate"])}">{sh["win_rate"]:.0f}% · {_sh_fmt_rr(sh["rr_ratio"])}</span>
+        <span style="font-weight:700;color:{_wrcol(sh.get("win_rate",0))}">{sh.get("win_rate",0):.0f}% <span style="color:#64748b;font-size:11px;font-weight:400">· {_sh_fmt_rr(sh.get("rr_ratio"))}</span></span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
         <span style="color:#94a3b8">Sharpe</span>
-        <span style="font-weight:700;color:{_sh_sharpe_col(sh["sharpe"], sh["trade_count"])}">{_sh_fmt_sharpe(sh["sharpe"])}</span>
+        <span style="font-weight:700;color:{_sh_sharpe_col(sh.get("sharpe"), sh.get("trade_count",0))}">{_sh_fmt_sharpe(sh.get("sharpe"))}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
         <span style="color:#94a3b8">Max DD</span>
-        <span style="font-weight:700;color:{_sh_dd_col(sh["max_dd_pct"])}">{sh["max_dd_pct"]:.1f}%</span>
+        <span style="font-weight:700;color:{_sh_dd_col(sh.get("max_dd_pct",0))}">{sh.get("max_dd_pct",0):.1f}%</span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
         <span style="color:#94a3b8">Trades</span>
-        <span style="font-weight:700;color:{_sh_count_col(sh["trade_count"])}" title="{_sh_count_label(sh['trade_count'])}">{sh["trade_count"]}</span>
+        <span style="font-weight:700;color:{_sh_count_col(sh.get("trade_count",0))}" title="{_sh_count_label(sh.get('trade_count',0))}">{sh.get("trade_count",0)}</span>
       </div>
     </div>
   </div>
