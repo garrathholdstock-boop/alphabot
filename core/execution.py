@@ -113,35 +113,70 @@ def start_ibkr_manager():
 
 
 async def _async_connect():
-    """Establish the shared IB connection. Runs on manager's loop."""
+    """Establish the shared IB connection. Runs on manager's loop.
+
+    Handles Error 326 ('clientId already in use') with exponential backoff.
+    When Gateway has a lingering session from a recent restart, it can take
+    30-60s to release the slot. Rather than failing 5 times in quick succession
+    and tripping the kill switch, we back off and let Gateway catch up.
+    """
     global _IB_INSTANCE, _IB_CONNECTED
     if _IB_INSTANCE is None:
         _IB_INSTANCE = IB()
     if _IB_INSTANCE.isConnected():
         _IB_CONNECTED = True
         return True
-    try:
-        await _IB_INSTANCE.connectAsync(
-            IBKR_HOST, IBKR_PORT,
-            clientId=_SHARED_CLIENT_ID, timeout=15,
-        )
-        _IB_CONNECTED = True
-        _IB_METRICS["reconnects"] += 1
-        log.info(f"[IBKR-MGR] Connected (clientId={_SHARED_CLIENT_ID})")
-        # Set market data type — 3 = delayed (free on paper), 1 = live (paid subscription).
-        # Controlled by IBKR_MARKET_DATA_TYPE env var. Silences Error 10089 on paper accounts.
-        # Applied on every successful (re)connect so Gateway restarts don't revert it.
+
+    # Exponential backoff retry schedule for Error 326 specifically.
+    # Total max wait ~115s (5+15+30+60) across 4 retries.
+    # Good case (clean Gateway): attempt 1 succeeds in ~1s.
+    backoff_schedule = [0, 5, 15, 30, 60]
+    last_exc = None
+    for attempt, wait_before in enumerate(backoff_schedule, start=1):
+        if wait_before > 0:
+            log.info(f"[IBKR-MGR] Waiting {wait_before}s before retry (attempt {attempt}/{len(backoff_schedule)}) — likely stale Gateway session")
+            await asyncio.sleep(wait_before)
         try:
-            _IB_INSTANCE.reqMarketDataType(IBKR_MARKET_DATA_TYPE)
-            _mdt_label = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed-frozen"}.get(IBKR_MARKET_DATA_TYPE, str(IBKR_MARKET_DATA_TYPE))
-            log.info(f"[IBKR-MGR] Market data type set to {IBKR_MARKET_DATA_TYPE} ({_mdt_label})")
+            await _IB_INSTANCE.connectAsync(
+                IBKR_HOST, IBKR_PORT,
+                clientId=_SHARED_CLIENT_ID, timeout=15,
+            )
+            _IB_CONNECTED = True
+            _IB_METRICS["reconnects"] += 1
+            log.info(f"[IBKR-MGR] Connected (clientId={_SHARED_CLIENT_ID}) on attempt {attempt}")
+            # Set market data type — 3 = delayed (free on paper), 1 = live (paid subscription).
+            # Controlled by IBKR_MARKET_DATA_TYPE env var. Silences Error 10089 on paper accounts.
+            # Applied on every successful (re)connect so Gateway restarts don't revert it.
+            try:
+                _IB_INSTANCE.reqMarketDataType(IBKR_MARKET_DATA_TYPE)
+                _mdt_label = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed-frozen"}.get(IBKR_MARKET_DATA_TYPE, str(IBKR_MARKET_DATA_TYPE))
+                log.info(f"[IBKR-MGR] Market data type set to {IBKR_MARKET_DATA_TYPE} ({_mdt_label})")
+            except Exception as e:
+                log.warning(f"[IBKR-MGR] Failed to set market data type: {e!r} — quotes may be rejected with Error 10089")
+            return True
         except Exception as e:
-            log.warning(f"[IBKR-MGR] Failed to set market data type: {e!r} — quotes may be rejected with Error 10089")
-        return True
-    except Exception as e:
-        _IB_CONNECTED = False
-        log.error(f"[IBKR-MGR] Connect failed: {e}")
-        return False
+            last_exc = e
+            _IB_CONNECTED = False
+            # Make sure we clean up any half-open state before retrying,
+            # otherwise next connectAsync may hit "already connected" internally.
+            try:
+                if _IB_INSTANCE.isConnected():
+                    _IB_INSTANCE.disconnect()
+            except Exception:
+                pass
+            # Is this a 326 (clientId in use) or a transient error worth retrying?
+            msg = str(e).lower()
+            is_326 = ("326" in msg or "client id" in msg or "already in use" in msg
+                      or isinstance(e, TimeoutError))   # 326 often manifests as timeout after peer-close
+            if not is_326:
+                # Non-326 errors: log and fail fast. Don't burn the whole backoff on e.g. a config error.
+                log.error(f"[IBKR-MGR] Connect failed (non-retryable): {e!r}")
+                return False
+            if attempt < len(backoff_schedule):
+                log.warning(f"[IBKR-MGR] Attempt {attempt} hit Error 326 / session-in-use. Will retry.")
+            else:
+                log.error(f"[IBKR-MGR] All {len(backoff_schedule)} attempts exhausted. Last error: {e!r}")
+    return False
 
 
 def _ensure_connected():
@@ -186,6 +221,28 @@ def _ensure_connected():
             _IB_CONNECT_BACKOFF = min(_IB_CONNECT_BACKOFF * 2, 30.0)
             log.error(f"[IBKR-MGR] Reconnect failed: {e}")
             return False
+
+
+def ibkr_graceful_disconnect():
+    """Cleanly disconnect from IBKR Gateway. Called from main.py's SIGTERM handler.
+
+    Why: when systemd restarts the bot with SIGTERM, we want Gateway to see
+    a clean close (FIN) on the socket, not a half-open hang that Gateway
+    must time out. A clean close releases clientId=1 immediately, letting
+    the next bot process connect without hitting Error 326.
+
+    Safe to call multiple times / when not connected / during shutdown."""
+    global _IB_INSTANCE, _IB_CONNECTED
+    try:
+        if _IB_INSTANCE is not None and _IB_INSTANCE.isConnected():
+            log.info("[IBKR-MGR] Graceful disconnect requested (SIGTERM/shutdown)")
+            # disconnect() runs sync from any thread; ib_insync handles the loop internally.
+            _IB_INSTANCE.disconnect()
+            log.info("[IBKR-MGR] Disconnected cleanly")
+    except Exception as e:
+        log.warning(f"[IBKR-MGR] Graceful disconnect error (non-fatal): {e!r}")
+    finally:
+        _IB_CONNECTED = False
 
 
 def _ibkr_submit(coro_factory, *args, timeout=15, **kwargs):
