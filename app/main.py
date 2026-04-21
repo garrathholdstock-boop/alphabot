@@ -1363,6 +1363,27 @@ def main():
     log.info(f"Port:   {cfg.PORT}")
     log.info("=" * 50)
 
+    # ── Graceful shutdown: SIGTERM (systemd) / SIGINT (Ctrl-C) ──
+    # When systemd restarts us, we want to tear down the IBKR connection
+    # cleanly so clientId=1 is released immediately. Without this, Gateway
+    # may hold the session for its own timeout, and the next bot process
+    # hits Error 326 ("clientId already in use").
+    import signal
+    from core.execution import ibkr_graceful_disconnect
+    def _handle_shutdown(signum, frame):
+        sig_name = "SIGTERM" if signum == signal.SIGTERM else ("SIGINT" if signum == signal.SIGINT else str(signum))
+        log.info(f"[SHUTDOWN] Received {sig_name} — closing IBKR connection before exit")
+        try:
+            ibkr_graceful_disconnect()
+        except Exception as e:
+            log.warning(f"[SHUTDOWN] Disconnect error (non-fatal): {e!r}")
+        log.info("[SHUTDOWN] Exiting cleanly")
+        # Exit via SystemExit so the normal Python shutdown path still runs.
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT,  _handle_shutdown)
+    log.info("[STARTUP] Signal handlers registered (SIGTERM/SIGINT)")
+
     log.info("AlphaBot bot process starting — dashboard runs separately on port 8080")
 
     # Start the IBKR connection manager (single shared connection on dedicated event loop)
