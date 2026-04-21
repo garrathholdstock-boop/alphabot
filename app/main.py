@@ -109,6 +109,25 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo
 
 
+# ── Tier 1: scan gate diagnostic logging ──────────────────────
+# When a scan cycle gets skipped by a gate (kill switch, market closed,
+# shutoff etc), we want to SEE why. But naive logging floods — a gate
+# fires every 60s so that's 1440 lines/day for just one discipline.
+# Throttle: log each (label, reason) once per GATE_LOG_COOLDOWN_SECS.
+import time as _time_mod
+GATE_LOG_COOLDOWN_SECS = 60
+_gate_log_last = {}  # (label, reason) -> last_log_epoch
+
+def log_gate_skip(label, reason):
+    """Log why a scan cycle was skipped. Throttled per (label, reason)."""
+    key = (label, reason)
+    now = _time_mod.time()
+    last = _gate_log_last.get(key, 0)
+    if now - last >= GATE_LOG_COOLDOWN_SECS:
+        _gate_log_last[key] = now
+        log.info(f"[{label}] SKIP: {reason}")
+
+
 # ── Small cap pool management ─────────────────────────────────
 def load_all_watchlists_from_db():
     """Load all watchlists from DB on startup. Any market without a DB entry
@@ -252,10 +271,18 @@ def check_intraday_positions(st, crypto=False):
 # ── Main swing trading cycle ──────────────────────────────────
 def run_cycle(watchlist, st, crypto=False):
     st.check_reset()
-    if st.shutoff: return
-    if kill_switch["active"]: return
-    if is_loss_streak_paused(): return
-    if not crypto and not is_market_open(): return
+    if st.shutoff:
+        log_gate_skip(st.label, "st.shutoff=True (kill switch / daily loss / manual)")
+        return
+    if kill_switch["active"]:
+        log_gate_skip(st.label, f"kill_switch active: {kill_switch.get('reason','')}")
+        return
+    if is_loss_streak_paused():
+        log_gate_skip(st.label, "loss streak cooldown active")
+        return
+    if not crypto and not is_market_open():
+        log_gate_skip(st.label, "market closed (US)")
+        return
     if market_regime["mode"] == "BEAR" and not crypto:
         log.info(f"[{st.label}] BEAR MODE — rotating to defensive tickers")
 
@@ -677,15 +704,28 @@ def run_cycle_smallcap(watchlist, st, market="us"):
     """Smallcap cycle — works for US, FTSE, and ASX markets.
     market: 'us' | 'ftse' | 'asx'
     """
+    _label = f"SMALLCAP_{market.upper()}"
     st.check_reset()
-    if st.shutoff: return
-    if kill_switch["active"]: return
-    if is_loss_streak_paused(): return
+    if st.shutoff:
+        log_gate_skip(_label, "st.shutoff=True (kill switch / daily loss / manual)")
+        return
+    if kill_switch["active"]:
+        log_gate_skip(_label, f"kill_switch active: {kill_switch.get('reason','')}")
+        return
+    if is_loss_streak_paused():
+        log_gate_skip(_label, "loss streak cooldown active")
+        return
 
     # Market-appropriate open check
-    if market == "us"   and not is_market_open(): return
-    if market == "ftse" and not is_ftse_open(): return
-    if market == "asx"  and not is_asx_open(): return
+    if market == "us"   and not is_market_open():
+        log_gate_skip(_label, "market closed (US)")
+        return
+    if market == "ftse" and not is_ftse_open():
+        log_gate_skip(_label, "market closed (FTSE)")
+        return
+    if market == "asx"  and not is_asx_open():
+        log_gate_skip(_label, "market closed (ASX)")
+        return
     if market_regime["mode"] == "BEAR":
         log.info(f"[SMALLCAP_{market.upper()}] BEAR MODE — pausing buys")
         return
@@ -816,9 +856,15 @@ def run_cycle_smallcap(watchlist, st, market="us"):
 # ── Intraday stock cycle ──────────────────────────────────────
 def run_intraday_cycle(watchlist, st):
     st.check_reset()
-    if st.shutoff: return
-    if not is_intraday_window(): return
-    if market_regime["mode"] == "BEAR": return
+    if st.shutoff:
+        log_gate_skip("INTRADAY", "st.shutoff=True (kill switch / daily loss / manual)")
+        return
+    if not is_intraday_window():
+        log_gate_skip("INTRADAY", "outside intraday window")
+        return
+    if market_regime["mode"] == "BEAR":
+        log_gate_skip("INTRADAY", "BEAR regime — intraday paused")
+        return
     if circuit_breaker["active"]:
         log.info("[INTRADAY] Circuit breaker active — skipping")
         return
@@ -927,8 +973,12 @@ def run_intraday_cycle(watchlist, st):
 # ── Intraday crypto cycle ─────────────────────────────────────
 def run_crypto_intraday_cycle(watchlist, st):
     st.check_reset()
-    if st.shutoff: return
-    if USE_BINANCE and time.time() < cfg._binance_ban_until: return
+    if st.shutoff:
+        log_gate_skip("CRYPTO_ID", "st.shutoff=True (kill switch / daily loss / manual)")
+        return
+    if USE_BINANCE and time.time() < cfg._binance_ban_until:
+        log_gate_skip("CRYPTO_ID", "Binance ban cooldown active")
+        return
     if crypto_regime["mode"] == "BEAR":
         log.info("[CRYPTO_ID] Bear mode — skipping intraday buys")
         return
@@ -1097,9 +1147,15 @@ def run_bear_cycle(st):
     """
     from core.config import BEAR_MIN_SCORE
     st.check_reset()
-    if st.shutoff: return
-    if kill_switch["active"]: return
-    if not is_market_open(): return
+    if st.shutoff:
+        log_gate_skip("BEAR", "st.shutoff=True (kill switch / daily loss / manual)")
+        return
+    if kill_switch["active"]:
+        log_gate_skip("BEAR", f"kill_switch active: {kill_switch.get('reason','')}")
+        return
+    if not is_market_open():
+        log_gate_skip("BEAR", "market closed (US)")
+        return
 
     # Only run in BEAR regime
     if market_regime.get("mode") != "BEAR":
@@ -1254,11 +1310,21 @@ def run_bear_cycle(st):
 
 def run_intl_cycle(watchlist, st, regime, market_open_fn, label):
     """Run a scan cycle for an international market (ASX or FTSE)."""
-    if not market_open_fn(): return
-    if kill_switch["active"]: return
-    if st.shutoff: return
-    if is_loss_streak_paused(): return
-    if regime["mode"] == "BEAR": return
+    if not market_open_fn():
+        log_gate_skip(label, f"market closed ({label})")
+        return
+    if kill_switch["active"]:
+        log_gate_skip(label, f"kill_switch active: {kill_switch.get('reason','')}")
+        return
+    if st.shutoff:
+        log_gate_skip(label, "st.shutoff=True (kill switch / daily loss / manual)")
+        return
+    if is_loss_streak_paused():
+        log_gate_skip(label, "loss streak cooldown active")
+        return
+    if regime["mode"] == "BEAR":
+        log_gate_skip(label, f"{label} regime is BEAR")
+        return
     discipline = "asx_swing" if label == "ASX" else "ftse_swing"
     results = []
     for sym in watchlist:
@@ -1754,38 +1820,44 @@ def main():
             except: pass
             time.sleep(30)
 def run_ibkr_startup_recovery():
-    """Recover open positions from BOTH brokers on startup.
+    """Recover open positions from BOTH brokers. Safe to call mid-session.
 
-    Recovery design (rewritten 2026-04-20):
-      1. Read DB snapshot — has _type tags from previous run for routing.
-      2. Build _type -> state-object routing table.
-      3. Pull live IBKR positions; for each, route by saved _type tag,
-         merge IBKR truth (qty/avg) with DB metadata (highest_price/entry_ts/score).
-      4. Pull live Binance balances; for each non-USDT non-zero balance, derive
-         pair symbol (ASSET+USDT), route to crypto_state vs crypto_intraday_state
-         by saved _type tag, merge as above.
+    Recovery design (rewritten 2026-04-21 for mid-session safety):
+      0. Sanity: validate that every _type in DB matches our routing table.
+         Typos / schema drift get caught LOUDLY at the top.
+      1. Clear all discipline position dicts under _state_lock — brokers are
+         the source of truth, so we rebuild in-memory state from scratch.
+         Prevents "ghost" positions that persist after a sell that was missed.
+      2. Read DB snapshot under the same lock — metadata source.
+      3. Pull live IBKR positions; route by saved _type; sanity-check qty/avg.
+      4. Pull live Binance balances; route by saved _type; reject if no
+         entry_price in DB (refuses to invent prices and expose us to bad stops).
       5. Reverse pass: any DB position not seen on either broker is an ORPHAN.
-         Log loudly and DO NOT load into in-memory state. Next snapshot write
-         will then naturally remove them from the DB (snapshot is full overwrite).
-      6. Per-discipline summary so failures are obvious.
+         Log loudly. Already NOT in state (step 1 cleared) so they're dropped.
+      6. Per-discipline summary.
 
-    Failure modes are LOUD — silent failure here means silent capital risk.
+    Failure modes are LOUD and CAUGHT — a crash in one step doesn't wipe state.
     """
+    # Outermost guard — if ANYTHING crashes, we log it rather than silently
+    # leaving positions half-restored. This is the last line of defence.
+    try:
+        _run_recovery_inner()
+    except Exception as e:
+        log.error("=" * 60)
+        log.error(f"[RECOVERY] !! FATAL: recovery crashed entirely: {e!r}")
+        log.error("[RECOVERY] !! In-memory state may be incomplete. MANUAL REVIEW REQUIRED.")
+        log.error("[RECOVERY] !! Broker positions are still safe on IBKR/Binance — only bot state affected.")
+        log.error("=" * 60)
+
+
+def _run_recovery_inner():
     # Import lazily so a missing helper can't crash module import.
     from core.execution import binance_get
     log.info("=" * 60)
-    log.info("[RECOVERY] Startup position recovery — all disciplines")
+    log.info("[RECOVERY] Startup/mid-session position recovery — all disciplines")
     log.info("=" * 60)
 
-    # ── Step 1: read DB snapshot. This is the ROUTING SOURCE OF TRUTH. ──
-    db_state = {}
-    try:
-        db_state = db_read_positions() or {}
-        log.info(f"[RECOVERY] DB snapshot: {len(db_state)} position(s) tagged from previous run")
-    except Exception as e:
-        log.error(f"[RECOVERY] !! DB read FAILED: {e!r} — recovery will use fresh defaults for ALL")
-
-    # ── Step 2: build routing table. _type tag -> (state_object, label). ──
+    # ── Routing table: _type tag -> (state_object, label). ──
     _type_to_state = {
         "Stock":  (state,                 "STOCKS"),
         "Crypto": (crypto_state,          "CRYPTO"),
@@ -1796,8 +1868,38 @@ def run_ibkr_startup_recovery():
         "FTSE":   (ftse_state,            "FTSE"),
         "Bear":   (bear_state,            "BEAR"),
     }
+    _valid_types = set(_type_to_state.keys())
 
-    # Track which symbols we successfully restored, so we can detect orphans.
+    # ── Step 1 + 2: acquire lock, clear state, read DB snapshot. ──
+    # Done together atomically so no scan cycle can observe an empty state.
+    db_state = {}
+    with _state_lock:
+        # Clear every discipline's in-memory positions.
+        # Brokers are the source of truth — we rebuild from scratch.
+        for _st, _label in _type_to_state.values():
+            _st.positions.clear()
+        try:
+            db_state = db_read_positions() or {}
+            log.info(f"[RECOVERY] DB snapshot: {len(db_state)} position(s) tagged from previous run")
+        except Exception as e:
+            log.error(f"[RECOVERY] !! DB read FAILED: {e!r} — recovery will proceed with BROKER DATA ONLY")
+            db_state = {}  # explicit — no metadata, everyone gets FRESH treatment
+
+    # ── Fix #5: validate _type tags against routing table BEFORE routing. ──
+    if db_state:
+        bad_tags = {}
+        for sym, pos in db_state.items():
+            t = (pos or {}).get("_type")
+            if t is not None and t not in _valid_types:
+                bad_tags.setdefault(t, []).append(sym)
+        if bad_tags:
+            log.error("[RECOVERY] !! DB contains unknown _type tag(s) — routing table may be stale:")
+            for bad_t, syms in bad_tags.items():
+                log.error(f"[RECOVERY] !!   _type={bad_t!r} on {syms}")
+            log.error(f"[RECOVERY] !! Valid types are: {sorted(_valid_types)}")
+            log.error("[RECOVERY] !! These positions will fall through to FRESH defaults.")
+
+    # Track what we restored so we can detect orphans at the end.
     seen = set()
     per_discipline_count = {label: 0 for _, label in _type_to_state.values()}
     fresh_count = 0
@@ -1817,38 +1919,47 @@ def run_ibkr_startup_recovery():
             "entry_breakdown":   saved.get("entry_breakdown",   ""),
         }
 
-    # ── Step 3: IBKR — covers Stocks, SmCap, ID, ASX, FTSE, Bear. ──
+    # ── Step 3: IBKR positions. ──
+    # Mutations wrapped in _state_lock so scan threads never iterate
+    # positions dict while we write to it (RuntimeError safety).
     try:
         ibkr_positions = ibkr_get_positions() or []
         log.info(f"[RECOVERY] IBKR returned {len(ibkr_positions)} position(s)")
-        for p in ibkr_positions:
-            sym = p.get("symbol")
-            qty = float(p.get("qty", 0) or 0)
-            avg = float(p.get("avg_entry_price", 0) or p.get("avg_cost", 0) or 0)
-            if not sym or qty <= 0:
-                continue
-            saved = db_state.get(sym, {}) or {}
-            saved_type = saved.get("_type")
-            if saved_type and saved_type in _type_to_state:
-                target_state, label = _type_to_state[saved_type]
-                target_state.positions[sym] = _build_pos_dict(qty, avg, saved)
-                per_discipline_count[label] += 1
-                seen.add(sym)
-                _high = saved.get("highest_price", avg)
-                _ets  = (saved.get("entry_ts") or "")[:10] or "today"
-                log.info(f"[RECOVERY] [{label}] Restored {sym} x{qty} @ ${avg:.2f} | MERGED: high=${_high:.2f} ts={_ets}")
-            else:
-                # No DB tag — fall back to US Stocks. Loud warning so you can
-                # decide manually if this is a position opened outside the bot.
-                state.positions[sym] = _build_pos_dict(qty, avg, {})
-                per_discipline_count["STOCKS"] += 1
-                fresh_count += 1
-                seen.add(sym)
-                log.warning(f"[RECOVERY] [STOCKS] Restored {sym} x{qty} @ ${avg:.2f} | FRESH (no DB tag — opened outside bot?)")
+        with _state_lock:
+            for p in ibkr_positions:
+                sym = p.get("symbol")
+                qty = float(p.get("qty", 0) or 0)
+                avg = float(p.get("avg_entry_price", 0) or p.get("avg_cost", 0) or 0)
+                if not sym:
+                    log.error(f"[RECOVERY] !! IBKR position has no symbol, skipping: {p!r}")
+                    continue
+                # Fix #6: sanity-check broker data.
+                if qty <= 0:
+                    continue  # legit — closed position, not an error
+                if avg <= 0:
+                    log.error(f"[RECOVERY] !! IBKR returned {sym} qty={qty} but avg_price<=0 — REJECTING (broker data bad)")
+                    continue
+                saved = db_state.get(sym, {}) or {}
+                saved_type = saved.get("_type")
+                if saved_type and saved_type in _type_to_state:
+                    target_state, label = _type_to_state[saved_type]
+                    target_state.positions[sym] = _build_pos_dict(qty, avg, saved)
+                    per_discipline_count[label] += 1
+                    seen.add(sym)
+                    _high = saved.get("highest_price", avg)
+                    _ets  = (saved.get("entry_ts") or "")[:10] or "today"
+                    log.info(f"[RECOVERY] [{label}] Restored {sym} x{qty} @ ${avg:.2f} | MERGED: high=${_high:.2f} ts={_ets}")
+                else:
+                    # No DB tag / unknown tag — route to US Stocks with fresh defaults.
+                    state.positions[sym] = _build_pos_dict(qty, avg, {})
+                    per_discipline_count["STOCKS"] += 1
+                    fresh_count += 1
+                    seen.add(sym)
+                    log.warning(f"[RECOVERY] [STOCKS] Restored {sym} x{qty} @ ${avg:.2f} | FRESH (no DB tag — opened outside bot or stale snapshot?)")
     except Exception as e:
         log.error(f"[RECOVERY] !! IBKR pull FAILED: {e!r} — IBKR positions NOT recovered this cycle")
 
-    # ── Step 4: Binance — covers crypto_state and crypto_intraday_state. ──
+    # ── Step 4: Binance positions. ──
     try:
         acct = binance_get("/api/v3/account", signed=True)
         if not acct:
@@ -1859,37 +1970,38 @@ def run_ibkr_startup_recovery():
                         if (float(b.get("free", 0)) + float(b.get("locked", 0))) > 0
                         and b.get("asset") not in ("USDT", "BUSD", "USDC")]
             log.info(f"[RECOVERY] Binance returned {len(non_zero)} non-zero non-stable balance(s)")
-            for b in non_zero:
-                asset = b.get("asset")
-                qty   = float(b.get("free", 0)) + float(b.get("locked", 0))
-                if not asset or qty <= 0:
-                    continue
-                pair = f"{asset}USDT"
-                saved = db_state.get(pair, {}) or {}
-                saved_type = saved.get("_type")
-                # Need entry price from DB — Binance balances don't carry one
-                avg = float(saved.get("entry_price") or 0)
-                if avg <= 0:
-                    log.warning(f"[RECOVERY] [BINANCE] {pair} qty={qty} on broker but NO entry_price in DB — cannot restore safely. Manual review needed.")
-                    continue
-                if saved_type == "CrypID":
-                    target_state, label = crypto_intraday_state, "CRYPTO_ID"
-                elif saved_type == "Crypto":
-                    target_state, label = crypto_state, "CRYPTO"
-                else:
-                    # Default Binance positions to swing if no tag
-                    target_state, label = crypto_state, "CRYPTO"
-                    log.warning(f"[RECOVERY] [{label}] {pair} has no/unknown _type tag — defaulting to swing state")
-                target_state.positions[pair] = _build_pos_dict(qty, avg, saved)
-                per_discipline_count[label] += 1
-                seen.add(pair)
-                _high = saved.get("highest_price", avg)
-                _ets  = (saved.get("entry_ts") or "")[:10] or "today"
-                log.info(f"[RECOVERY] [{label}] Restored {pair} x{qty:.6f} @ ${avg:.6f} | MERGED: high=${_high:.6f} ts={_ets}")
+            with _state_lock:
+                for b in non_zero:
+                    asset = b.get("asset")
+                    qty   = float(b.get("free", 0)) + float(b.get("locked", 0))
+                    if not asset or qty <= 0:
+                        continue
+                    pair = f"{asset}USDT"
+                    saved = db_state.get(pair, {}) or {}
+                    saved_type = saved.get("_type")
+                    # Need entry price from DB — Binance balances don't carry one.
+                    # Fix #6: sanity on the DB-provided avg too.
+                    avg = float(saved.get("entry_price") or 0)
+                    if avg <= 0:
+                        log.warning(f"[RECOVERY] [BINANCE] {pair} qty={qty} on broker but NO entry_price in DB — cannot restore safely. Manual review needed.")
+                        continue
+                    if saved_type == "CrypID":
+                        target_state, label = crypto_intraday_state, "CRYPTO_ID"
+                    elif saved_type == "Crypto":
+                        target_state, label = crypto_state, "CRYPTO"
+                    else:
+                        target_state, label = crypto_state, "CRYPTO"
+                        log.warning(f"[RECOVERY] [{label}] {pair} has no/unknown _type tag — defaulting to swing state")
+                    target_state.positions[pair] = _build_pos_dict(qty, avg, saved)
+                    per_discipline_count[label] += 1
+                    seen.add(pair)
+                    _high = saved.get("highest_price", avg)
+                    _ets  = (saved.get("entry_ts") or "")[:10] or "today"
+                    log.info(f"[RECOVERY] [{label}] Restored {pair} x{qty:.6f} @ ${avg:.6f} | MERGED: high=${_high:.6f} ts={_ets}")
     except Exception as e:
         log.error(f"[RECOVERY] !! Binance pull FAILED: {e!r} — crypto positions NOT recovered this cycle")
 
-    # ── Step 5: orphan detection. DB had it, brokers didn't. ──
+    # ── Step 5: orphan detection (DB had it, neither broker did). ──
     orphans = [sym for sym in db_state.keys() if sym not in seen]
     if orphans:
         log.warning("=" * 60)
@@ -1897,14 +2009,14 @@ def run_ibkr_startup_recovery():
         for sym in orphans:
             tag  = (db_state.get(sym, {}) or {}).get("_type", "?")
             qty  = (db_state.get(sym, {}) or {}).get("qty", "?")
-            ts   = (db_state.get(sym, {}) or {}).get("entry_ts", "?")[:19]
-            log.warning(f"[RECOVERY] !!   ORPHAN: {sym} (_type={tag}, qty={qty}, entry_ts={ts}) — DROPPING from state")
-        log.warning("[RECOVERY] !! Orphans will be removed from DB on next snapshot write.")
-        log.warning("[RECOVERY] !! These positions never filled on broker — investigate via trades table.")
+            ts   = ((db_state.get(sym, {}) or {}).get("entry_ts") or "?")[:19]
+            log.warning(f"[RECOVERY] !!   ORPHAN: {sym} (_type={tag}, qty={qty}, entry_ts={ts}) — NOT loaded into state")
+        log.warning("[RECOVERY] !! Orphans will be removed from DB on next snapshot write (full overwrite).")
+        log.warning("[RECOVERY] !! These positions never filled on broker OR were closed outside the bot — investigate via trades table.")
         log.warning("=" * 60)
         orphan_count = len(orphans)
 
-    # ── Step 6: summary. Visible at every restart, makes regressions obvious. ──
+    # ── Step 6: summary. Always logged, success or failure. ──
     total_restored = sum(per_discipline_count.values())
     log.info("=" * 60)
     log.info(f"[RECOVERY] SUMMARY — {total_restored} position(s) restored, {orphan_count} orphan(s) dropped, {fresh_count} fresh")
