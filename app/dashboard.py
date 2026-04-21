@@ -1413,7 +1413,7 @@ function pinCmd(path,label){{
         <span style="color:#94a3b8">Expectancy</span>
         <span style="text-align:right">
           <span style="font-weight:700;color:{_sh_expectancy_col(sh["expectancy"], sh["trade_count"])}">{_sh_fmt_exp(sh["expectancy"])}</span>
-          <br><span style="color:#94a3b8;font-size:10px">{_sh_fmt_pct(sh["expectancy_pct"])} · {_sh_fmt_r(sh["expectancy_r"])}</span>
+          <br><span style="color:#94a3b8;font-size:10px">{_sh_fmt_pct(sh.get("expectancy_pct"))} · {_sh_fmt_r(sh.get("expectancy_r"))}</span>
         </span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
