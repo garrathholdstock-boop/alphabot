@@ -1420,6 +1420,8 @@ def db_get_strategy_health(window="all"):
         "window": window,
         "trade_count": 0,
         "expectancy": 0.0,
+        "expectancy_pct": None,
+        "expectancy_r": None,
         "win_rate": 0.0,
         "rr_ratio": None,
         "sharpe": None,
@@ -1468,6 +1470,15 @@ def db_get_strategy_health(window="all"):
         result["avg_loss"]   = (sum(losses) / len(losses)) if losses else 0.0
         if losses and wins:
             result["rr_ratio"] = abs(result["avg_win"] / result["avg_loss"])
+        # Expectancy as % of typical loss (= R-multiple × 100).
+        # Scale-free, readable, independent of account size and trade size.
+        # Positive pct = edge, negative pct = bleeding.
+        if losses:
+            result["expectancy_pct"] = (result["expectancy"] / abs(result["avg_loss"])) * 100.0
+            result["expectancy_r"]   = result["expectancy"] / abs(result["avg_loss"])
+        else:
+            result["expectancy_pct"] = None
+            result["expectancy_r"]   = None
 
         # Max drawdown on cumulative equity curve (per-trade, not daily).
         cum = 0.0
