@@ -346,18 +346,18 @@ ASX_SMALLCAP_WATCHLIST = [
     # Mining / resources
     "PLS","LTR","GL1","AKE","CXO","HMC","VUL","LKE","SYA","DRO",
     "BGL","BHP","NST","EVN","SFR","GOR","RMS","WAF","DEG","NIC",
-    "CAA","OSH","PNR","SVL","BMN","LRS","BOE","LOT","PDN","AEE",
+    "CAA","PNR","SVL","BMN","BOE","LOT","PDN","AEE",
     # Technology
-    "MEI","VHT","APX","TNE","SDR","NIC","WTC","XRO","TLX","ALU",
-    "MP1","NEA","BVS","PPS","WLD","EML","IRE","PPH","RUL","DTL",
+    "MEI","APX","TNE","SDR","NIC","WTC","XRO","TLX",
+    "MP1","BVS","PPS","EML","IRE","DTL",
     # Financial / fintech
-    "LVT","HUB","PYR","Z1P","AFG","HGH","BRG","EQT","HMY","HOC",
+    "HUB","AFG","HGH","BRG","EQT","HMY","HOC",
     # Consumer / retail
-    "NHC","YAL","TBN","HVN","SUL","UNI","IPD","GUD","NCK","MHJ",
-    "BAP","CCX","EML","PPH","SLR","SKC","AIM","BWX","PMV","KMD",
+    "NHC","YAL","TBN","HVN","SUL","UNI","IPD","NCK","MHJ",
+    "BAP","CCX","EML","SLR","SKC","AIM","BWX","PMV","KMD",
     # Healthcare / biotech
     "IGL","MYX","PNV","AVH","PRN","CNI","IMU","NAN","RHY","ACL",
-    "EBO","MSB","FPH","OSH","IPD","AVH","VHT","SIG","RHC","ANN",
+    "EBO","MSB","FPH","IPD","AVH","SIG","RHC","ANN",
 ]
 
 CRYPTO_WATCHLIST_BINANCE = [
@@ -611,10 +611,10 @@ ASX_WATCHLIST = [
     "WAF","GOR","RMS","WDS","STO","BPT","KAR","WHC","YAL","NHC",
     # Healthcare
     "CSL","RMD","COH","SHL","PME","ANN","SIG","RHC","NAN","RHY",
-    "IMU","ACL","EBO","FPH","MSB","OSH","PNV","IPD","AVH","VHT",
+    "IMU","ACL","EBO","FPH","MSB","PNV","IPD","AVH",
     # Tech
-    "WTC","XRO","TLX","ALU","MP1","TNE","SDR","NIC","APX","NEA",
-    "BVS","PPS","WLD","EML","IRE","PPH","RUL","DTL","LVT","HUB",
+    "WTC","XRO","TLX","MP1","TNE","SDR","NIC","APX",
+    "BVS","PPS","EML","IRE","DTL","HUB",
     # Consumer / retail
     "WOW","COL","JBH","ARB","REH","HVN","SUL","UNI","NCK","MHJ",
     "BAP","CCX","KMD","LOV","RBL","TPW","BWX","PMV","MTS","EDV",
@@ -631,7 +631,7 @@ ASX_WATCHLIST = [
     "TLS","TPG","TUA","SWM","NEC","ARB","IPH","EVT","SKT","VOC",
     # Misc
     "IFL","CGF","SUN","IAG","QBE","MPL","PPT","AMP","MFG","CGC",
-    "HMY","DRO","VUL","LKE","SYA","BGL","TBN","GUD","AD8","FLT",
+    "HMY","DRO","VUL","LKE","SYA","BGL","TBN","AD8","FLT",
 ]
 
 # ── FTSE Watchlist (LSE exchange, GBP) ────────────────────────
