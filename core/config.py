@@ -52,6 +52,14 @@ IBKR_HOST      = "127.0.0.1"
 IBKR_PORT      = 4001 if IS_LIVE else 4004
 IBKR_CLIENT_ID = 1
 
+# Market data type for IBKR (reqMarketDataType). Controls Error 10089 behavior.
+#   1 = Live (requires paid IBKR market data subscription)
+#   2 = Frozen (last live price when market closed)
+#   3 = Delayed (~15 min delay, free — default for paper)
+#   4 = Delayed Frozen
+# Flip to 1 when you add a paid market data subscription on the IBKR account.
+IBKR_MARKET_DATA_TYPE = int(os.environ.get("IBKR_MARKET_DATA_TYPE", "3"))
+
 # ── Binance ───────────────────────────────────────────────────
 BINANCE_KEY            = os.environ.get("BINANCE_KEY",    "") or os.environ.get("BINANCE_TESTNET_KEY", "")
 BINANCE_SECRET         = os.environ.get("BINANCE_SECRET", "") or os.environ.get("BINANCE_TESTNET_SECRET", "")
