@@ -310,15 +310,17 @@ def build_dashboard():
     now_paris = datetime.now(PARIS)
     now_date = now_paris.strftime("%A %d %B %Y")
 
-    # ── Strategy health metrics (all-time) ──
-    # Five quality measures that don't depend on time window PnL.
-    # Measure EDGE rather than recent luck. Low trade counts are visually flagged.
+    # ── Strategy health metrics (30-day rolling) ──
+    # Rolling window excludes stale early trades from pre-cleanup eras
+    # (bugs, dead tickers, old sizing). Long enough for meaningful sample,
+    # short enough that config changes start showing within ~2 weeks.
     try:
-        sh = db_get_strategy_health("all")
+        sh = db_get_strategy_health("30d")
     except Exception:
-        sh = {"trade_count": 0, "expectancy": 0.0, "win_rate": 0.0,
-              "rr_ratio": None, "sharpe": None, "max_drawdown": 0.0,
-              "max_dd_pct": 0.0, "avg_win": 0.0, "avg_loss": 0.0}
+        sh = {"trade_count": 0, "expectancy": 0.0, "expectancy_pct": None,
+              "expectancy_r": None, "win_rate": 0.0, "rr_ratio": None,
+              "sharpe": None, "max_drawdown": 0.0, "max_dd_pct": 0.0,
+              "avg_win": 0.0, "avg_loss": 0.0}
 
     # ── P&L helpers ──
     def _fmt(v): return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
@@ -364,6 +366,12 @@ def build_dashboard():
     def _sh_fmt_exp(v):    return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
     def _sh_fmt_sharpe(s): return f"{s:.2f}" if s is not None else "—"
     def _sh_fmt_rr(r):     return f"1:{r:.2f}" if r else "—"
+    def _sh_fmt_pct(p):
+        if p is None: return "—"
+        return f"+{p:.1f}%" if p >= 0 else f"{p:.1f}%"
+    def _sh_fmt_r(r):
+        if r is None: return "—"
+        return f"+{r:.2f}R" if r >= 0 else f"{r:.2f}R"
 
     # ── Period P&L ──
     today_str = date.today().isoformat()
@@ -1400,9 +1408,13 @@ function pinCmd(path,label){{
     <div class="lbl">Current Balance</div>
     <div class="big blue" style="font-size:28px;line-height:1.1;margin-bottom:10px">{portfolio}</div>
     <div style="border-top:1px solid #2a3544;padding-top:8px">
+      <div style="font-size:10px;color:#64748b;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">Last 30 days</div>
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
         <span style="color:#94a3b8">Expectancy</span>
-        <span style="font-weight:700;color:{_sh_expectancy_col(sh["expectancy"], sh["trade_count"])}">{_sh_fmt_exp(sh["expectancy"])}</span>
+        <span style="text-align:right">
+          <span style="font-weight:700;color:{_sh_expectancy_col(sh["expectancy"], sh["trade_count"])}">{_sh_fmt_exp(sh["expectancy"])}</span>
+          <br><span style="color:#94a3b8;font-size:10px">{_sh_fmt_pct(sh["expectancy_pct"])} · {_sh_fmt_r(sh["expectancy_r"])}</span>
+        </span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">
         <span style="color:#94a3b8">Win Rate</span>
