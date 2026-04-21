@@ -1400,6 +1400,110 @@ def db_discipline_detail(discipline, days=None):
         return {}
 
 
+def db_get_strategy_health(window="all"):
+    """Return the 5 strategy-quality metrics over the given window.
+
+    window: 'all' | '30d' | '7d' | 'today'
+
+    Returns dict with:
+      expectancy   : avg $ P&L per closed trade
+      win_rate     : pct of closed trades with pnl > 0
+      rr_ratio     : avg_win / abs(avg_loss), None if no losses
+      sharpe       : annualized Sharpe of daily returns, None if <2 days
+      max_drawdown : peak-to-trough drop on cumulative P&L ($)
+      max_dd_pct   : same as pct of (starting capital 1M for paper)
+      trade_count  : total SELL rows with non-null pnl
+      avg_win      : avg $ of winning trades
+      avg_loss     : avg $ of losing trades (negative number)
+    """
+    result = {
+        "window": window,
+        "trade_count": 0,
+        "expectancy": 0.0,
+        "win_rate": 0.0,
+        "rr_ratio": None,
+        "sharpe": None,
+        "max_drawdown": 0.0,
+        "max_dd_pct": 0.0,
+        "avg_win": 0.0,
+        "avg_loss": 0.0,
+    }
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Build WHERE clause by window. Use date column (TEXT 'YYYY-MM-DD').
+        where = "side='SELL' AND pnl IS NOT NULL"
+        if window == "today":
+            today = datetime.now().strftime("%Y-%m-%d")
+            where += f" AND date = '{today}'"
+        elif window == "7d":
+            cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            where += f" AND date >= '{cutoff}'"
+        elif window == "30d":
+            cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            where += f" AND date >= '{cutoff}'"
+        # 'all' → no date filter
+
+        # Pull per-trade pnl ordered by date+time for equity curve.
+        c.execute(f"""SELECT pnl, date FROM trades
+                      WHERE {where}
+                      ORDER BY date ASC, time ASC""")
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            return result
+
+        pnls  = [float(r[0]) for r in rows]
+        dates = [r[1] for r in rows]
+        n     = len(pnls)
+        wins  = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
+
+        result["trade_count"] = n
+        result["expectancy"] = sum(pnls) / n
+        result["win_rate"]   = (len(wins) / n) * 100.0
+        result["avg_win"]    = (sum(wins) / len(wins)) if wins else 0.0
+        result["avg_loss"]   = (sum(losses) / len(losses)) if losses else 0.0
+        if losses and wins:
+            result["rr_ratio"] = abs(result["avg_win"] / result["avg_loss"])
+
+        # Max drawdown on cumulative equity curve (per-trade, not daily).
+        cum = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for p in pnls:
+            cum += p
+            if cum > peak:
+                peak = cum
+            dd = peak - cum  # positive number = how far below peak
+            if dd > max_dd:
+                max_dd = dd
+        result["max_drawdown"] = -max_dd  # negative for display (a drop)
+        # Pct of nominal starting capital — paper account seeded at $1M
+        result["max_dd_pct"] = (-max_dd / 1_000_000.0) * 100.0
+
+        # Sharpe — annualized, daily buckets. Needs at least 2 distinct trading days.
+        # Aggregate trade pnls by date, divide by nominal 1M for daily pct return.
+        from collections import defaultdict
+        by_day = defaultdict(float)
+        for p, d in zip(pnls, dates):
+            by_day[d] += p
+        if len(by_day) >= 2:
+            daily_pcts = [v / 1_000_000.0 for v in by_day.values()]
+            mean = sum(daily_pcts) / len(daily_pcts)
+            var  = sum((x - mean) ** 2 for x in daily_pcts) / len(daily_pcts)
+            std  = var ** 0.5
+            if std > 0:
+                # Annualize: sqrt(252 trading days)
+                result["sharpe"] = (mean / std) * (252 ** 0.5)
+        return result
+    except Exception as e:
+        log.warning(f"[DB] db_get_strategy_health({window}) failed: {e}")
+        return result
+
+
 # ═══════════════════════════════════════════════════════════════
 # INITIALISE ON IMPORT
 # ═══════════════════════════════════════════════════════════════
