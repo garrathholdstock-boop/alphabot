@@ -330,25 +330,23 @@ US_SMALLCAP_WATCHLIST = [
 
 FTSE_SMALLCAP_WATCHLIST = [
     # Tech / data
-    "IQG","RWS","GAMA","JTC","FOUR","AMS","CBOX","KNOS","BVXP","EKF",
-    "BOKU","BGEO","CEPS","CRAW","ERM","CMCX","YOU","RCH","KOO","IMM",
+    "RWS","GAMA","JTC","FOUR","AMS","CBOX","KNOS","BVXP","EKF",
+    "BOKU","BGEO","CMCX","YOU","RCH","KOO","IMM",
     # Biotech / health
-    "FRP","POLR","CML","GYM","TAST","RBGP","MONY","PLUS","FDM","CLIG",
-    "DRM","OXB","ANGL","ABDX","REN","IPX","SYNC","MCB","ADT","BHG",
+    "FRP","POLR","CML","GYM","MONY","PLUS","FDM","CLIG",
+    "OXB","ABDX","IPX","SYNC","MCB",
     # Consumer / retail
-    "SHOE","MPAC","WINV","IDP","AFX","SQZ","TIG","ASAI","RDW","BOO",
-    "CARD","HYVE","TPX","VLX","SMDS","FSFL","MHN","QTX","SUMO","RHM",
+    "SHOE","MPAC","WINV","SQZ","TIG","ASAI","CARD","TPX","VLX","FSFL","QTX",
     # Energy / resources
-    "FDEV","IGR","JET","GKP","TLW","SOLG","ECOR","HOC","CAP","TRP",
+    "FDEV","IGR","GKP","TLW","ECOR","HOC","TRP",
     # Real estate / industrial
-    "WHR","IHR","LOK","FCH","TRN","AGR","TR.","CTO","BMY","XPF",
+    "FCH","TRN","BMY","XPF",
     # Property
-    "SAFE","ASHM","CAPC","BBOX","GPE","MUT","SHB","FCRE","EPIC","SHI",
+    "SAFE","ASHM","BBOX","GPE","MUT","SHI",
     # Financial services
-    "ARBB","IPO","LIO","CAPD","INL","RBN","ASB","CLIG","JAM","BRK",
+    "ARBB","IPO","LIO","CAPD","RBN","CLIG","JAM","BRK",
     # Industrials
-    "CHRT","FGP","RENX","VP.","NORC","EAH","STEM","TIG","BWNG","GKN",
-]
+    "CHRT","FGP","RENX","VP.","EAH","STEM","TIG"]
 
 ASX_SMALLCAP_WATCHLIST = [
     # Mining / resources
@@ -648,34 +646,31 @@ FTSE_WATCHLIST = [
     "HSBA","LLOY","BARC","NWG","STAN","AV.","LGEN","PRU","STJ","HLMA",
     "SBRE","ABDN","OSB","MNG","JUP","ITRK","CBG","PAG","PSDL","IIG",
     # Energy
-    "SHEL","BP.","HBR","TLW","TRIN","ENQ","CAP","WOSG","SOLG","PMO",
+    "SHEL","BP.","HBR","TLW","ENQ","WOSG",
     # Miners
-    "RIO","BHP","AAL","GLEN","FRES","MNDI","ANTO","EVR","CEY","SHG",
-    "POLY","KMR","HOC","ECOR","HOR","ADT","GRG","TRR","CZN","GEMD",
+    "RIO","BHP","AAL","GLEN","FRES","MNDI","ANTO","KMR","HOC","ECOR","GRG","CZN","GEMD",
     # Consumer staples
-    "ULVR","DGE","BATS","IMB","OCDO","ABF","RKT","TATE","CCH","BBAM",
-    "BWY","BAB","RSW","NICL","SMDS","SGP","EMG","RNO","ROR","WIX",
+    "ULVR","DGE","BATS","IMB","OCDO","ABF","RKT","TATE","CCH","BWY","BAB","RSW","NICL","EMG","ROR","WIX",
     # Pharma
-    "AZN","GSK","HLN","HIK","NXT","ASLE","DRX","PHP","SPH","MCB",
-    "GWRS","SYNC","BHG","ANGL","VCT","OXB","IPX","ATS","REN","ABDX",
+    "AZN","GSK","HLN","HIK","NXT","DRX","PHP","MCB",
+    "SYNC","VCT","OXB","IPX","ABDX",
     # Industrials
-    "BA.","RR.","IMI","WEIR","DCC","MTO","SMIN","DPLM","SMDS","AUTO",
-    "IHG","EXPN","SGE","SSP","DLG","VMUK","BKG","TW.","PSN","RPD",
+    "BA.","RR.","IMI","WEIR","DCC","MTO","SMIN","DPLM","AUTO",
+    "EXPN","SGE","BKG","TW.","PSN",
     # Retail
     "MKS","TSCO","SBRY","WPP","WTB","JD.","BRBY","KGF","HMSO","ASC",
-    "GPE","GFS","CARD","LSEG","GNS","BOO","MCB","PETS","WIZZ","EZJ",
+    "GPE","CARD","LSEG","GNS","MCB","PETS","WIZZ","EZJ",
     # Real estate
-    "LAND","SGRO","BLND","BBOX","PHP","SUPR","CLS","DLN","GPE","SHB",
+    "LAND","SGRO","BLND","BBOX","PHP","SUPR","DLN","GPE",
     # Utilities
-    "UU.","SVT","NG.","CNA","PNN","DRX","SPC","RWS","TRIG","BSIF",
+    "UU.","SVT","NG.","CNA","PNN","DRX","RWS","TRIG","BSIF",
     # Tech / media
-    "REL","PSON","ITV","CCH","TATE","BME","GSF","OBS","GAW","TRST",
+    "REL","PSON","ITV","CCH","TATE","BME","GSF","GAW","TRST",
     # Transport
-    "IAG","EZJ","WIZZ","RYA","SMDS","FGP","GOG","MBH","TRN","SHAL",
+    "IAG","EZJ","WIZZ","FGP","MBH","TRN",
     # Other
-    "CRH","SMT","FCIT","PETS","SCT","TRN","HSX","III","SDR","HWDN",
-    "SPX","SKG","ABF","EPIC","ASHM","ATG","AO.","BWY","GSK","SHEL",
-]
+    "SMT","FCIT","PETS","SCT","TRN","HSX","III","SDR","HWDN",
+    "SPX","ABF","ASHM","ATG","AO.","BWY","GSK","SHEL"]
 
 # ── Market configs per exchange ───────────────────────────────
 MARKET_CONFIG = {
