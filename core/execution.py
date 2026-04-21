@@ -33,7 +33,7 @@ from ib_insync import IB, Stock, MarketOrder, StopOrder, LimitOrder, util
 
 from core.config import (
     log, IS_LIVE,
-    IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID,
+    IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID, IBKR_MARKET_DATA_TYPE,
     BINANCE_BASE, BINANCE_HEADERS, _BIN_KEY, _BIN_SECRET,
     BINANCE_DELAY, BINANCE_INTERVAL_MAP, USE_BINANCE,
     SLIPPAGE_STOCK, SLIPPAGE_CRYPTO, STOP_LOSS_PCT, TAKE_PROFIT_PCT,
@@ -128,6 +128,15 @@ async def _async_connect():
         _IB_CONNECTED = True
         _IB_METRICS["reconnects"] += 1
         log.info(f"[IBKR-MGR] Connected (clientId={_SHARED_CLIENT_ID})")
+        # Set market data type — 3 = delayed (free on paper), 1 = live (paid subscription).
+        # Controlled by IBKR_MARKET_DATA_TYPE env var. Silences Error 10089 on paper accounts.
+        # Applied on every successful (re)connect so Gateway restarts don't revert it.
+        try:
+            _IB_INSTANCE.reqMarketDataType(IBKR_MARKET_DATA_TYPE)
+            _mdt_label = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed-frozen"}.get(IBKR_MARKET_DATA_TYPE, str(IBKR_MARKET_DATA_TYPE))
+            log.info(f"[IBKR-MGR] Market data type set to {IBKR_MARKET_DATA_TYPE} ({_mdt_label})")
+        except Exception as e:
+            log.warning(f"[IBKR-MGR] Failed to set market data type: {e!r} — quotes may be rejected with Error 10089")
         return True
     except Exception as e:
         _IB_CONNECTED = False
