@@ -236,22 +236,94 @@ def get_ibkr_metrics():
 # API HEALTH TRACKING
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Tier 2 auto-reset: if kill switch has been active AND API has been healthy
+# for AUTO_RESET_HEALTHY_SECS continuously, clear the kill switch. Capped at
+# AUTO_RESET_MAX_PER_DAY per 24h so we never flap.
+AUTO_RESET_HEALTHY_SECS  = 300   # 5 minutes of continuous success
+AUTO_RESET_MAX_PER_DAY   = 3     # after 3 auto-resets in 24h, requires manual
+
+# Track when kill switch went active + when the current healthy streak began.
+# These are module-local (not in api_health) because they're purely internal.
+_kill_activated_epoch   = None   # float epoch when kill switch most recently activated
+_healthy_streak_began   = None   # float epoch when current success streak started
+_auto_reset_history     = []     # list of epochs when auto-resets happened
+
+
+def _purge_old_resets(now_epoch):
+    """Drop reset events older than 24h so we only count recent ones."""
+    cutoff = now_epoch - 86400
+    global _auto_reset_history
+    _auto_reset_history = [t for t in _auto_reset_history if t > cutoff]
+
+
+def _try_auto_reset_kill_switch():
+    """If conditions met, clear kill_switch and st.shutoff across all disciplines.
+    Called from record_api_success. Loud log on every decision point.
+    Safe to call repeatedly — bails early if conditions not met.
+    """
+    global _healthy_streak_began, _kill_activated_epoch
+    if not kill_switch.get("active"):
+        return                              # nothing to reset
+    if _healthy_streak_began is None:
+        return                              # no streak tracked yet
+    now = time.time()
+    streak_len = now - _healthy_streak_began
+    if streak_len < AUTO_RESET_HEALTHY_SECS:
+        return                              # not healthy long enough yet
+    _purge_old_resets(now)
+    if len(_auto_reset_history) >= AUTO_RESET_MAX_PER_DAY:
+        # Limit hit — log ONCE per kill activation to avoid flood
+        if _kill_activated_epoch and (now - _kill_activated_epoch) < 60:
+            log.error(f"[AUTO-RESET] BLOCKED — already used {len(_auto_reset_history)}/{AUTO_RESET_MAX_PER_DAY} auto-resets in last 24h. Manual reset required.")
+        return
+
+    # All gates passed — reset.
+    log.warning("=" * 60)
+    log.warning(f"[AUTO-RESET] Kill switch auto-reset firing after {streak_len:.0f}s of API health")
+    log.warning(f"[AUTO-RESET] Prior kill reason: {kill_switch.get('reason')!r}")
+    log.warning(f"[AUTO-RESET] Resets used today: {len(_auto_reset_history) + 1}/{AUTO_RESET_MAX_PER_DAY}")
+    kill_switch["active"]       = False
+    kill_switch["reason"]       = ""
+    kill_switch["activated_at"] = None
+    for st in [state, crypto_state, smallcap_state, intraday_state,
+               crypto_intraday_state, asx_state, ftse_state]:
+        st.shutoff = False
+    api_health["ibkr_fails"] = 0
+    api_health["data_fails"] = 0
+    _auto_reset_history.append(now)
+    _kill_activated_epoch = None
+    log.warning("[AUTO-RESET] Kill switch cleared. All disciplines resumed.")
+    log.warning("=" * 60)
+
+
 def record_api_success():
+    global _healthy_streak_began
+    # If we were previously failing, this is the start of a new streak.
+    had_failures = api_health.get("ibkr_fails", 0) > 0 or api_health.get("data_fails", 0) > 0
     api_health["ibkr_fails"] = 0
     api_health["data_fails"] = 0
     api_health["last_success"] = datetime.now().isoformat()
+    now = time.time()
+    if had_failures or _healthy_streak_began is None:
+        _healthy_streak_began = now
+    # If kill switch is active and we've been healthy long enough, reset it.
+    _try_auto_reset_kill_switch()
 
 
 def record_api_failure(source="ibkr"):
+    global _healthy_streak_began, _kill_activated_epoch
     if source == "ibkr" and _is_weekend_maintenance():
         return
     key = f"{source}_fails"
     api_health[key] = api_health.get(key, 0) + 1
+    # Any failure breaks the healthy streak.
+    _healthy_streak_began = None
     total = api_health.get("ibkr_fails", 0) + api_health.get("data_fails", 0)
     if total >= api_health["max_fails"] and not kill_switch["active"]:
         kill_switch["active"] = True
         kill_switch["reason"] = f"API kill: {total} consecutive failures ({source})"
         kill_switch["activated_at"] = datetime.now().strftime("%H:%M:%S")
+        _kill_activated_epoch = time.time()
         for st in [state, crypto_state, smallcap_state, intraday_state,
                    crypto_intraday_state, asx_state, ftse_state]:
             st.shutoff = True
