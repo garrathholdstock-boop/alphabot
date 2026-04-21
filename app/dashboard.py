@@ -62,7 +62,13 @@ from core.risk import (
     total_exposure, all_positions_count, calc_profit_factor, calc_sharpe,
     vol_adjusted_size, is_market_open, is_intraday_window,
 )
-from core.execution import place_order, cancel_stop_order_ibkr
+# NOTE: core.execution deliberately NOT imported here.
+# Dashboard is a read-only view + in-process state flipper. Any action
+# requiring IBKR (like /close-all) must be routed through the bot process
+# to avoid clientId=1 collision. Importing execution.py at module level
+# would start a second IBKR manager thread in this process and collide
+# with the bot's Gateway session.
+# See: 21-Apr-2026 session log — Error 326 root cause investigation.
 from data.analytics import score_signal
 from data.database import (
     db_get_leaderboard, db_search_symbol, db_get_skip_reason_breakdown,
@@ -76,7 +82,6 @@ from data.database import (
     db_get_latest_intelligence_run, db_get_intelligence_runs,
     db_ev_by_discipline, db_discipline_detail,
     db_log_config_change, db_get_config_history,
-    db_get_strategy_health,
 )
 
 try:
@@ -310,18 +315,6 @@ def build_dashboard():
     now_paris = datetime.now(PARIS)
     now_date = now_paris.strftime("%A %d %B %Y")
 
-    # ── Strategy health metrics (30-day rolling) ──
-    # Rolling window excludes stale early trades from pre-cleanup eras
-    # (bugs, dead tickers, old sizing). Long enough for meaningful sample,
-    # short enough that config changes start showing within ~2 weeks.
-    try:
-        sh = db_get_strategy_health("30d")
-    except Exception:
-        sh = {"trade_count": 0, "expectancy": 0.0, "expectancy_pct": None,
-              "expectancy_r": None, "win_rate": 0.0, "rr_ratio": None,
-              "sharpe": None, "max_drawdown": 0.0, "max_dd_pct": 0.0,
-              "avg_win": 0.0, "avg_loss": 0.0}
-
     # ── P&L helpers ──
     def _fmt(v): return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
     def _col(v): return "#00ff88" if v >= 0 else "#ff4466"
@@ -338,40 +331,6 @@ def build_dashboard():
     def _status(st): return "Shut Off" if st.get("shutoff") else ("Running" if st.get("running") else "Idle")
     def _pnl(st): return _fmt(st.get("pnl", 0.0))
     def _pnlc(st): return _col(st.get("pnl", 0.0))
-
-    # ── Strategy health formatters ──
-    # Color thresholds reflect what professional systematic traders target.
-    # Expectancy/Sharpe/DD are SAFE to evaluate but only above a min trade count.
-    def _sh_count_col(n):
-        if n < 30:   return "#8899aa"   # insufficient data — grey
-        if n < 100:  return "#f59e0b"   # early signal — amber
-        return "#00ff88"                # statistically meaningful — green
-    def _sh_count_label(n):
-        if n < 30:   return "insufficient"
-        if n < 100:  return "early"
-        return "meaningful"
-    def _sh_expectancy_col(v, n):
-        if n < 30: return "#8899aa"     # don't colour too optimistically on small N
-        return "#00ff88" if v > 0 else "#ff4466"
-    def _sh_sharpe_col(s, n):
-        if s is None or n < 30: return "#8899aa"
-        if s >= 1.0:  return "#00ff88"
-        if s >= 0.5:  return "#f59e0b"
-        return "#ff4466"
-    def _sh_dd_col(pct):
-        # Negative pct values — smaller (closer to 0) is better
-        if pct >= -5:   return "#00ff88"
-        if pct >= -15:  return "#f59e0b"
-        return "#ff4466"
-    def _sh_fmt_exp(v):    return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
-    def _sh_fmt_sharpe(s): return f"{s:.2f}" if s is not None else "—"
-    def _sh_fmt_rr(r):     return f"1:{r:.2f}" if r else "—"
-    def _sh_fmt_pct(p):
-        if p is None: return "—"
-        return f"+{p:.1f}%" if p >= 0 else f"{p:.1f}%"
-    def _sh_fmt_r(r):
-        if r is None: return "—"
-        return f"+{r:.2f}R" if r >= 0 else f"{r:.2f}R"
 
     # ── Period P&L ──
     today_str = date.today().isoformat()
@@ -1403,35 +1362,23 @@ function pinCmd(path,label){{
 {kill_banner}{circuit_banner}
 
 <!-- Portfolio strip -->
-<div class="pstrip" style="display:grid;grid-template-columns:1.7fr 1fr 1fr 1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+<div class="pstrip" style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px">
   <div class="card">
-    <div class="lbl">Current Balance</div>
-    <div class="big blue" style="font-size:30px;line-height:1.1;margin-bottom:12px">{portfolio}</div>
-    <div style="border-top:1px solid #2a3544;padding-top:10px">
-      <div style="font-size:11px;color:#64748b;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px">Last 30 days</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
-        <span style="color:#94a3b8">Expectancy</span>
-        <span>
-          <span style="font-weight:700;color:{_sh_expectancy_col(sh.get("expectancy",0), sh.get("trade_count",0))}">{_sh_fmt_exp(sh.get("expectancy",0))}</span>
-          <span style="color:#64748b;font-size:11px;margin-left:4px">· {_sh_fmt_pct(sh.get("expectancy_pct"))} · {_sh_fmt_r(sh.get("expectancy_r"))}</span>
-        </span>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="lbl">Total Balance · IBKR + Binance</div>
+        <div class="big blue" style="font-size:32px">{portfolio}</div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
-        <span style="color:#94a3b8">Win Rate</span>
-        <span style="font-weight:700;color:{_wrcol(sh.get("win_rate",0))}">{sh.get("win_rate",0):.0f}% <span style="color:#64748b;font-size:11px;font-weight:400">· {_sh_fmt_rr(sh.get("rr_ratio"))}</span></span>
+      <div style="text-align:right">
+        <div style="font-size:12px;color:#94a3b8">{now_date}</div>
+        <div style="font-size:13px;color:#94a3b8;margin-top:3px">
+          <span class="dot {'dot-green' if market_open else 'dot-red'}"></span>{"Open" if market_open else "Closed"}
+        </div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
-        <span style="color:#94a3b8">Sharpe</span>
-        <span style="font-weight:700;color:{_sh_sharpe_col(sh.get("sharpe"), sh.get("trade_count",0))}">{_sh_fmt_sharpe(sh.get("sharpe"))}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:7px">
-        <span style="color:#94a3b8">Max DD</span>
-        <span style="font-weight:700;color:{_sh_dd_col(sh.get("max_dd_pct",0))}">{sh.get("max_dd_pct",0):.1f}%</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
-        <span style="color:#94a3b8">Trades</span>
-        <span style="font-weight:700;color:{_sh_count_col(sh.get("trade_count",0))}" title="{_sh_count_label(sh.get('trade_count',0))}">{sh.get("trade_count",0)}</span>
-      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:24px;font-size:14px;flex-wrap:wrap">
+      <span><span style="color:#94a3b8">Today </span><span style="font-weight:700;color:{_col(today_pnl)}">{_fmt(today_pnl)}</span></span>
+      <span><span style="color:#94a3b8">Trades </span><span style="font-weight:700">{today_count}</span></span>
     </div>
   </div>
   <div class="card">
@@ -2409,17 +2356,44 @@ async def close_all(request: Request):
     params = dict(request.query_params)
     if params.get("pin") != KILL_PIN:
         return JSONResponse({"status": "wrong_pin"})
-    log.warning("[KILL SWITCH] Close all positions from dashboard")
-    for sym, pos in list(state.positions.items()):
-        place_order(sym, "sell", pos["qty"], estimated_price=pos["entry_price"])
-    for sym, pos in list(crypto_state.positions.items()):
-        place_order(sym, "sell", pos["qty"], crypto=True, estimated_price=pos["entry_price"])
-    state.positions.clear(); crypto_state.positions.clear()
-    kill_switch.update({"active": True, "reason": "Close all — liquidated from dashboard",
+    log.warning("[KILL SWITCH] Close-all requested from dashboard — handing to bot")
+
+    # IBKR lives in the bot process. Dashboard can't call place_order() directly
+    # (would start a second IBKR manager thread with clientId=1, collide with
+    # bot's Gateway session, Error 326, cascade).
+    # Instead: flip kill flags (takes effect immediately, prevents new buys) and
+    # write a pending-action file. Bot picks it up at the start of the next
+    # cycle (≤60s) and closes positions from its own IBKR session.
+
+    # 1. Immediate: kill all new buys (safe, just flag flips)
+    kill_switch.update({"active": True, "reason": "Close all requested — bot will liquidate on next cycle",
                         "activated_at": datetime.now(PARIS).strftime("%H:%M:%S")})
     for st in [state, crypto_state, smallcap_state, smallcap_asx_state, smallcap_ftse_state, intraday_state, crypto_intraday_state, asx_state, ftse_state]:
         st.shutoff = True
-    return JSONResponse({"status": "closed"})
+
+    # 2. Deferred: write pending-action file for bot to pick up
+    try:
+        import json as _json
+        pending_file = "/home/alphabot/app/pending_actions.json"
+        try:
+            with open(pending_file) as _f:
+                queue = _json.load(_f)
+            if not isinstance(queue, list):
+                queue = []
+        except Exception:
+            queue = []
+        queue.append({
+            "action": "close_all",
+            "requested_at": datetime.now(PARIS).isoformat(),
+            "source": "dashboard",
+        })
+        with open(pending_file, "w") as _f:
+            _json.dump(queue, _f)
+        log.info(f"[PENDING] close_all queued — bot will execute on next cycle (≤60s)")
+        return JSONResponse({"status": "queued", "message": "Close-all queued. Bot will liquidate positions on next cycle (~60s). All new buys blocked immediately."})
+    except Exception as e:
+        log.error(f"[PENDING] Could not write close_all action: {e}")
+        return JSONResponse({"status": "error", "message": f"Kill flag set but could not queue close-all: {e}. Use agent/Termius to close manually."})
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, msg: str = None, msg_type: str = "ok"):
